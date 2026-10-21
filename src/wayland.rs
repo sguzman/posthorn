@@ -200,6 +200,124 @@ pub fn present_frame_once(
     Ok(())
 }
 
+
+/**
+ * Reusable layer-shell presenter. Unlike present_frame_once, this keeps a
+ * mapped surface alive until its content changes or notifications disappear.
+ * It is intentionally confined to the opt-in development renderer.
+ */
+pub struct LivePresenter {
+    conn: Connection,
+    queue: wayland_client::EventQueue<ConfigureState>,
+    qh: QueueHandle<ConfigureState>,
+    compositor: wl_compositor::WlCompositor,
+    shell: zwlr_layer_shell_v1::ZwlrLayerShellV1,
+    shm: wl_shm::WlShm,
+    state: ConfigureState,
+    active: Option<LiveSurface>,
+}
+
+struct LiveSurface {
+    layer: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    surface: wl_surface::WlSurface,
+    buffer: wl_buffer::WlBuffer,
+    pool: wl_shm_pool::WlShmPool,
+    // Retain backing storage until no compositor buffer references it.
+    _backing: std::fs::File,
+}
+
+impl LivePresenter {
+    pub fn connect() -> Result<Self, Box<dyn std::error::Error>> {
+        let conn = Connection::connect_to_env()?;
+        let (globals, queue) = registry_queue_init::<ConfigureState>(&conn)?;
+        let qh = queue.handle();
+        let compositor = globals.bind(&qh, 4..=6, ())?;
+        let shell = globals.bind(&qh, 1..=4, ())?;
+        let shm = globals.bind(&qh, 1..=1, ())?;
+        Ok(Self {
+            conn, queue, qh, compositor, shell, shm,
+            state: ConfigureState::default(), active: None,
+        })
+    }
+
+    pub fn update_frame(
+        &mut self, frame: Option<&PixelFrame>, corner: ScreenCorner, margin: i32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if margin < 0 {return Err("negative margin".into());}
+        if let Some(frame) = frame { validate_frame(frame)?; }
+        self.clear();
+        let Some(frame) = frame else {
+            self.conn.flush()?;
+            return Ok(());
+        };
+        self.state = ConfigureState::default();
+        let surface = self.compositor.create_surface(&self.qh, ());
+        let layer = self.shell.get_layer_surface(
+            &surface, None, Layer::Top, "posthorn-private-preview".into(), &self.qh, (),
+        );
+        layer.set_anchor(corner.anchors());
+        layer.set_size(frame.width, frame.height);
+        layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+        layer.set_exclusive_zone(0);
+        layer.set_margin(
+            if matches!(corner, ScreenCorner::TopLeft|ScreenCorner::TopRight) { margin } else { 0 },
+            if matches!(corner, ScreenCorner::TopRight|ScreenCorner::BottomRight) { margin } else { 0 },
+            if matches!(corner, ScreenCorner::BottomLeft|ScreenCorner::BottomRight) { margin } else { 0 },
+            if matches!(corner, ScreenCorner::TopLeft|ScreenCorner::BottomLeft) { margin } else { 0 },
+        );
+        surface.commit();
+        while self.state.size.is_none() && !self.state.closed {
+            self.queue.blocking_dispatch(&mut self.state)?;
+        }
+        if self.state.closed {return Err("layer-shell compositor closed the popup".into());}
+        let (cw,ch) = self.state.size.ok_or("no layer-shell configure")?;
+        if (cw != 0 && cw != frame.width) || (ch != 0 && ch != frame.height) {
+            return Err("compositor supplied an unexpected popup size".into());
+        }
+        let mut backing = tempfile::tempfile()?;
+        backing.write_all(&frame.pixels)?;
+        let pool = self.shm.create_pool(
+            backing.as_fd(), frame.pixels.len() as i32, &self.qh, (),
+        );
+        let buffer = pool.create_buffer(
+            0, frame.width as i32, frame.height as i32, frame.stride,
+            wl_shm::Format::Argb8888, &self.qh, (),
+        );
+        surface.attach(Some(&buffer), 0, 0);
+        surface.damage_buffer(0, 0, frame.width as i32, frame.height as i32);
+        surface.commit();
+        self.conn.flush()?;
+        self.active = Some(LiveSurface { layer, surface, pool, buffer, _backing: backing });
+        Ok(())
+    }
+
+    pub fn poll_events(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.queue.dispatch_pending(&mut self.state)?;
+        self.conn.flush()?;
+        if self.state.closed {
+            self.clear();
+            self.state.closed = false;
+        }
+        Ok(())
+    }
+
+    pub fn clear(&mut self) {
+        if let Some(old) = self.active.take() {
+            old.buffer.destroy();
+            old.pool.destroy();
+            old.layer.destroy();
+            old.surface.destroy();
+        }
+    }
+}
+
+impl Drop for LivePresenter {
+    fn drop(&mut self) {
+        self.clear();
+        let _ = self.conn.flush();
+    }
+}
+
 fn validate_frame(frame: &PixelFrame) -> Result<(), &'static str> {
     if frame.width == 0 || frame.height == 0 { return Err("empty frame"); }
     let expected_stride = i64::from(frame.width) * 4;
