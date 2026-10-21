@@ -51,7 +51,12 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
         let h=style.get("height").and_then(|v|v.parse::<u32>().ok()).unwrap_or(100) as f64;
         if click.y >= y && click.y < y+h {
             if click.x >= w { return Ok(None); }
-            let raw=style.get(name).map(String::as_str).unwrap_or("none");
+            let fallback=match click.button {
+                272=>"invoke-default-action",
+                273|0=>"dismiss",
+                _=>"none",
+            };
+            let raw=style.get(name).map(String::as_str).unwrap_or(fallback);
             return NotifyBinding::parse(raw).map(|binding|Some((n.id,binding)))
                 .map_err(error);
         }
@@ -146,6 +151,21 @@ mod tests {
             Some((old,NotifyBinding::InvokeDefaultAction)));
         assert_eq!(hit_test(&runtime,click(100.0,10.0,272)).unwrap(),None);
         assert_eq!(hit_test(&runtime,click(0.0,10.0,999)).unwrap(),None);
+    }
+
+    #[test]
+    fn upstream_mako_default_buttons_work_without_user_config() {
+        let runtime=SharedRuntime::new(Config::default());
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        for (button,binding) in [
+            (272,NotifyBinding::InvokeDefaultAction),
+            (273,NotifyBinding::Dismiss{save_history:true}),
+            (274,NotifyBinding::None),
+            (0,NotifyBinding::Dismiss{save_history:true}),
+        ] {
+            assert_eq!(hit_test(&runtime,click(5.0,5.0,button)).unwrap(),
+                Some((id,binding)));
+        }
     }
 
     #[test]
