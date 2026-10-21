@@ -151,7 +151,8 @@ pub fn can_invoke_action(runtime:&SharedRuntime,id:u32,key:&str)->io::Result<boo
     let modes=runtime.modes().lock().map_err(|_|error("mode lock poisoned"))?
         .clone();
     let style=style_for_note_group(runtime,&note,&modes,group_count);
-    Ok(style.get("actions").is_none_or(|v|v=="1"||v=="true")
+    Ok(style.get("actions").is_none_or(|v|
+        v=="1"||v.eq_ignore_ascii_case("true"))
         && note.actions.iter().any(|a|a.key==key))
 }
 
@@ -245,6 +246,17 @@ mod tests {
         let second=runtime.store.lock().unwrap().push(request());
         assert!(!can_invoke_action(&runtime,first,"default").unwrap());
         assert!(!can_invoke_action(&runtime,second,"default").unwrap());
+    }
+
+    #[test]
+    fn action_permission_boolean_is_case_insensitive_like_mako_config() {
+        let runtime=SharedRuntime::new(Config::parse("actions=TRUE\n").unwrap());
+        let id=runtime.store.lock().unwrap().push(Request{
+            actions:vec![crate::notification::Action{
+                key:"default".into(),label:"Open".into(),
+            }],..Request::default()
+        });
+        assert!(can_invoke_action(&runtime,id,"default").unwrap());
     }
 
     #[test]
