@@ -18,9 +18,11 @@ and Clear All, channels, SQLite persistence, and a general local message broker.
 > Wayland layer-shell stack, shrink-wrapped Cairo/Pango text and icons, configured
 > on-notify shell hooks, basic mouse/touch bindings, category-aware history,
 > grouped count formatting, hidden placeholders, and partial posthornctl.
-> **It does not claim the desktop notifications D-Bus name.** Exact automatic
-> exact Pango sizing, image-data hints, XDG activation, output/scaling behavior,
-> control parity and live Hyprland QA remain.
+> **It does not claim the desktop notifications D-Bus name.** Inline
+> Freedesktop image-data hints, progress fills and transactional config reload
+> are implemented in the private development daemon. Exact Pango layout,
+> XDG activation, output/scaling behavior, full control parity and live
+> Hyprland QA remain.
 > **Keep using Mako.** Do not replace, disable or uninstall it for this build.
 
 ## Progress
@@ -62,7 +64,9 @@ starts a headless daemon under **`org.posthorn.Development`** (never Mako's
 Mako object paths/interfaces for explicit, private-name testing and can
 expire/archive notifications with D-Bus close signals. It does **not**
 render popups, support ordinary `notify-send` destination routing, or replace
-the active Mako daemon. Do not install or autostart this experimental service.
+the active Mako daemon. The `Reload` control method reads the specified
+file again, commits valid changes atomically and leaves invalid reloads
+unchanged. Do not install or autostart this experimental service.
 
 The separate `posthorn --experimental-popup-preview PATH` command opens a
 single temporary, synthetic category-colored Wayland popup using the supplied
@@ -78,8 +82,9 @@ The extra `posthorn --experimental-private-desktop PATH` command is a
 **development-only live preview**: it runs the private-name D-Bus daemon
 alongside a separate Wayland renderer thread and updates a persistent stacked
 popup surface whenever the notification store changes. It does not claim the
-real desktop notification D-Bus name, handle clicks or outputs correctly yet,
-or replace Mako. Do not autostart it.
+real desktop notification D-Bus name or replace Mako. Basic button/touch
+handlers are implemented but compositor interaction, output routing,
+activation and HiDPI remain unverified. Do not autostart it.
 
 ## License
 

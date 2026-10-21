@@ -60,7 +60,7 @@
               "id": "T103",
               "emoji": "🧰",
               "name": "Complete option validation, built-in grouping and escaping semantics",
-              "progress": 49
+              "progress": 54
             },
             {
               "id": "T104",
@@ -109,7 +109,7 @@
               "id": "T205",
               "emoji": "🔤",
               "name": "Pango markup/escaping, format specifiers and actions",
-              "progress": 60
+              "progress": 64
             }
           ]
         },
@@ -122,19 +122,19 @@
               "id": "T301",
               "emoji": "📬",
               "name": "Implement org.freedesktop.Notifications methods and signals",
-              "progress": 74
+              "progress": 83
             },
             {
               "id": "T302",
               "emoji": "🧾",
               "name": "Implement full Mako D-Bus control interface, properties and JSON",
-              "progress": 67
+              "progress": 74
             },
             {
               "id": "T303",
               "emoji": "🔄",
               "name": "Correct startup, bus ownership and config reload behavior",
-              "progress": 26
+              "progress": 57
             }
           ]
         },
@@ -153,7 +153,7 @@
               "id": "T402",
               "emoji": "🖌️",
               "name": "Text, icons, colors, borders, progress and layout",
-              "progress": 84
+              "progress": 90
             },
             {
               "id": "T403",
@@ -199,17 +199,17 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 53
+          "progress": 58
         },
         {
           "emoji": "🎨",
           "name": "Mako category coloring and sound parity",
-          "progress": 39
+          "progress": 40
         },
         {
           "emoji": "📜",
           "name": "Mako history/control API parity",
-          "progress": 61
+          "progress": 67
         }
       ]
     },
