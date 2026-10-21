@@ -7,7 +7,7 @@
 use wayland_client::{
     delegate_noop,
     globals::{registry_queue_init, GlobalListContents},
-    protocol::{wl_buffer, wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface, wl_touch},
+    protocol::{wl_buffer, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface, wl_touch},
     WEnum,
     Connection, Dispatch, QueueHandle,
 };
@@ -152,6 +152,7 @@ struct ConfigureState {
     pointer_x: f64,
     pointer_y: f64,
     clicks: Vec<PointerClick>,
+    output_names: Vec<(wl_output::WlOutput,String)>,
 }
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for ConfigureState {
@@ -167,6 +168,23 @@ delegate_noop!(ConfigureState: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
 delegate_noop!(ConfigureState: ignore wl_shm::WlShm);
 delegate_noop!(ConfigureState: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(ConfigureState: ignore wl_buffer::WlBuffer);
+
+impl Dispatch<wl_output::WlOutput, ()> for ConfigureState {
+    fn event(
+        state:&mut Self, output:&wl_output::WlOutput,event:wl_output::Event,
+        _:&(),_:&Connection,_:&QueueHandle<Self>,
+    ){
+        if let wl_output::Event::Name{name}=event {
+            if let Some((_,value))=state.output_names.iter_mut()
+                .find(|(proxy,_)|proxy==output)
+            {
+                *value=name;
+            }else {
+                state.output_names.push((output.clone(),name));
+            }
+        }
+    }
+}
 
 impl Dispatch<wl_seat::WlSeat, ()> for ConfigureState {
     fn event(
@@ -406,16 +424,28 @@ struct LiveSurface {
 impl LivePresenter {
     pub fn connect() -> Result<Self, Box<dyn std::error::Error>> {
         let conn = Connection::connect_to_env()?;
-        let (globals, queue) = registry_queue_init::<ConfigureState>(&conn)?;
+        let (globals, mut queue) = registry_queue_init::<ConfigureState>(&conn)?;
         let qh = queue.handle();
         let compositor = globals.bind(&qh, 4..=6, ())?;
         let shell = globals.bind(&qh, 1..=4, ())?;
         let shm = globals.bind(&qh, 1..=1, ())?;
-        // Headless preview still works without any pointer-capable seat.
+        // Headless preview still works without a pointer-capable seat.
         let seat = globals.bind(&qh, 1..=9, ()).ok();
+        // wl_output.name is available from version 4. Bind every named
+        // output instead of incorrectly selecting the first global.
+        let named_outputs:Vec<_>=globals.contents().clone_list().into_iter()
+            .filter(|g|g.interface=="wl_output"&&g.version>=4)
+            .map(|g|globals.registry().bind::<wl_output::WlOutput,_,_>(
+                g.name,4,&qh,()
+            ))
+            .collect();
+        let mut state=ConfigureState::default();
+        if !named_outputs.is_empty() {
+            queue.roundtrip(&mut state)?;
+        }
         Ok(Self {
             conn, queue, qh, compositor, shell, shm,
-            state: ConfigureState::default(), _seat: seat, active: None,
+            state, _seat: seat, active: None,
         })
     }
 
@@ -436,7 +466,22 @@ impl LivePresenter {
         &mut self, frame: Option<&PixelFrame>, corner: ScreenCorner,
         margins: PopupMargins, selected_layer: PopupLayer,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        self.update_frame_on_output(frame,corner,margins,selected_layer,"")
+    }
+
+    pub fn update_frame_on_output(
+        &mut self, frame: Option<&PixelFrame>, corner: ScreenCorner,
+        margins: PopupMargins, selected_layer: PopupLayer, output_name:&str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(frame) = frame { validate_frame(frame)?; }
+        // Poll pending name notifications before resolving the target.
+        self.queue.dispatch_pending(&mut self.state)?;
+        let output = if output_name.is_empty() {None} else {
+            Some(self.state.output_names.iter()
+                .find(|(_,name)|name==output_name)
+                .ok_or_else(||format!("Wayland output not found: {output_name}"))?
+                .0.clone())
+        };
         self.clear();
         let Some(frame) = frame else {
             self.conn.flush()?;
@@ -451,7 +496,8 @@ impl LivePresenter {
         let surface = self.compositor.create_surface(&self.qh, ());
         self.state.active_surface=Some(surface.clone());
         let layer = self.shell.get_layer_surface(
-            &surface, None, selected_layer.protocol(), "posthorn-private-preview".into(), &self.qh, (),
+            &surface, output.as_ref(), selected_layer.protocol(),
+            "posthorn-private-preview".into(), &self.qh, (),
         );
         layer.set_anchor(corner.anchors());
         layer.set_size(frame.width, frame.height);
@@ -603,6 +649,14 @@ mod tests {
         assert_eq!(PopupLayer::from_mako("bottom"),Some(PopupLayer::Bottom));
         assert_eq!(PopupLayer::from_mako("background"),Some(PopupLayer::Background));
         assert_eq!(PopupLayer::from_mako("other"),None);
+    }
+
+    #[test]
+    fn empty_output_name_means_compositor_selection() {
+        let names=["DP-1","HDMI-A-1"];
+        assert!(names.iter().any(|name|*name=="DP-1"));
+        assert!(!names.iter().any(|name|*name=="HDMI-A-3"));
+        assert!("".is_empty());
     }
 
     #[test]

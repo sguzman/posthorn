@@ -50,7 +50,8 @@ pub fn style_for_note_group(
         },
         anchor:config.global.get("anchor")
             .map(String::as_str).unwrap_or("top-right"),
-        output:"",modes:&mode_views,
+        output:config.global.get("output").map(String::as_str).unwrap_or(""),
+        modes:&mode_views,
         requested_timeout_ms:n.requested_timeout_ms,
         actionable:!n.actions.is_empty(),
         group_index:if group_count>=2{0}else{-1},hidden:false,
@@ -148,7 +149,8 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
             summary:"",body:"",urgency:"normal",
             anchor:config.global.get("anchor")
                 .map(String::as_str).unwrap_or("top-right"),
-            output:"",modes:&mode_views,requested_timeout_ms:-1,
+            output:config.global.get("output").map(String::as_str).unwrap_or(""),
+            modes:&mode_views,requested_timeout_ms:-1,
             actionable:false,group_index:-1,hidden:true,
         };
         let style=config.style_for(&traits);
@@ -185,7 +187,8 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<P
             let layer=config.global.get("layer")
                 .and_then(|s|PopupLayer::from_mako(s))
                 .unwrap_or(PopupLayer::Top);
-            viewer.update_frame_with_options(frame.as_ref(),corner,margins,layer)
+            let output=config.global.get("output").map(String::as_str).unwrap_or("");
+            viewer.update_frame_on_output(frame.as_ref(),corner,margins,layer,output)
                 .map_err(other)?;
             previous=notes;
             previous_modes=modes;
