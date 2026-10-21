@@ -145,7 +145,7 @@ fn json_entry(map: &HashMap<String,OwnedValue>) -> serde_json::Value {
     })
 }
 
-pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if command == Command::Help {
         println!("posthornctl (development, private D-Bus only)\n          dismiss [-n id] [-a|-g] [-h] | restore | invoke [-n id] [action]\n          list [-j] | history [-j] | mode [-s|-a|-r|-t mode] | reload");
         return Ok(());

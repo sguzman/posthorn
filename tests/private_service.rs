@@ -34,5 +34,22 @@ async fn private_service_expires_and_archives_a_notification() -> Result<(), Box
     assert!(current.is_empty());
     assert_eq!(history.len(), 1);
     assert_eq!(u32::try_from(history[0].get("id").unwrap())?, id);
+
+    // Exercise a separate CLI session-bus connection, not just the server
+    // internals or a proxy sharing the same connection.
+    use posthorn::ctl::{Command, execute};
+    execute(Command::Modes { edit: vec![('s', "quiet".into())] }).await?;
+    let modes: Vec<String> = control.call("ListModes", &()).await?;
+    assert_eq!(modes, vec!["quiet"]);
+    execute(Command::Restore).await?;
+    let restored: Vec<HashMap<String, OwnedValue>> =
+        control.call("ListNotifications", &()).await?;
+    assert_eq!(restored.len(), 1);
+    execute(Command::Dismiss {
+        id, all: false, group: false, history: false
+    }).await?;
+    let dismissed: Vec<HashMap<String, OwnedValue>> =
+        control.call("ListNotifications", &()).await?;
+    assert!(dismissed.is_empty());
     Ok(())
 }
