@@ -2,7 +2,7 @@
 name = "posthorn"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.83"
 authors = ["Posthorn contributors"]
 description = "A Rust reimplementation of the Mako Wayland notification daemon (work in progress)"
 license = "MIT"
@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 regex = "1.12"
+pangocairo = "0.22"
 zbus = "5.19"
 serde = "1.0"
 tokio = { version = "1.48", features = ["macros", "rt", "time"] }

@@ -14,6 +14,7 @@ pub mod runtime;
 pub mod service;
 pub mod wayland;
 pub mod raster;
+pub mod render;
 pub mod grouping;
 
 pub const MAKO_BASELINE: &str = "v1.11.0";
