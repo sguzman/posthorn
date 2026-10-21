@@ -10,7 +10,8 @@ use crate::hooks::NotifyBinding;
 use crate::notification::{CloseReason,Notification};
 use crate::runtime::SharedRuntime;
 use crate::wayland::PointerClick;
-use crate::desktop::style_for_note;
+use crate::desktop::{style_for_note,stack_alignment};
+use crate::render::StackAlignment;
 use crate::dbus::{BUS_NAME,OBJECT_PATH};
 use zbus::Connection;
 
@@ -44,13 +45,27 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
         .and_then(|s|s.split(',').next())
         .and_then(|s|s.parse::<u32>().ok()).unwrap_or(10) as f64;
     let (notes,modes)=ordered_visible(runtime)?;
-    let mut y=0.0f64;
-    for n in &notes {
+    // Layer-shell's surface width is the largest notification width.
+    // Narrow notifications may be left, centered, or right aligned.
+    let dimensions:Vec<_>=notes.iter().map(|n|{
         let style=style_for_note(runtime,n,&modes);
         let w=style.get("width").and_then(|v|v.parse::<u32>().ok()).unwrap_or(300) as f64;
         let h=style.get("height").and_then(|v|v.parse::<u32>().ok()).unwrap_or(100) as f64;
+        (w,h)
+    }).collect();
+    let max_width=dimensions.iter().map(|(w,_)|*w).fold(0.0f64,f64::max);
+    let align=stack_alignment(runtime.config().global.get("anchor")
+        .map(String::as_str).unwrap_or("top-right"));
+    let mut y=0.0f64;
+    for (n,(w,h)) in notes.iter().zip(dimensions.iter().copied()) {
+        let style=style_for_note(runtime,n,&modes);
+        let x=match align {
+            StackAlignment::Left=>0.0,
+            StackAlignment::Center=>(max_width-w)/2.0,
+            StackAlignment::Right=>max_width-w,
+        };
         if click.y >= y && click.y < y+h {
-            if click.x >= w { return Ok(None); }
+            if click.x<x || click.x>=x+w {return Ok(None);}
             let fallback=match click.button {
                 272=>"invoke-default-action",
                 273|0=>"dismiss",
@@ -166,6 +181,22 @@ mod tests {
             assert_eq!(hit_test(&runtime,click(5.0,5.0,button)).unwrap(),
                 Some((id,binding)));
         }
+    }
+
+    #[test]
+    fn hit_testing_accounts_for_right_aligned_variable_width_popups() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=240\nheight=40\nmargin=4\nanchor=top-right\n             [category=warning]\nwidth=90\n"
+        ).unwrap());
+        let wide=runtime.store.lock().unwrap().push(Request::default());
+        let narrow=runtime.store.lock().unwrap().push(Request{
+            category:"warning".into(),..Request::default()
+        });
+        assert_eq!(hit_test(&runtime,click(10.0,10.0,273)).unwrap(),None);
+        assert_eq!(hit_test(&runtime,click(200.0,10.0,273)).unwrap(),
+            Some((narrow,NotifyBinding::Dismiss{save_history:true})));
+        assert_eq!(hit_test(&runtime,click(10.0,50.0,273)).unwrap(),
+            Some((wide,NotifyBinding::Dismiss{save_history:true})));
     }
 
     #[test]

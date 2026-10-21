@@ -8,9 +8,15 @@ use std::time::Duration;
 use crate::config::{Options, Traits};
 use crate::grouping::{GroupSpec,group_ordered};
 use crate::notification::{Notification, Urgency};
-use crate::render::{compose_stack, render_notification, PixelFrame};
+use crate::render::{compose_stack_aligned, render_notification, PixelFrame,StackAlignment};
 use crate::runtime::SharedRuntime;
 use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins,PointerClick};
+
+pub fn stack_alignment(anchor:&str)->StackAlignment {
+    if anchor.ends_with("-right"){StackAlignment::Right}
+    else if anchor.ends_with("-left"){StackAlignment::Left}
+    else{StackAlignment::Center}
+}
 
 fn poisoned() -> io::Error { io::Error::other("notification state lock poisoned") }
 fn other(e: impl std::fmt::Display) -> io::Error { io::Error::other(e.to_string()) }
@@ -71,7 +77,9 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
     let gap=runtime.config().global.get("margin")
         .and_then(|s|s.split(',').next()).and_then(|s|s.parse::<u32>().ok())
         .unwrap_or(10);
-    compose_stack(&frames,gap).map_err(other)
+    let align=stack_alignment(runtime.config().global.get("anchor")
+        .map(String::as_str).unwrap_or("top-right"));
+    compose_stack_aligned(&frames,gap,align).map_err(other)
 }
 
 fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<PointerClick>) -> io::Result<()> {

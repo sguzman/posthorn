@@ -201,6 +201,15 @@ pub fn render_notification(note: &Notification, style: &Options) -> Result<Pixel
 /// Each frame is already rendered and has an independent background. The
 /// transparent gaps are intentionally *not* colored by the compositor.
 pub fn compose_stack(frames: &[PixelFrame], gap: u32) -> Result<Option<PixelFrame>, String> {
+    compose_stack_aligned(frames,gap,StackAlignment::Left)
+}
+
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+pub enum StackAlignment { Left,Center,Right }
+
+pub fn compose_stack_aligned(
+    frames: &[PixelFrame], gap: u32, alignment: StackAlignment,
+) -> Result<Option<PixelFrame>, String> {
     if frames.is_empty() {return Ok(None);}
     let width=frames.iter().map(|f|f.width).max().unwrap_or(0);
     let content_height: u64=frames.iter().map(|f|u64::from(f.height)).sum();
@@ -221,9 +230,14 @@ pub fn compose_stack(frames: &[PixelFrame], gap: u32) -> Result<Option<PixelFram
             return Err("invalid child frame".into());
         }
         let row_bytes=frame.width as usize * 4;
+        let horizontal_offset=match alignment {
+            StackAlignment::Left=>0,
+            StackAlignment::Center=>(width-frame.width)/2,
+            StackAlignment::Right=>width-frame.width,
+        } as usize*4;
         for y in 0..frame.height as usize {
             let src=y*frame.stride as usize;
-            let dst=(offset_y+y)*stride as usize;
+            let dst=(offset_y+y)*stride as usize+horizontal_offset;
             pixels[dst..dst+row_bytes].copy_from_slice(&frame.pixels[src..src+row_bytes]);
         }
         offset_y+=frame.height as usize + gap as usize;
@@ -271,6 +285,25 @@ mod tests {
         // The text moves into the freed icon slot; this point may contain a
         // text glyph rather than background after icons are disabled.
         assert_ne!(&without.pixels[at..at+4],&[0x00,0x00,0xFF,0xFF]);
+    }
+
+    #[test]
+    fn narrower_frames_align_to_the_selected_stack_edge() {
+        let wide=PixelFrame{width:4,height:1,stride:16,pixels:vec![1;16]};
+        let narrow=PixelFrame{width:2,height:1,stride:8,pixels:vec![2;8]};
+        let right=compose_stack_aligned(
+            &[wide.clone(),narrow.clone()],0,StackAlignment::Right
+        ).unwrap().unwrap();
+        assert_eq!(&right.pixels[16..24],&[0;8]);
+        assert_eq!(&right.pixels[24..32],&[2;8]);
+        let centered=compose_stack_aligned(
+            &[wide.clone(),narrow.clone()],0,StackAlignment::Center
+        ).unwrap().unwrap();
+        assert_eq!(&centered.pixels[16..20],&[0;4]);
+        assert_eq!(&centered.pixels[20..28],&[2;8]);
+        assert_eq!(&centered.pixels[28..32],&[0;4]);
+        let left=compose_stack(&[wide,narrow],0).unwrap().unwrap();
+        assert_eq!(&left.pixels[16..24],&[2;8]);
     }
 
     #[test]
