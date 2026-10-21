@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 regex = "1.12"
+zbus = "5.19"
 
 [lints.rust]
 unsafe_code = "forbid"

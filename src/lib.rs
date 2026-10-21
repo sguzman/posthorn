@@ -5,6 +5,7 @@
 //! notification daemon by itself.
 
 pub mod config;
+pub mod dbus;
 pub mod format;
 pub mod notification;
 
