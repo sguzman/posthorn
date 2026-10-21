@@ -210,12 +210,14 @@ pub fn render_notification_group(
     if note.progress>0 {
         let configured=style.get("progress-color").map(String::as_str)
             .unwrap_or("#5588AAFF");
-        let (operator,color)=if let Some(v)=configured.strip_prefix("source "){
-            (cairo::Operator::Source,v)
-        }else if let Some(v)=configured.strip_prefix("over "){
-            (cairo::Operator::Over,v)
-        }else{
-            (cairo::Operator::Over,configured)
+        let tokens:Vec<_>=configured.split_whitespace().collect();
+        let (operator,color)=match tokens.as_slice() {
+            [mode,color] if mode.eq_ignore_ascii_case("source")=>
+                (cairo::Operator::Source,*color),
+            [mode,color] if mode.eq_ignore_ascii_case("over")=>
+                (cairo::Operator::Over,*color),
+            [color]=>(cairo::Operator::Over,*color),
+            _=>return Err("invalid progress-color setting".into()),
         };
         let color=Color::parse_mako(color)
             .map_err(|e|format!("progress-color: {e}"))?;

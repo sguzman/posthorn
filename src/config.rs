@@ -340,7 +340,18 @@ fn validate_option(key: &str, value: &str) -> Result<(), String> {
         if let Some(raw) = raw {
             if (raw.len()==6 || raw.len()==8) && raw.chars().all(|x|x.is_ascii_hexdigit()) { return Ok(()); }
         }
-    } else if key=="progress-color" { if !value.is_empty() { return Ok(()); } }
+    } else if key=="progress-color" {
+        let words:Vec<_>=value.split_whitespace().collect();
+        let color=match words.as_slice(){
+            [color]=>Some(*color),
+            [mode,color] if mode.eq_ignore_ascii_case("over")
+                || mode.eq_ignore_ascii_case("source")=>Some(*color),
+            _=>None,
+        };
+        if color.is_some_and(|c|crate::raster::Color::parse_mako(c).is_ok()){
+            return Ok(());
+        }
+    }
     else if key=="icon-location" { if ["left","right","top","bottom"].contains(&value) { return Ok(()); } }
     else if key=="text-alignment" { if ["left","right","center"].contains(&value) { return Ok(()); } }
     else if key=="layer" { if ["background","bottom","top","overlay"].contains(&value) { return Ok(()); } }
@@ -383,6 +394,17 @@ mod tests {
         let custom=Config::parse("[hidden]\nformat=<b>%h of %t unseen</b>\n").unwrap();
         assert_eq!(custom.style_for(&fields).get("format").map(String::as_str),
             Some("<b>%h of %t unseen</b>"));
+    }
+
+    #[test]
+    fn progress_color_parses_mako_source_and_over_syntax() {
+        for value in ["#5588AAFF","source #123456","OVER #55667788"] {
+            assert!(Config::parse(&format!("progress-color={value}\n")).is_ok());
+        }
+        for value in ["purple","source","multiply #112233",
+            "over #11223","source #FFFFFF trailing"] {
+            assert!(Config::parse(&format!("progress-color={value}\n")).is_err());
+        }
     }
 
     #[test]
