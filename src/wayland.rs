@@ -552,13 +552,9 @@ impl LivePresenter {
         layer.set_size(frame.width, frame.height);
         layer.set_keyboard_interactivity(KeyboardInteractivity::None);
         layer.set_exclusive_zone(0);
-        let anchor=corner.anchors();
-        layer.set_margin(
-            if anchor.contains(Anchor::Top) {margins.top} else {0},
-            if anchor.contains(Anchor::Right) {margins.right} else {0},
-            if anchor.contains(Anchor::Bottom) {margins.bottom} else {0},
-            if anchor.contains(Anchor::Left) {margins.left} else {0},
-        );
+        // Mako sends all four outer-margin values to layer shell regardless
+        // of anchor; the compositor chooses which edges affect placement.
+        layer.set_margin(margins.top,margins.right,margins.bottom,margins.left);
         surface.commit();
         while self.state.size.is_none() && !self.state.closed {
             self.queue.blocking_dispatch(&mut self.state)?;

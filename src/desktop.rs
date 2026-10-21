@@ -12,6 +12,14 @@ use crate::render::{compose_stack_spaced, render_notification_group, render_hidd
 use crate::runtime::SharedRuntime;
 use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins,PointerClick};
 
+/// Mako applies outer-margin to the layer-shell window; margin belongs to
+/// the per-notification layout and must never shift the entire surface.
+pub fn outer_margins(config:&crate::config::Config)->PopupMargins {
+    config.global.get("outer-margin")
+        .and_then(|s|PopupMargins::parse_mako(s))
+        .unwrap_or(PopupMargins::uniform(0))
+}
+
 pub fn stack_alignment(anchor:&str)->StackAlignment {
     if anchor.ends_with("-right"){StackAlignment::Right}
     else if anchor.ends_with("-left"){StackAlignment::Left}
@@ -184,9 +192,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<P
             let corner=config.global.get("anchor")
                 .and_then(|s|ScreenCorner::from_mako(s))
                 .unwrap_or(ScreenCorner::TopRight);
-            let margins=config.global.get("margin")
-                .and_then(|s|PopupMargins::parse_mako(s))
-                .unwrap_or(PopupMargins::uniform(10));
+            let margins=outer_margins(&config);
             let layer=config.global.get("layer")
                 .and_then(|s|PopupLayer::from_mako(s))
                 .unwrap_or(PopupLayer::Top);
@@ -311,6 +317,18 @@ mod tests {
         let style=style_for_note(&runtime,&note,&modes);
         assert_eq!(style.get("background-color").map(String::as_str),
             Some("#305747"));
+    }
+
+    #[test]
+    fn layer_shell_window_uses_outer_margin_not_notification_margin() {
+        let default=Config::parse("margin=18\n").unwrap();
+        assert_eq!(outer_margins(&default),PopupMargins::uniform(0));
+        let explicit=Config::parse(
+            "margin=18\nouter-margin=3,5,7,9\n"
+        ).unwrap();
+        assert_eq!(outer_margins(&explicit),PopupMargins{
+            top:3,right:5,bottom:7,left:9,
+        });
     }
 
     #[test]
