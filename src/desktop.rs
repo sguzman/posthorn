@@ -48,6 +48,12 @@ pub fn style_for_note(
 pub fn style_for_note_group(
     runtime:&SharedRuntime,n:&Notification,modes:&[String],group_count:usize,
 )->Options {
+    style_for_note_index(runtime,n,modes,if group_count>=2{0}else{-1})
+}
+
+pub fn style_for_note_index(
+    runtime:&SharedRuntime,n:&Notification,modes:&[String],group_index:i32,
+)->Options {
     let config=runtime.config();
     let mode_views: Vec<&str>=modes.iter().map(String::as_str).collect();
     let traits=Traits {
@@ -62,7 +68,7 @@ pub fn style_for_note_group(
         modes:&mode_views,
         requested_timeout_ms:n.requested_timeout_ms,
         actionable:!n.actions.is_empty(),
-        group_index:if group_count>=2{0}else{-1},hidden:false,
+        group_index,hidden:false,
     };
     config.style_for(&traits)
 }
@@ -76,8 +82,22 @@ pub fn visible_notifications(runtime:&SharedRuntime)->io::Result<Vec<Notificatio
 
 /// Return the count of each displayed notification's group as well as its ID.
 /// Keeping this together prevents formatting and mouse geometry from diverging.
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct VisibleMember {
+    pub notification:Notification,
+    pub group_count:usize,
+    pub group_index:i32,
+}
+
 pub fn visible_members(runtime:&SharedRuntime)
     -> io::Result<Vec<(Notification,usize)>>
+{
+    Ok(visible_members_indexed(runtime)?.into_iter()
+        .map(|m|(m.notification,m.group_count)).collect())
+}
+
+pub fn visible_members_indexed(runtime:&SharedRuntime)
+    -> io::Result<Vec<VisibleMember>>
 {
     let config=runtime.config();
     let spec=config.global.get("group-by")
@@ -90,21 +110,24 @@ pub fn visible_members(runtime:&SharedRuntime)
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let by_id=store.active();
     let mut selected=Vec::new();
+    let mut displayed_groups=0usize;
     for group in group_ordered(by_id,&spec) {
-        if let Some(id)=group.ids.first(){
-            if let Some(n)=by_id.iter().find(|n|&n.id==id){
-                let count=group.ids.len();
-                let style=style_for_note_group(runtime,n,&modes,count);
-                // Upstream reads max-visible from the current matched
-                // notification style, allowing per-category overrides.
+        let count=group.ids.len();
+        for (index,id) in group.ids.iter().enumerate() {
+            if let Some(note)=by_id.iter().find(|n|&n.id==id) {
+                let group_index=if count>1{index as i32}else{-1};
+                let style=style_for_note_index(runtime,note,&modes,group_index);
                 let limit=style.get("max-visible")
                     .and_then(|v|v.parse::<i32>().ok()).unwrap_or(5);
-                if limit>=0&&selected.len()>=limit as usize {continue;}
+                if limit>=0&&displayed_groups>=limit as usize {continue;}
                 if style.get("invisible").is_some_and(|v|
-                    v=="1"||v.eq_ignore_ascii_case("true")){
+                    v=="1"||v.eq_ignore_ascii_case("true")) {
                     continue;
                 }
-                selected.push((n.clone(),count));
+                selected.push(VisibleMember{
+                    notification:note.clone(),group_count:count,group_index,
+                });
+                if group_index<=0 {displayed_groups+=1;}
             }
         }
     }
@@ -138,20 +161,21 @@ pub fn displayable_groups(runtime:&SharedRuntime)->io::Result<usize>{
 /// configured category colors. Returns None for an empty notification list.
 pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> {
     let config=runtime.config();
-    let notes=visible_members(runtime)?;
+    let notes=visible_members_indexed(runtime)?;
     let displayable=displayable_groups(runtime)?;
     let total=runtime.store.lock().map_err(|_|poisoned())?.active().len();
     let hidden=displayable.saturating_sub(notes.len());
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let mut frames=Vec::with_capacity(notes.len());
     let mut margins=Vec::with_capacity(notes.len());
-    for (note,group_count) in &notes {
-        let style=style_for_note_group(runtime,note,&modes,*group_count);
+    for entry in &notes {
+        let note=&entry.notification;
+        let style=style_for_note_index(runtime,note,&modes,entry.group_index);
         margins.push(style.get("margin")
             .and_then(|s|PopupMargins::parse_mako(s))
             .unwrap_or(PopupMargins::uniform(10)));
         frames.push(render_notification_group(
-            note,&style,if *group_count>=2{*group_count}else{0}
+            note,&style,if entry.group_count>=2{entry.group_count}else{0}
         ).map_err(other)?);
     }
     if hidden>0 {
@@ -367,6 +391,30 @@ mod tests {
             runtime.store.lock().unwrap().push(Request::default());
         }
         assert_eq!(visible_notifications(&runtime).unwrap().len(),7);
+    }
+
+    #[test]
+    fn grouped_secondary_member_can_be_made_visible_by_user_rule() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=app-name\nmax-visible=4\n[grouped]\ninvisible=0\n"
+        ).unwrap());
+        let old=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),..Request::default()
+        });
+        let new=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),..Request::default()
+        });
+        let visible=visible_members_indexed(&runtime).unwrap();
+        assert_eq!(visible.iter().map(|v|(v.notification.id,v.group_index))
+            .collect::<Vec<_>>(),vec![(new,0),(old,1)]);
+        assert!(snapshot_frame(&runtime).unwrap().is_some());
+        let defaults=SharedRuntime::new(Config::parse("group-by=app-name\n").unwrap());
+        for _ in 0..2 {
+            defaults.store.lock().unwrap().push(Request{
+                app_name:"same".into(),..Request::default()
+            });
+        }
+        assert_eq!(visible_members_indexed(&defaults).unwrap().len(),1);
     }
 
     #[test]
