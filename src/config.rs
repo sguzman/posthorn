@@ -174,6 +174,10 @@ impl Config {
         // criteria. Later [hidden] rules may override this built-in format.
         if n.hidden {
             style.insert("format".into(),"(%h more)".into());
+        } else if n.group_index>=0 {
+            // Upstream grouped notifications have a built-in count format,
+            // which explicit [grouped] and [group-index] rules may override.
+            style.insert("format".into(),"(%g) <b>%s</b>\\n%b".into());
         }
         for rule in &self.rules {
             if rule.matches(n) {
@@ -355,6 +359,18 @@ mod tests {
         Traits { app_name: "example", app_icon:"", category, desktop_entry:"", summary:"Saved",
             body:"All changes written", urgency:"normal", anchor:"top-right", output:"",
             modes, requested_timeout_ms:-1, actionable:false, group_index:-1, hidden:false }
+    }
+
+    #[test]
+    fn grouped_first_notification_uses_mako_count_format() {
+        let defaults=Config::default();
+        let mut fields=note("normal",&["default"]);
+        fields.group_index=0;
+        assert_eq!(defaults.style_for(&fields).get("format").map(String::as_str),
+            Some("(%g) <b>%s</b>\\n%b"));
+        let custom=Config::parse("[group-index=0]\nformat=[%g] %s\n").unwrap();
+        assert_eq!(custom.style_for(&fields).get("format").map(String::as_str),
+            Some("[%g] %s"));
     }
 
     #[test]
