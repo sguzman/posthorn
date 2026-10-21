@@ -168,7 +168,16 @@ mod tests {
         assert_eq!(hit_test(&runtime,click(90.0,10.0,0)).unwrap(),
             Some((newest,NotifyBinding::Dismiss{save_history:true})));
         assert_eq!(hit_test(&runtime,click(90.0,42.0,272)).unwrap(),None);
-        assert_eq!(hit_test(&runtime,click(90.0,50.0,272)).unwrap(),
+        let top={
+            let store=runtime.store.lock().unwrap();
+            let note=store.active().iter().find(|n|n.id==newest).unwrap();
+            crate::render::measure_notification_height(
+                note,&crate::desktop::style_for_note(
+                    &runtime,note,&["default".into()]
+                )
+            ).unwrap()
+        };
+        assert_eq!(hit_test(&runtime,click(90.0,f64::from(top+5)+3.0,272)).unwrap(),
             Some((old,NotifyBinding::InvokeDefaultAction)));
         assert_eq!(hit_test(&runtime,click(100.0,10.0,272)).unwrap(),None);
         assert_eq!(hit_test(&runtime,click(0.0,10.0,999)).unwrap(),None);
@@ -199,9 +208,15 @@ mod tests {
             category:"warning".into(),..Request::default()
         });
         // Newer bottom margin=1, older top margin=2 -> 2px gap.
-        assert_eq!(hit_test(&runtime,click(30.0,15.0,273)).unwrap().unwrap().0,newer);
-        assert!(hit_test(&runtime,click(30.0,31.0,273)).unwrap().is_none());
-        assert_eq!(hit_test(&runtime,click(30.0,33.0,273)).unwrap().unwrap().0,older);
+        let top={
+            let store=runtime.store.lock().unwrap();
+            let n=store.active().iter().find(|n|n.id==newer).unwrap();
+            let style=crate::desktop::style_for_note(&runtime,n,&["default".into()]);
+            crate::render::measure_notification_height(n,&style).unwrap()
+        };
+        assert_eq!(hit_test(&runtime,click(30.0,3.0,273)).unwrap().unwrap().0,newer);
+        assert!(hit_test(&runtime,click(30.0,f64::from(top)+1.0,273)).unwrap().is_none());
+        assert_eq!(hit_test(&runtime,click(30.0,f64::from(top)+5.0,273)).unwrap().unwrap().0,older);
     }
 
     #[test]
@@ -216,7 +231,13 @@ mod tests {
         assert_eq!(hit_test(&runtime,click(10.0,10.0,273)).unwrap(),None);
         assert_eq!(hit_test(&runtime,click(200.0,10.0,273)).unwrap(),
             Some((narrow,NotifyBinding::Dismiss{save_history:true})));
-        assert_eq!(hit_test(&runtime,click(10.0,50.0,273)).unwrap(),
+        let top={
+            let store=runtime.store.lock().unwrap();
+            let n=store.active().iter().find(|n|n.id==narrow).unwrap();
+            let style=crate::desktop::style_for_note(&runtime,n,&["default".into()]);
+            crate::render::measure_notification_height(n,&style).unwrap()
+        };
+        assert_eq!(hit_test(&runtime,click(10.0,f64::from(top+4)+3.0,273)).unwrap(),
             Some((wide,NotifyBinding::Dismiss{save_history:true})));
     }
 
