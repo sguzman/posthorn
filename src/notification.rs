@@ -33,6 +33,7 @@ pub struct Notification {
     pub desktop_entry: String,
     pub tag: String,
     pub urgency: Urgency,
+    pub progress: u8,
     pub requested_timeout_ms: i32,
     pub actions: Vec<Action>,
 }
@@ -49,6 +50,7 @@ pub struct Request {
     pub desktop_entry: String,
     pub tag: String,
     pub urgency: Urgency,
+    pub progress: u8,
     pub requested_timeout_ms: i32,
     pub actions: Vec<Action>,
 }
@@ -58,7 +60,7 @@ impl Default for Request {
         Self { replaces_id: 0, app_name: String::new(), app_icon: String::new(), image_data: None,
             summary: String::new(), body: String::new(), category: String::new(),
             desktop_entry: String::new(), tag: String::new(), urgency: Urgency::Normal,
-            requested_timeout_ms: -1, actions: Vec::new() }
+            progress: 0, requested_timeout_ms: -1, actions: Vec::new() }
     }
 }
 
@@ -67,7 +69,8 @@ impl Notification {
         Self { id, app_name: request.app_name, app_icon: request.app_icon,
             image_data: request.image_data, summary: request.summary, body: request.body, category: request.category,
             desktop_entry: request.desktop_entry, tag: request.tag, urgency: request.urgency,
-            requested_timeout_ms: request.requested_timeout_ms, actions: request.actions }
+            progress: request.progress, requested_timeout_ms: request.requested_timeout_ms,
+            actions: request.actions }
     }
 
     /// Returns None for a persistent notification, otherwise its timeout.

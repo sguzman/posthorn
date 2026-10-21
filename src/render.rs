@@ -207,6 +207,32 @@ pub fn render_notification_group(
         context.fill().map_err(|e| e.to_string())?;
     }
 
+    if note.progress>0 {
+        let configured=style.get("progress-color").map(String::as_str)
+            .unwrap_or("#5588AAFF");
+        let (operator,color)=if let Some(v)=configured.strip_prefix("source "){
+            (cairo::Operator::Source,v)
+        }else if let Some(v)=configured.strip_prefix("over "){
+            (cairo::Operator::Over,v)
+        }else{
+            (cairo::Operator::Over,configured)
+        };
+        let color=Color::parse_mako(color)
+            .map_err(|e|format!("progress-color: {e}"))?;
+        let inner_width=(f64::from(width)-2.0*border).max(0.0);
+        let inner_height=(f64::from(height)-2.0*border).max(0.0);
+        context.save().map_err(|e|e.to_string())?;
+        rounded(&context,border,border,inner_width,inner_height,
+            (radius-border).max(0.0));
+        context.clip();
+        context.set_operator(operator);
+        set_color(&context,color);
+        context.rectangle(border,border,
+            inner_width*f64::from(note.progress.min(100))/100.0,inner_height);
+        context.fill().map_err(|e|e.to_string())?;
+        context.restore().map_err(|e|e.to_string())?;
+    }
+
     let markup = style.get("markup")
         .is_none_or(|v| v == "1" || v.eq_ignore_ascii_case("true"));
     let body_is_valid_markup = markup && pango::parse_markup(&note.body, '\0').is_ok();
@@ -461,6 +487,26 @@ mod tests {
         // The text moves into the freed icon slot; this point may contain a
         // text glyph rather than background after icons are disabled.
         assert_ne!(&without.pixels[at..at+4],&[0x00,0x00,0xFF,0xFF]);
+    }
+
+    #[test]
+    fn progress_fill_respects_value_and_uses_configured_color() {
+        let mut note=fixture();
+        note.progress=50;
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","120"),("height","90"),("border-size","0"),
+            ("background-color","#000000"),("progress-color","#FF0000"),
+        ]{style.insert(key.into(),value.into());}
+        let frame=render_notification(&note,&style).unwrap();
+        let y=frame.height as usize-3;
+        let first=y*frame.stride as usize+10*4;
+        let last=y*frame.stride as usize+110*4;
+        assert_eq!(&frame.pixels[first..first+4],&[0,0,255,255]);
+        assert_eq!(&frame.pixels[last..last+4],&[0,0,0,255]);
+        note.progress=0;
+        let empty=render_notification(&note,&style).unwrap();
+        assert_eq!(&empty.pixels[first..first+4],&[0,0,0,255]);
     }
 
     #[test]
