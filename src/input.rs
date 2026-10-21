@@ -187,7 +187,6 @@ mod tests {
             Some((newest,NotifyBinding::Dismiss{save_history:true})));
         assert_eq!(hit_test(&runtime,click(90.0,10.0,0)).unwrap(),
             Some((newest,NotifyBinding::Dismiss{save_history:true})));
-        assert_eq!(hit_test(&runtime,click(90.0,42.0,272)).unwrap(),None);
         let top={
             let store=runtime.store.lock().unwrap();
             let note=store.active().iter().find(|n|n.id==newest).unwrap();
@@ -197,9 +196,12 @@ mod tests {
                 )
             ).unwrap()
         };
-        assert_eq!(hit_test(&runtime,click(90.0,f64::from(top+5)+3.0,272)).unwrap(),
+        assert_eq!(hit_test(&runtime,click(90.0,f64::from(top)+7.0,272)).unwrap(),None,
+            "adjacent notification margins are transparent");
+        assert_eq!(hit_test(&runtime,click(90.0,f64::from(top)+15.0,272)).unwrap(),
             Some((old,NotifyBinding::InvokeDefaultAction)));
-        assert_eq!(hit_test(&runtime,click(100.0,10.0,272)).unwrap(),None);
+        assert_eq!(hit_test(&runtime,click(105.0,10.0,272)).unwrap(),None);
+        assert_eq!(hit_test(&runtime,click(2.0,10.0,272)).unwrap(),None);
         assert_eq!(hit_test(&runtime,click(0.0,10.0,999)).unwrap(),None);
     }
 
@@ -265,7 +267,7 @@ mod tests {
             (274,NotifyBinding::None),
             (0,NotifyBinding::Dismiss{save_history:true}),
         ] {
-            assert_eq!(hit_test(&runtime,click(5.0,5.0,button)).unwrap(),
+            assert_eq!(hit_test(&runtime,click(15.0,15.0,button)).unwrap(),
                 Some((id,binding)));
         }
     }
@@ -286,9 +288,9 @@ mod tests {
             let style=crate::desktop::style_for_note(&runtime,n,&["default".into()]);
             crate::render::measure_notification_height(n,&style).unwrap()
         };
-        assert_eq!(hit_test(&runtime,click(30.0,3.0,273)).unwrap().unwrap().0,newer);
-        assert!(hit_test(&runtime,click(30.0,f64::from(top)+1.0,273)).unwrap().is_none());
-        assert_eq!(hit_test(&runtime,click(30.0,f64::from(top)+5.0,273)).unwrap().unwrap().0,older);
+        assert_eq!(hit_test(&runtime,click(30.0,7.0,273)).unwrap().unwrap().0,newer);
+        assert!(hit_test(&runtime,click(30.0,f64::from(top)+6.0,273)).unwrap().is_none());
+        assert_eq!(hit_test(&runtime,click(30.0,f64::from(top)+8.0,273)).unwrap().unwrap().0,older);
     }
 
     #[test]
@@ -309,7 +311,7 @@ mod tests {
             let style=crate::desktop::style_for_note(&runtime,n,&["default".into()]);
             crate::render::measure_notification_height(n,&style).unwrap()
         };
-        assert_eq!(hit_test(&runtime,click(10.0,f64::from(top+4)+3.0,273)).unwrap(),
+        assert_eq!(hit_test(&runtime,click(10.0,f64::from(top)+10.0,273)).unwrap(),
             Some((wide,NotifyBinding::Dismiss{save_history:true})));
     }
 
