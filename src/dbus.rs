@@ -176,9 +176,9 @@ mod tests {
     fn maps_category_urgency_actions_and_tags() {
         let s = service();
         let hints: HashMap<_, _> = [
-            ("category".into(), OwnedValue::from("success".to_string())),
+            ("category".into(), OwnedValue::try_from(zbus::zvariant::Value::from("success")).unwrap()),
             ("urgency".into(), OwnedValue::from(2u8)),
-            ("x-dunst-stack-tag".into(), OwnedValue::from("job".to_string())),
+            ("x-dunst-stack-tag".into(), OwnedValue::try_from(zbus::zvariant::Value::from("job")).unwrap()),
         ].into();
         let id = s.apply_notify("worker", 0, "", "Done", "Completed",
             vec!["default".into(), "Open".into()], hints, 7000).unwrap();
