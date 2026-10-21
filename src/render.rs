@@ -210,10 +210,20 @@ pub enum StackAlignment { Left,Center,Right }
 pub fn compose_stack_aligned(
     frames: &[PixelFrame], gap: u32, alignment: StackAlignment,
 ) -> Result<Option<PixelFrame>, String> {
-    if frames.is_empty() {return Ok(None);}
+    let gaps=vec![gap;frames.len().saturating_sub(1)];
+    compose_stack_spaced(frames,&gaps,alignment)
+}
+
+/// Honor distinct adjacent Mako top/bottom margins between frames. Callers
+/// calculate each gap as max(previous.bottom, next.top).
+pub fn compose_stack_spaced(
+    frames: &[PixelFrame],gaps:&[u32],alignment:StackAlignment,
+) -> Result<Option<PixelFrame>,String> {
+    if frames.is_empty(){return Ok(None);}
+    if gaps.len()!=frames.len()-1{return Err("invalid popup gap count".into());}
     let width=frames.iter().map(|f|f.width).max().unwrap_or(0);
-    let content_height: u64=frames.iter().map(|f|u64::from(f.height)).sum();
-    let spaces=u64::from(gap) * (frames.len().saturating_sub(1) as u64);
+    let content_height:u64=frames.iter().map(|f|u64::from(f.height)).sum();
+    let spaces:u64=gaps.iter().map(|g|u64::from(*g)).sum();
     let height=content_height.checked_add(spaces)
         .ok_or("popup stack overflow")?;
     let stride=u64::from(width).checked_mul(4).ok_or("popup stack stride overflow")?;
@@ -223,7 +233,7 @@ pub fn compose_stack_aligned(
     }
     let mut pixels=vec![0;size as usize];
     let mut offset_y:usize=0;
-    for frame in frames {
+    for (index,frame) in frames.iter().enumerate() {
         if frame.height==0 || frame.width==0 ||
            frame.stride<i32::try_from(frame.width*4).map_err(|_|"invalid frame stride")? ||
            frame.pixels.len() != (frame.stride as usize)*(frame.height as usize) {
@@ -240,7 +250,8 @@ pub fn compose_stack_aligned(
             let dst=(offset_y+y)*stride as usize+horizontal_offset;
             pixels[dst..dst+row_bytes].copy_from_slice(&frame.pixels[src..src+row_bytes]);
         }
-        offset_y+=frame.height as usize + gap as usize;
+        offset_y+=frame.height as usize
+            +gaps.get(index).copied().unwrap_or(0) as usize;
     }
     Ok(Some(PixelFrame{width,height:height as u32,stride:stride as i32,pixels}))
 }
@@ -285,6 +296,24 @@ mod tests {
         // The text moves into the freed icon slot; this point may contain a
         // text glyph rather than background after icons are disabled.
         assert_ne!(&without.pixels[at..at+4],&[0x00,0x00,0xFF,0xFF]);
+    }
+
+    #[test]
+    fn per_notification_gaps_are_respected_independently() {
+        let one=PixelFrame{width:1,height:1,stride:4,pixels:vec![9;4]};
+        let result=compose_stack_spaced(
+            &[one.clone(),one.clone(),one], &[2,5],StackAlignment::Left
+        ).unwrap().unwrap();
+        assert_eq!(result.height,10);
+        assert_eq!(&result.pixels[0..4],&[9;4]);
+        assert_eq!(&result.pixels[4..12],&[0;8]);
+        assert_eq!(&result.pixels[12..16],&[9;4]);
+        assert_eq!(&result.pixels[16..36],&[0;20]);
+        assert_eq!(&result.pixels[36..40],&[9;4]);
+        assert!(compose_stack_spaced(
+            &[PixelFrame{width:1,height:1,stride:4,pixels:vec![0;4]}],
+            &[2],StackAlignment::Left
+        ).is_err());
     }
 
     #[test]

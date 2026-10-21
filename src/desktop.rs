@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::config::{Options, Traits};
 use crate::grouping::{GroupSpec,group_ordered};
 use crate::notification::{Notification, Urgency};
-use crate::render::{compose_stack_aligned, render_notification, PixelFrame,StackAlignment};
+use crate::render::{compose_stack_spaced, render_notification, PixelFrame,StackAlignment};
 use crate::runtime::SharedRuntime;
 use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins,PointerClick};
 
@@ -16,6 +16,14 @@ pub fn stack_alignment(anchor:&str)->StackAlignment {
     if anchor.ends_with("-right"){StackAlignment::Right}
     else if anchor.ends_with("-left"){StackAlignment::Left}
     else{StackAlignment::Center}
+}
+
+/// Extract per-notification directional margins; each adjacent vertical
+/// spacer is the max of the previous bottom and next top margin.
+pub fn vertical_spacing(margins:&[PopupMargins])->Vec<u32>{
+    margins.windows(2).map(|pair|{
+        pair[0].bottom.max(pair[1].top).max(0) as u32
+    }).collect()
 }
 
 fn poisoned() -> io::Error { io::Error::other("notification state lock poisoned") }
@@ -70,16 +78,17 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
     let notes=visible_notifications(runtime)?;
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let mut frames=Vec::with_capacity(notes.len());
+    let mut margins=Vec::with_capacity(notes.len());
     for note in &notes {
         let style=style_for_note(runtime,note,&modes);
+        margins.push(style.get("margin")
+            .and_then(|s|PopupMargins::parse_mako(s))
+            .unwrap_or(PopupMargins::uniform(10)));
         frames.push(render_notification(note,&style).map_err(other)?);
     }
-    let gap=runtime.config().global.get("margin")
-        .and_then(|s|s.split(',').next()).and_then(|s|s.parse::<u32>().ok())
-        .unwrap_or(10);
     let align=stack_alignment(runtime.config().global.get("anchor")
         .map(String::as_str).unwrap_or("top-right"));
-    compose_stack_aligned(&frames,gap,align).map_err(other)
+    compose_stack_spaced(&frames,&vertical_spacing(&margins),align).map_err(other)
 }
 
 fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<PointerClick>) -> io::Result<()> {
@@ -177,6 +186,16 @@ mod tests {
         runtime.close(a,CloseReason::Dismissed,false).unwrap();
         let after=snapshot_frame(&runtime).unwrap().unwrap();
         assert_eq!(after.height,40);
+    }
+
+    #[test]
+    fn adjacent_mako_margins_use_the_larger_edge() {
+        let margins=[
+            PopupMargins{top:1,right:0,bottom:9,left:0},
+            PopupMargins{top:4,right:0,bottom:2,left:0},
+            PopupMargins{top:7,right:0,bottom:3,left:0},
+        ];
+        assert_eq!(vertical_spacing(&margins),vec![9,7]);
     }
 
     #[test]

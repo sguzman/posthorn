@@ -10,7 +10,8 @@ use crate::hooks::NotifyBinding;
 use crate::notification::{CloseReason,Notification};
 use crate::runtime::SharedRuntime;
 use crate::wayland::PointerClick;
-use crate::desktop::{style_for_note,stack_alignment};
+use crate::desktop::{style_for_note,stack_alignment,vertical_spacing};
+use crate::wayland::PopupMargins;
 use crate::render::StackAlignment;
 use crate::dbus::{BUS_NAME,OBJECT_PATH};
 use zbus::Connection;
@@ -41,23 +42,25 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
         274=>"on-button-middle",
         _=>return Ok(None),
     };
-    let gap=runtime.config().global.get("margin")
-        .and_then(|s|s.split(',').next())
-        .and_then(|s|s.parse::<u32>().ok()).unwrap_or(10) as f64;
     let (notes,modes)=ordered_visible(runtime)?;
     // Layer-shell's surface width is the largest notification width.
     // Narrow notifications may be left, centered, or right aligned.
+    let mut margins=Vec::with_capacity(notes.len());
     let dimensions:Vec<_>=notes.iter().map(|n|{
         let style=style_for_note(runtime,n,&modes);
+        margins.push(style.get("margin")
+            .and_then(|s|PopupMargins::parse_mako(s))
+            .unwrap_or(PopupMargins::uniform(10)));
         let w=style.get("width").and_then(|v|v.parse::<u32>().ok()).unwrap_or(300) as f64;
         let h=style.get("height").and_then(|v|v.parse::<u32>().ok()).unwrap_or(100) as f64;
         (w,h)
     }).collect();
+    let gaps=vertical_spacing(&margins);
     let max_width=dimensions.iter().map(|(w,_)|*w).fold(0.0f64,f64::max);
     let align=stack_alignment(runtime.config().global.get("anchor")
         .map(String::as_str).unwrap_or("top-right"));
     let mut y=0.0f64;
-    for (n,(w,h)) in notes.iter().zip(dimensions.iter().copied()) {
+    for (index,(n,(w,h))) in notes.iter().zip(dimensions.iter().copied()).enumerate() {
         let style=style_for_note(runtime,n,&modes);
         let x=match align {
             StackAlignment::Left=>0.0,
@@ -75,7 +78,7 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
             return NotifyBinding::parse(raw).map(|binding|Some((n.id,binding)))
                 .map_err(error);
         }
-        y+=h+gap;
+        y+=h+f64::from(gaps.get(index).copied().unwrap_or(0));
     }
     Ok(None)
 }
@@ -181,6 +184,21 @@ mod tests {
             assert_eq!(hit_test(&runtime,click(5.0,5.0,button)).unwrap(),
                 Some((id,binding)));
         }
+    }
+
+    #[test]
+    fn mouse_targets_follow_asymmetric_vertical_spacers() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=120\nheight=30\nmargin=2,1,12,1\n             [category=warning]\nmargin=5,1,1,1\n"
+        ).unwrap());
+        let older=runtime.store.lock().unwrap().push(Request::default());
+        let newer=runtime.store.lock().unwrap().push(Request{
+            category:"warning".into(),..Request::default()
+        });
+        // Newer bottom margin=1, older top margin=2 -> 2px gap.
+        assert_eq!(hit_test(&runtime,click(30.0,15.0,273)).unwrap().unwrap().0,newer);
+        assert!(hit_test(&runtime,click(30.0,31.0,273)).unwrap().is_none());
+        assert_eq!(hit_test(&runtime,click(30.0,33.0,273)).unwrap().unwrap().0,older);
     }
 
     #[test]
