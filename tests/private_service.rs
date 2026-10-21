@@ -122,6 +122,25 @@ async fn pointer_button_bindings_dispatch_through_private_desktop_bus()
 }
 
 #[tokio::test]
+async fn makoctl_mode_set_positional_arguments_reach_private_bus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::ctl::{execute,parse_command};
+    let (conn,_runtime)=open_private_service(Config::default()).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let args=["mode","-s","quiet","reading"]
+        .into_iter().map(str::to_owned).collect::<Vec<_>>();
+    execute(parse_command(&args)?).await?;
+    let selected:Vec<String>=control.call("ListModes",&()).await?;
+    assert_eq!(selected,vec!["quiet","reading"]);
+    let args=["mode","-s"].into_iter().map(str::to_owned).collect::<Vec<_>>();
+    execute(parse_command(&args)?).await?;
+    let cleared:Vec<String>=control.call("ListModes",&()).await?;
+    assert!(cleared.is_empty(),"makoctl -s must allow the empty mode set");
+    Ok(())
+}
+
+#[tokio::test]
 async fn control_reload_swaps_styles_and_preserves_last_good_file()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
