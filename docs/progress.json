@@ -72,7 +72,7 @@
               "id": "T105",
               "emoji": "📐",
               "name": "Type/layout/style parity for all Mako config settings",
-              "progress": 0
+              "progress": 12
             }
           ]
         },
@@ -97,19 +97,19 @@
               "id": "T203",
               "emoji": "⏳",
               "name": "Timeout selection and timer/event scheduling",
-              "progress": 80
+              "progress": 84
             },
             {
               "id": "T204",
               "emoji": "🔗",
               "name": "Grouping, sorting, hidden placeholder and visibility",
-              "progress": 42
+              "progress": 48
             },
             {
               "id": "T205",
               "emoji": "🔤",
               "name": "Pango markup/escaping, format specifiers and actions",
-              "progress": 55
+              "progress": 60
             }
           ]
         },
@@ -122,13 +122,13 @@
               "id": "T301",
               "emoji": "📬",
               "name": "Implement org.freedesktop.Notifications methods and signals",
-              "progress": 67
+              "progress": 70
             },
             {
               "id": "T302",
               "emoji": "🧾",
               "name": "Implement full Mako D-Bus control interface, properties and JSON",
-              "progress": 63
+              "progress": 67
             },
             {
               "id": "T303",
@@ -147,19 +147,19 @@
               "id": "T401",
               "emoji": "🧱",
               "name": "Layer-shell surfaces, anchors, output routing and scaling",
-              "progress": 38
+              "progress": 52
             },
             {
               "id": "T402",
               "emoji": "🖌️",
               "name": "Text, icons, colors, borders, progress and layout",
-              "progress": 48
+              "progress": 63
             },
             {
               "id": "T403",
               "emoji": "🖱️",
               "name": "Pointer, touch, button bindings and XDG activation",
-              "progress": 0
+              "progress": 42
             }
           ]
         },
@@ -172,13 +172,13 @@
               "id": "T501",
               "emoji": "⌨️",
               "name": "Port makoctl operations with compatibility tests",
-              "progress": 38
+              "progress": 50
             },
             {
               "id": "T502",
               "emoji": "🔔",
               "name": "Reproduce category colors, per-category sounds and quiet mode",
-              "progress": 35
+              "progress": 39
             },
             {
               "id": "T503",
@@ -199,17 +199,17 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 25
+          "progress": 38
         },
         {
           "emoji": "🎨",
           "name": "Mako category coloring and sound parity",
-          "progress": 35
+          "progress": 39
         },
         {
           "emoji": "📜",
           "name": "Mako history/control API parity",
-          "progress": 45
+          "progress": 49
         }
       ]
     },

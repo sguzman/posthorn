@@ -29,19 +29,22 @@ change how they call the Freedesktop Notification protocol. Until parity:
 | Upstream source | Posthorn scope | State |
 | --- | --- | --- |
 | `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; format/group spec validation and sort handling strengthened |
-| `notification.c` | IDs, replace, close, timeout, history, groups, format | Partial; deterministic timers, urgency/time sorting and group projections |
+| `notification.c` | IDs, replace, close, timeout, history, groups, format | Timers and dismiss/restore synchronization tested, sorting preserved across restores, grouping/visibility partial |
 | `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Active on private development bus with expiration signals and property invalidations; system notification name not claimed; controls incomplete |
-| `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Layer-shell configure probe and isolated one-shot SHM pixel presenter; no continuous runtime surface management |
-| `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango text and markup, backgrounds and borders; icons, per-output scaling and Mako layout rules pending |
-| `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Private headless service, shared mode/timeout state, on-notify shell hooks and partial posthornctl; full loop/menu/reload pending |
+| `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Private desktop has continuously updated stacked SHM layer-shell surface, socket polling, pointer and touch events; output/scale QA pending |
+| `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango markup/ellipsize and colored backgrounds, theme/file icons decoded and drawn; exact automatic heights, image-data hints and HiDPI incomplete |
+| `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Private live/headless services, configured hooks, mode state, partial posthornctl including menu; exact text output and reload incomplete |
 
 ## Explicit nonclaims
 
-Current Rust code **cannot act as a session D-Bus notification service or render
-popups**. The D-Bus adapters are unregistered and the Wayland probe deliberately
-has no buffer or notification rendering. Current parsing is a subset; POSIX vs Rust regex, full style option
-semantics, built-in hidden/grouped selectors, exact string escaping, sorting,
-input event handling, and many other details still need parity tests. The
+Current Rust code registers only the **private development D-Bus name**;
+it is not the default desktop notification service. The private desktop path
+renders and updates stacked Wayland popups, with basic mouse/touch bindings,
+but has not been visually exercised under Hyprland. Exact Mako auto-height,
+icons from D-Bus image-data, grouping placeholders, per-output scaling,
+XDG activation, touch QA, configuration reload, and control formatting remain.
+Current parsing is a subset; POSIX vs Rust regex and many style options
+still need parity tests. The
 presence of a config key in a map does not mean the visual behavior is ported.
 No MVP/release or workstation cutover until the end-to-end acceptance suite
 passes. The README and progress report must not call this a working Mako port.

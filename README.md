@@ -14,11 +14,12 @@ and Clear All, channels, SQLite persistence, and a general local message broker.
 
 > **Not yet a working daemon.** Rust now includes configuration/criteria,
 > notification lifecycle, timers, sorting/grouping projections, D-Bus
-> adapters on an isolated development bus, a Wayland layer-shell preview,
-> Cairo/Pango rasterized text/colors, configured on-notify shell hooks, and a
-> partial posthornctl CLI. **It does not claim the desktop notifications D-Bus
-> name or continuously render notifications.** Icons, compositor integration,
-> exact control parity, and live Hyprland QA remain.
+> adapters on an isolated development bus, a continuously refreshed
+> Wayland layer-shell stack, Cairo/Pango rasterized text and icons, configured
+> on-notify shell hooks, basic mouse/touch bindings, and partial posthornctl.
+> **It does not claim the desktop notifications D-Bus name.** Exact automatic
+> layout, image-data hints, XDG activation, output/scaling behavior,
+> control parity and live Hyprland QA remain.
 > **Keep using Mako.** Do not replace, disable or uninstall it for this build.
 
 ## Progress
@@ -69,8 +70,8 @@ notification daemon. It doesn't claim the desktop D-Bus name or affect Mako.
 
 The experimental `posthornctl` binary exercises Mako-style commands only
 against `org.posthorn.Development`. It cannot control or replace your active
-Mako daemon. Its `menu` command, production routing, and exact non-JSON
-formatting are not yet implemented.
+Mako daemon. Its `menu` command is now implemented for private-bus action selection, but
+production routing and exact non-JSON formatting remain unfinished.
 
 The extra `posthorn --experimental-private-desktop PATH` command is a
 **development-only live preview**: it runs the private-name D-Bus daemon
