@@ -4,7 +4,7 @@
 
 use std::collections::VecDeque;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Urgency { Low, Normal, Critical }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -77,23 +77,90 @@ impl Notification {
     }
 }
 
-/// Mirrors Mako's bounded, newest-first in-memory history and active list.
+/// Mako sort settings. Time breaks urgency ties according to arrival order.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SortPolicy {
+    pub by_priority: bool,
+    pub priority_ascending: bool,
+    pub time_ascending: bool,
+}
+
+impl Default for SortPolicy {
+    fn default() -> Self {
+        Self { by_priority: false, priority_ascending: false, time_ascending: false }
+    }
+}
+
+impl SortPolicy {
+    pub fn from_config(tokens: &[String]) -> Self {
+        let mut policy = Self::default();
+        for token in tokens {
+            match token.as_str() {
+                "+priority" => { policy.by_priority = true; policy.priority_ascending = true; },
+                "-priority" => { policy.by_priority = true; policy.priority_ascending = false; },
+                "+time" => policy.time_ascending = true,
+                "-time" => policy.time_ascending = false,
+                _ => {}
+            }
+        }
+        policy
+    }
+}
+
+/// Mirrors Mako's bounded in-memory history and active list.
 #[derive(Debug)]
 pub struct NotificationStore {
     active: VecDeque<Notification>,
     history: VecDeque<Notification>,
     next_id: u32,
     max_history: usize,
+    sort_policy: SortPolicy,
 }
 
 impl NotificationStore {
     pub fn new(max_history: usize) -> Self {
         Self { active: VecDeque::new(), history: VecDeque::new(),
-            next_id: 1, max_history }
+            next_id: 1, max_history, sort_policy: SortPolicy::default() }
     }
 
     pub fn active(&self) -> &VecDeque<Notification> { &self.active }
     pub fn history(&self) -> &VecDeque<Notification> { &self.history }
+
+    /// Configure sorting before accepting notifications.
+    /// Re-sorting existing notifications on config reload is pending.
+    pub fn set_sort_policy(&mut self, policy: SortPolicy) {
+        self.sort_policy = policy;
+    }
+
+    fn insert_sorted(&mut self, notification: Notification) {
+        if !self.sort_policy.by_priority {
+            if self.sort_policy.time_ascending {
+                self.active.push_back(notification);
+            } else {
+                self.active.push_front(notification);
+            }
+            return;
+        }
+        let rank = |urgency: Urgency| match urgency {
+            Urgency::Low => 0u8,
+            Urgency::Normal => 1,
+            Urgency::Critical => 2,
+        };
+        let rank_new = rank(notification.urgency);
+        let policy = self.sort_policy;
+        let index = self.active.iter().position(|existing| {
+            let rank_old = rank(existing.urgency);
+            if rank_new == rank_old {
+                // Newer first for -time, older first for +time.
+                !policy.time_ascending
+            } else if policy.priority_ascending {
+                rank_new < rank_old
+            } else {
+                rank_new > rank_old
+            }
+        }).unwrap_or(self.active.len());
+        self.active.insert(index, notification);
+    }
 
     pub fn push(&mut self, request: Request) -> u32 {
         // `replaces_id` only refers to currently active notifications.
@@ -111,7 +178,7 @@ impl NotificationStore {
             return id;
         }
         let id = self.allocate_id();
-        self.active.push_front(Notification::from_request(id, request));
+        self.insert_sorted(Notification::from_request(id, request));
         id
     }
 
@@ -199,6 +266,44 @@ mod tests {
         assert_eq!(store.restore(),Some(c));
         assert_eq!(store.active()[0].id,c);
     }
+    #[test]
+    fn urgency_sort_preserves_time_order_inside_priority_bands() {
+        let mut store = NotificationStore::new(5);
+        store.set_sort_policy(SortPolicy {
+            by_priority: true, priority_ascending: false, time_ascending: false,
+        });
+        let mk = |urgency| Request { urgency, ..Request::default() };
+        let low = store.push(mk(Urgency::Low));
+        let a = store.push(mk(Urgency::Normal));
+        let critical = store.push(mk(Urgency::Critical));
+        let b = store.push(mk(Urgency::Normal));
+        assert_eq!(store.active().iter().map(|n| n.id).collect::<Vec<_>>(),
+            vec![critical, b, a, low]);
+    }
+
+    #[test]
+    fn ascending_time_and_priority_produce_oldest_first_within_band() {
+        let mut store = NotificationStore::new(5);
+        store.set_sort_policy(SortPolicy {
+            by_priority: true, priority_ascending: true, time_ascending: true,
+        });
+        let a = store.push(Request { urgency: Urgency::Normal, ..Request::default() });
+        let b = store.push(Request { urgency: Urgency::Low, ..Request::default() });
+        let c = store.push(Request { urgency: Urgency::Normal, ..Request::default() });
+        assert_eq!(store.active().iter().map(|n| n.id).collect::<Vec<_>>(),
+            vec![b, a, c]);
+    }
+
+    #[test]
+    fn sort_config_tokens_override_each_dimension() {
+        let policy = SortPolicy::from_config(&[
+            "-time".into(), "+time".into(), "+priority".into(), "-priority".into()
+        ]);
+        assert_eq!(policy, SortPolicy {
+            by_priority: true, priority_ascending: false, time_ascending: true
+        });
+    }
+
     #[test]
     fn no_history_when_disabled() {
         let mut store=NotificationStore::new(3);
