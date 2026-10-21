@@ -98,22 +98,40 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
             Ok(Command::Invoke {id, action})
         }
         "mode" => {
+            // Upstream makoctl uses getopt("a:r:t:s"): -a/-r/-t take
+            // exactly one argument; -s is a flag whose replacement modes
+            // are positional arguments, and may be an empty list.
             let mut edits=Vec::new();
+            let mut positional=Vec::new();
+            let mut set=false;
             let mut i=0;
             while i<rest.len() {
-                let flag=rest[i].as_str();
-                if !["-a", "-r", "-t", "-s"].contains(&flag) {
-                    return Err(format!("unknown mode option {flag}"));
+                match rest[i].as_str() {
+                    "-s"=>{set=true;i+=1;}
+                    "-a"|"-r"|"-t"=>{
+                        let flag=rest[i].as_str();
+                        let op=flag.as_bytes()[1] as char;
+                        i+=1;
+                        let mode=rest.get(i).ok_or_else(||
+                            format!("missing value after {flag}"))?;
+                        if mode.starts_with('-'){
+                            return Err(format!("missing value after {flag}"));
+                        }
+                        edits.push((op,mode.clone()));
+                        i+=1;
+                    }
+                    other if other.starts_with('-')=>
+                        return Err(format!("unknown mode option {other}")),
+                    value=>{positional.push(value.to_owned());i+=1;}
                 }
-                let op=flag.as_bytes()[1] as char;
-                i+=1;
-                let mut count=0;
-                while i<rest.len() && !rest[i].starts_with('-') {
-                    edits.push((op,rest[i].clone()));
-                    i+=1;
-                    count+=1;
-                }
-                if count==0 { return Err(format!("missing value after {flag}")); }
+            }
+            if set {
+                // A marker is retained even if no positional mode follows.
+                // The set operation supersedes add/remove/toggle edits.
+                edits.push(('s',String::new()));
+                edits.extend(positional.into_iter().map(|m|('S',m)));
+            } else if !positional.is_empty() {
+                return Err("positional mode arguments require -s".into());
             }
             Ok(Command::Modes {edit:edits})
         }
@@ -122,26 +140,27 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
 }
 
 pub fn update_modes(mut current: Vec<String>, edits: &[(char, String)]) -> Vec<String> {
+    // Mako's -s replaces *all* modes, including an explicit empty list.
+    if edits.iter().any(|(op,_)|*op=='s'){
+        let mut selected:Vec<String>=edits.iter()
+            .filter(|(op,value)|*op=='s'&&!value.is_empty())
+            .map(|(_,value)|value.clone()).collect();
+        selected.extend(edits.iter().filter(|(op,_)|*op=='S')
+            .map(|(_,value)|value.clone()));
+        return selected;
+    }
     for (op,mode) in edits {
-        match op {
-            's' => { if !current.contains(mode) { current.push(mode.clone()); } },
-            'a' => { if !current.contains(mode) { current.push(mode.clone()); } },
-            'r' => current.retain(|value| value != mode),
-            't' => {
-                if current.contains(mode) { current.retain(|value| value != mode); }
-                else { current.push(mode.clone()); }
-            },
-            _ => {},
+        let index=current.iter().position(|value|value==mode);
+        match (op,index){
+            // Upstream makoctl permits duplicate additions.
+            ('a',_)=>current.push(mode.clone()),
+            ('r',Some(index))=>{current.swap_remove(index);},
+            ('t',Some(index))=>{current.swap_remove(index);},
+            ('t',None)=>current.push(mode.clone()),
+            _=>{}
         }
     }
-    // -s is replacement, not additive; preserve argument order.
-    if edits.iter().any(|(op,_)| *op == 's') {
-        let mut selected=Vec::new();
-        for (op,mode) in edits {
-            if *op=='s' && !selected.contains(mode) {selected.push(mode.clone());}
-        }
-        selected
-    } else { current }
+    current
 }
 
 /// Resolve a menu program's selected title to the Freedesktop action key.
@@ -282,11 +301,27 @@ mod tests {
         assert!(parse_command(&v(&["dismiss","-n","not-numeric"])).is_err());
     }
     #[test]
-    fn mode_operations_are_ordered_and_deduplicated() {
+    fn modes_match_makoctl_getopt_and_replacement_semantics() {
         let edits=vec![('a',"quiet".into()),('t',"default".into())];
         assert_eq!(update_modes(vec!["default".into()],&edits),vec!["quiet"]);
-        let selected=vec![('s',"quiet".into()),('s',"custom".into())];
-        assert_eq!(update_modes(vec!["default".into()],&selected),vec!["quiet","custom"]);
+        assert_eq!(parse_command(&v(&["mode","-s","quiet","custom"])).unwrap(),
+            Command::Modes{edit:vec![
+                ('s',"".into()),('S',"quiet".into()),('S',"custom".into())
+            ]});
+        assert_eq!(update_modes(vec!["default".into()],&[
+            ('s',"".into()),('S',"quiet".into()),('S',"custom".into())
+        ]),vec!["quiet","custom"]);
+        assert_eq!(update_modes(vec!["default".into()],&[('s',"".into())]),
+            Vec::<String>::new());
+        assert_eq!(parse_command(&v(&["mode","-s"])).unwrap(),
+            Command::Modes{edit:vec![('s',"".into())]});
+        assert!(parse_command(&v(&["mode","quiet"])).is_err());
+        assert!(parse_command(&v(&["mode","-a"])).is_err());
+        assert!(parse_command(&v(&["mode","-a","-t"])).is_err());
+        assert_eq!(parse_command(&v(&["mode","-a","quiet","-t","default"])).unwrap(),
+            Command::Modes{edit:vec![('a',"quiet".into()),('t',"default".into())]});
+        assert_eq!(update_modes(vec![],&[('a',"quiet".into()),('a',"quiet".into())]),
+            vec!["quiet","quiet"]);
     }
     #[test]
     fn menu_parse_requires_command_and_supports_explicit_notification_id() {
