@@ -229,7 +229,7 @@ fn json_entry(map: &HashMap<String,OwnedValue>) -> serde_json::Value {
 pub fn notification_text(map:&HashMap<String,OwnedValue>)->String{
     let id=map.get("id").and_then(|v|u32::try_from(v).ok()).unwrap_or(0);
     let summary=value_string(map,"summary").unwrap_or_default();
-    let mut result=format!("Notification {id}:{title}\\n",
+    let mut result=format!("Notification {id}:{title}\n",
         title=if summary.is_empty(){String::new()}else{format!(" {summary}")});
     for (field,title) in [
         ("app-name","App name"),
@@ -237,7 +237,7 @@ pub fn notification_text(map:&HashMap<String,OwnedValue>)->String{
         ("desktop-entry","Desktop entry"),
     ]{
         if let Some(value)=value_string(map,field){
-            result.push_str(&format!("  {title}: {value}\\n"));
+            result.push_str(&format!("  {title}: {value}\n"));
         }
     }
     let urgency=map.get("urgency").and_then(|v|u8::try_from(v).ok());
@@ -246,16 +246,16 @@ pub fn notification_text(map:&HashMap<String,OwnedValue>)->String{
         Some(2)=>Some("critical"),_=>None
     };
     if let Some(urgency)=urgency {
-        result.push_str(&format!("  Urgency: {urgency}\\n"));
+        result.push_str(&format!("  Urgency: {urgency}\n"));
     }
     if let Some(actions)=map.get("actions")
         .and_then(|v|HashMap::<String,String>::try_from(v.clone()).ok())
     {
-        result.push_str("  Actions:\\n");
+        result.push_str("  Actions:\n");
         let mut pairs:Vec<_>=actions.into_iter().collect();
         pairs.sort_by(|a,b|a.0.cmp(&b.0));
         for (key,label) in pairs{
-            result.push_str(&format!("    {key}: {label}\\n"));
+            result.push_str(&format!("    {key}: {label}\n"));
         }
     }
     result
@@ -345,10 +345,10 @@ mod tests {
             HashMap::from([("default".to_string(),"Open".to_string())])
         ));
         assert_eq!(notification_text(&fields),
-            "Notification 7: Task completed\\n  App name: Backup\\n  Category: success\\n  Desktop entry: backup.desktop\\n  Urgency: normal\\n  Actions:\\n    default: Open\\n");
+            "Notification 7: Task completed\n  App name: Backup\n  Category: success\n  Desktop entry: backup.desktop\n  Urgency: normal\n  Actions:\n    default: Open\n");
         let mut fields=HashMap::new();
         fields.insert("id".into(),OwnedValue::from(9u32));
-        assert_eq!(notification_text(&fields),"Notification 9:\\n");
+        assert_eq!(notification_text(&fields),"Notification 9:\n");
     }
 
     #[test]
