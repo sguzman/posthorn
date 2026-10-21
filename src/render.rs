@@ -116,7 +116,9 @@ pub fn render_notification(note: &Notification, style: &Options) -> Result<Pixel
     drop(context);
     surface.flush();
     let stride = surface.stride();
-    let pixels = surface.with_data(|data| data.to_vec()).map_err(|e| e.to_string())?;
+    let mut pixels = Vec::new();
+    surface.with_data(|data| pixels.extend_from_slice(data))
+        .map_err(|e| e.to_string())?;
     Ok(PixelFrame {width, height, stride, pixels})
 }
 
