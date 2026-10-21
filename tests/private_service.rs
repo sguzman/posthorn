@@ -147,3 +147,35 @@ async fn control_reload_swaps_styles_and_preserves_last_good_file()
         "old snapshots remain immutable after reload");
     Ok(())
 }
+
+#[tokio::test]
+async fn dbus_inline_image_and_progress_reach_rendered_pixels()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::desktop::snapshot_frame;
+    let config=Config::parse(
+        "width=160\nheight=90\nborder-size=0\npadding=4\n         progress-color=#00FF00\nbackground-color=#000000\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let dest=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let data=(8i32,8i32,32i32,true,8i32,4i32,
+        [255u8,0,0,255].repeat(64));
+    let inline=OwnedValue::try_from(zbus::zvariant::Value::from(data))?;
+    let hints:HashMap<String,OwnedValue>=[
+        ("image-data".into(),inline),
+        ("value".into(),OwnedValue::from(50i32))
+    ].into();
+    let id:u32=dest.call("Notify",&(
+        "wire-image-test",0u32,"","Progress","Running",
+        Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let store=runtime.store.lock().unwrap();
+    let note=store.active().iter().find(|n|n.id==id).unwrap();
+    assert_eq!(note.progress,50);
+    assert!(note.image_data.is_some());
+    drop(store);
+    let frame=snapshot_frame(&runtime)?.unwrap();
+    let px=frame.height as usize/2*frame.stride as usize+6*4;
+    assert_eq!(&frame.pixels[px..px+4],&[0,0,255,255]);
+    Ok(())
+}
