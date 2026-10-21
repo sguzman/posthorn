@@ -28,17 +28,18 @@ change how they call the Freedesktop Notification protocol. Until parity:
 
 | Upstream source | Posthorn scope | State |
 | --- | --- | --- |
-| `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial Rust implementation |
-| `notification.c` | IDs, replace, close, timeout, history, groups, format | Partial lifecycle implementation |
-| `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Not started |
-| `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Not started |
-| `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Not started |
+| `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; format/group spec validation and sort handling strengthened |
+| `notification.c` | IDs, replace, close, timeout, history, groups, format | Partial; deterministic timers, urgency/time sorting and group projections |
+| `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Adapters compile; not registered, incomplete controls and signals |
+| `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Layer-shell configure probe; no mapped notification surfaces |
+| `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | ARGB8888 rounded-background raster only; text/icons not implemented |
 | `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Not started |
 
 ## Explicit nonclaims
 
-Current Rust code **cannot handle incoming desktop notifications or render
-popups**. Current parsing is a subset; POSIX vs Rust regex, full style option
+Current Rust code **cannot act as a session D-Bus notification service or render
+popups**. The D-Bus adapters are unregistered and the Wayland probe deliberately
+has no buffer or notification rendering. Current parsing is a subset; POSIX vs Rust regex, full style option
 semantics, built-in hidden/grouped selectors, exact string escaping, sorting,
 input event handling, and many other details still need parity tests. The
 presence of a config key in a map does not mean the visual behavior is ported.

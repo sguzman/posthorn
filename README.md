@@ -12,8 +12,12 @@ D-Bus APIs, Wayland rendering, actions, history, and controls. Only **after**
 that milestone will we add TOML, a graphical notification center with history
 and Clear All, channels, SQLite persistence, and a general local message broker.
 
-> **Not yet a working daemon.** Current Rust implements initial config and
-> notification lifecycle logic; there is no D-Bus service or Wayland window.
+> **Not yet a working daemon.** Rust now includes configuration/criteria,
+> notification lifecycle, deterministic timers, sorting/grouping projections,
+> D-Bus interface adapters, a Wayland layer-shell configure handshake, and
+> an ARGB8888 raster foundation. **D-Bus is not registered; notification
+> windows do not render or receive notifications.** The visual compositor,
+> lifecycle integration, full controls, sound hooks, and live QA remain.
 > **Keep using Mako.** Do not replace, disable or uninstall it for this build.
 
 ## Progress
