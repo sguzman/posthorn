@@ -25,18 +25,43 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScreenCorner {
     TopLeft,
+    TopCenter,
     TopRight,
+    CenterLeft,
+    Center,
+    CenterRight,
     BottomLeft,
+    BottomCenter,
     BottomRight,
 }
 
 impl ScreenCorner {
+    pub fn from_mako(value:&str)->Option<Self>{
+        match value {
+            "top-left"=>Some(Self::TopLeft),
+            "top-center"=>Some(Self::TopCenter),
+            "top-right"=>Some(Self::TopRight),
+            "center-left"=>Some(Self::CenterLeft),
+            "center"=>Some(Self::Center),
+            "center-right"=>Some(Self::CenterRight),
+            "bottom-left"=>Some(Self::BottomLeft),
+            "bottom-center"=>Some(Self::BottomCenter),
+            "bottom-right"=>Some(Self::BottomRight),
+            _=>None,
+        }
+    }
+
     fn anchors(self) -> Anchor {
         match self {
-            Self::TopLeft => Anchor::Top | Anchor::Left,
-            Self::TopRight => Anchor::Top | Anchor::Right,
-            Self::BottomLeft => Anchor::Bottom | Anchor::Left,
-            Self::BottomRight => Anchor::Bottom | Anchor::Right,
+            Self::TopLeft=>Anchor::Top|Anchor::Left,
+            Self::TopCenter=>Anchor::Top,
+            Self::TopRight=>Anchor::Top|Anchor::Right,
+            Self::CenterLeft=>Anchor::Left,
+            Self::Center=>Anchor::empty(),
+            Self::CenterRight=>Anchor::Right,
+            Self::BottomLeft=>Anchor::Bottom|Anchor::Left,
+            Self::BottomCenter=>Anchor::Bottom,
+            Self::BottomRight=>Anchor::Bottom|Anchor::Right,
         }
     }
 }
@@ -220,11 +245,12 @@ pub fn probe_configure(bounds: PopupBounds) -> Result<(u32, u32), Box<dyn std::e
     layer.set_keyboard_interactivity(KeyboardInteractivity::None);
 
     let margin = bounds.margin;
+    let anchor=bounds.corner.anchors();
     layer.set_margin(
-        if matches!(bounds.corner, ScreenCorner::TopLeft | ScreenCorner::TopRight) {margin} else {0},
-        if matches!(bounds.corner, ScreenCorner::TopRight | ScreenCorner::BottomRight) {margin} else {0},
-        if matches!(bounds.corner, ScreenCorner::BottomLeft | ScreenCorner::BottomRight) {margin} else {0},
-        if matches!(bounds.corner, ScreenCorner::TopLeft | ScreenCorner::BottomLeft) {margin} else {0},
+        if anchor.contains(Anchor::Top) {margin} else {0},
+        if anchor.contains(Anchor::Right) {margin} else {0},
+        if anchor.contains(Anchor::Bottom) {margin} else {0},
+        if anchor.contains(Anchor::Left) {margin} else {0},
     );
     // Layer-shell requires an initial commit without a buffer before configure.
     surface.commit();
@@ -265,11 +291,12 @@ pub fn present_frame_once(
     layer.set_size(frame.width, frame.height);
     layer.set_anchor(corner.anchors());
     layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+    let anchor=corner.anchors();
     layer.set_margin(
-        if matches!(corner, ScreenCorner::TopLeft | ScreenCorner::TopRight) {margin} else {0},
-        if matches!(corner, ScreenCorner::TopRight | ScreenCorner::BottomRight) {margin} else {0},
-        if matches!(corner, ScreenCorner::BottomLeft | ScreenCorner::BottomRight) {margin} else {0},
-        if matches!(corner, ScreenCorner::TopLeft | ScreenCorner::BottomLeft) {margin} else {0},
+        if anchor.contains(Anchor::Top) {margin} else {0},
+        if anchor.contains(Anchor::Right) {margin} else {0},
+        if anchor.contains(Anchor::Bottom) {margin} else {0},
+        if anchor.contains(Anchor::Left) {margin} else {0},
     );
     surface.commit();
     let mut state = ConfigureState::default();
@@ -372,11 +399,12 @@ impl LivePresenter {
         layer.set_size(frame.width, frame.height);
         layer.set_keyboard_interactivity(KeyboardInteractivity::None);
         layer.set_exclusive_zone(0);
+        let anchor=corner.anchors();
         layer.set_margin(
-            if matches!(corner, ScreenCorner::TopLeft|ScreenCorner::TopRight) { margin } else { 0 },
-            if matches!(corner, ScreenCorner::TopRight|ScreenCorner::BottomRight) { margin } else { 0 },
-            if matches!(corner, ScreenCorner::BottomLeft|ScreenCorner::BottomRight) { margin } else { 0 },
-            if matches!(corner, ScreenCorner::TopLeft|ScreenCorner::BottomLeft) { margin } else { 0 },
+            if anchor.contains(Anchor::Top) {margin} else {0},
+            if anchor.contains(Anchor::Right) {margin} else {0},
+            if anchor.contains(Anchor::Bottom) {margin} else {0},
+            if anchor.contains(Anchor::Left) {margin} else {0},
         );
         surface.commit();
         while self.state.size.is_none() && !self.state.closed {
@@ -494,6 +522,18 @@ mod tests {
         assert!(validate_frame(&frame).is_ok());
         assert!(validate_frame(&PixelFrame { pixels: vec![0; 60], ..frame.clone() }).is_err());
         assert!(validate_frame(&PixelFrame { stride: 4, ..frame }).is_err());
+    }
+
+    #[test]
+    fn all_nine_mako_anchors_map_to_wayland_layer_shell_flags() {
+        for option in ["top-left","top-center","top-right",
+            "center-left","center","center-right",
+            "bottom-left","bottom-center","bottom-right"]{
+            assert!(ScreenCorner::from_mako(option).is_some());
+        }
+        assert_eq!(ScreenCorner::from_mako("center").unwrap().anchors(),Anchor::empty());
+        assert_eq!(ScreenCorner::from_mako("bottom-center").unwrap().anchors(),Anchor::Bottom);
+        assert!(ScreenCorner::from_mako("invalid").is_none());
     }
 
     #[test]

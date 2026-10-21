@@ -81,7 +81,13 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<P
         let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
         if notes!=previous || modes!=previous_modes {
             let frame=snapshot_frame(&runtime)?;
-            viewer.update_frame(frame.as_ref(),ScreenCorner::TopRight,10)
+            let corner=runtime.config().global.get("anchor")
+                .and_then(|s|ScreenCorner::from_mako(s))
+                .unwrap_or(ScreenCorner::TopRight);
+            let margin=runtime.config().global.get("margin")
+                .and_then(|s|s.split(',').next())
+                .and_then(|s|s.parse::<i32>().ok()).unwrap_or(10);
+            viewer.update_frame(frame.as_ref(),corner,margin)
                 .map_err(other)?;
             previous=notes;
             previous_modes=modes;
