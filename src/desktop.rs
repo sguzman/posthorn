@@ -41,7 +41,9 @@ pub fn style_for_note(
         urgency:match n.urgency {
             Urgency::Low=>"low",Urgency::Normal=>"normal",Urgency::Critical=>"critical"
         },
-        anchor:"top-right",output:"",modes:&mode_views,
+        anchor:runtime.config().global.get("anchor")
+            .map(String::as_str).unwrap_or("top-right"),
+        output:"",modes:&mode_views,
         requested_timeout_ms:n.requested_timeout_ms,
         actionable:!n.actions.is_empty(),group_index:-1,hidden:false,
     };
@@ -186,6 +188,19 @@ mod tests {
         runtime.close(a,CloseReason::Dismissed,false).unwrap();
         let after=snapshot_frame(&runtime).unwrap().unwrap();
         assert_eq!(after.height,40);
+    }
+
+    #[test]
+    fn style_matching_uses_the_configured_anchor_instead_of_top_right() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "anchor=bottom-left\n             [anchor=bottom-left]\nbackground-color=#715536\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        let note=runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==id).unwrap().clone();
+        let mode=vec!["default".to_string()];
+        let style=style_for_note(&runtime,&note,&mode);
+        assert_eq!(style.get("background-color").map(String::as_str),Some("#715536"));
     }
 
     #[test]

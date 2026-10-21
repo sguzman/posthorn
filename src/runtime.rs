@@ -68,7 +68,8 @@ impl SharedRuntime {
                 crate::notification::Urgency::Normal => "normal",
                 crate::notification::Urgency::Critical => "critical",
             },
-            anchor: "top-right", output: "", modes: &mode_views,
+            anchor: self.config.global.get("anchor").map(String::as_str).unwrap_or("top-right"),
+            output: "", modes: &mode_views,
             requested_timeout_ms: note.requested_timeout_ms,
             actionable: !note.actions.is_empty(), group_index: -1, hidden: false,
         };
@@ -274,6 +275,18 @@ mod tests {
         runtime.schedule(id,now).unwrap();
         assert!(runtime.close(id,CloseReason::Dismissed,true).unwrap());
         assert_eq!(runtime.store.lock().unwrap().history().len(),1);
+    }
+
+    #[test]
+    fn anchor_selector_controls_timeout_on_non_default_anchor() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "anchor=bottom-left\ndefault-timeout=1000\n             [anchor=bottom-left]\ndefault-timeout=250\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        let now=Instant::now();
+        runtime.schedule(id,now).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+Duration::from_millis(250)));
     }
 
     #[test]
