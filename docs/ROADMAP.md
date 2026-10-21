@@ -111,4 +111,3 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 - 📥 Work queues and fan-out delivery — `░░░░░░░░░░ 0%`
 - 🧭 Monitoring and administrative controls — `░░░░░░░░░░ 0%`
-
