@@ -75,6 +75,24 @@ mod tests {
     }
 
     #[test]
+    fn configured_shell_hook_receives_the_numeric_notification_id() {
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("hook-id");
+        let command = format!("exec printf '%s' \"$id\" > '{}'", destination.display());
+        let action = NotifyBinding::parse(&command).unwrap();
+        action.run_exec(173).unwrap();
+        let mut found = false;
+        for _ in 0..100 {
+            if std::fs::read_to_string(&destination).ok().as_deref() == Some("173") {
+                found = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(found, "configured hook failed to receive the ID");
+    }
+
+    #[test]
     fn none_is_a_safe_noop() {
         NotifyBinding::None.run_exec(8).unwrap();
     }

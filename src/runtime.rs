@@ -151,6 +151,24 @@ mod tests {
     }
 
     #[test]
+    fn quiet_mode_retains_notifications_and_suppresses_configured_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("unexpected-hook");
+        let cfg = format!(
+            "[category=success]\\non-notify=exec touch '{}'\\n[mode=quiet]\\non-notify=none\\n",
+            marker.display()
+        );
+        let runtime = SharedRuntime::new(Config::parse(&cfg).unwrap());
+        *runtime.modes().lock().unwrap() = vec!["quiet".into()];
+        let id = runtime.store.lock().unwrap().push(Request {
+            category: "success".into(), ..Request::default()
+        });
+        runtime.schedule(id, Instant::now()).unwrap();
+        assert_eq!(runtime.store.lock().unwrap().active().len(), 1);
+        assert!(!marker.exists(), "quiet mode unexpectedly launched a hook");
+    }
+
+    #[test]
     fn mode_changes_affect_new_notification_timeout_rules() {
         let runtime = SharedRuntime::new(
             Config::parse("default-timeout=1000\n[mode=quiet]\ndefault-timeout=0\n").unwrap()
