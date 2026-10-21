@@ -26,6 +26,7 @@ pub struct Notification {
     pub id: u32,
     pub app_name: String,
     pub app_icon: String,
+    pub image_data: Option<crate::icons::IconPixels>,
     pub summary: String,
     pub body: String,
     pub category: String,
@@ -41,6 +42,7 @@ pub struct Request {
     pub replaces_id: u32,
     pub app_name: String,
     pub app_icon: String,
+    pub image_data: Option<crate::icons::IconPixels>,
     pub summary: String,
     pub body: String,
     pub category: String,
@@ -53,7 +55,7 @@ pub struct Request {
 
 impl Default for Request {
     fn default() -> Self {
-        Self { replaces_id: 0, app_name: String::new(), app_icon: String::new(),
+        Self { replaces_id: 0, app_name: String::new(), app_icon: String::new(), image_data: None,
             summary: String::new(), body: String::new(), category: String::new(),
             desktop_entry: String::new(), tag: String::new(), urgency: Urgency::Normal,
             requested_timeout_ms: -1, actions: Vec::new() }
@@ -63,7 +65,7 @@ impl Default for Request {
 impl Notification {
     fn from_request(id: u32, request: Request) -> Self {
         Self { id, app_name: request.app_name, app_icon: request.app_icon,
-            summary: request.summary, body: request.body, category: request.category,
+            image_data: request.image_data, summary: request.summary, body: request.body, category: request.category,
             desktop_entry: request.desktop_entry, tag: request.tag, urgency: request.urgency,
             requested_timeout_ms: request.requested_timeout_ms, actions: request.actions }
     }

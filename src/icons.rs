@@ -18,6 +18,46 @@ pub struct IconPixels {
     pub bgra:Vec<u8>,
 }
 
+/// Freedesktop image-data hint: (width, height, rowstride, alpha,
+/// bits-per-sample, channels, raw bytes). Reject malformed sender data before
+/// allocating a Cairo image or performing any indexing.
+pub fn decode_raw_image(
+    width:i32,height:i32,rowstride:i32,has_alpha:bool,
+    bits_per_sample:i32,channels:i32,bytes:&[u8],
+) -> Option<IconPixels> {
+    let (w,h,stride,channels)=(
+        u32::try_from(width).ok()?,
+        u32::try_from(height).ok()?,
+        usize::try_from(rowstride).ok()?,
+        usize::try_from(channels).ok()?,
+    );
+    if w==0 || h==0 || w>4096 || h>4096
+        || u64::from(w)*u64::from(h)>4_194_304
+        || bits_per_sample!=8
+        || channels != if has_alpha {4}else{3}
+    {return None;}
+    let row=(w as usize).checked_mul(channels)?;
+    let last=(h as usize-1).checked_mul(stride)?.checked_add(row)?;
+    if stride<row||last>bytes.len()||bytes.len()>16*1024*1024{
+        return None;
+    }
+    let mut bgra=vec![0u8;(w as usize).checked_mul(h as usize)?.checked_mul(4)?];
+    for y in 0..h as usize {
+        let row_base=y.checked_mul(stride)?;
+        for x in 0..w as usize {
+            let pos=row_base.checked_add(x.checked_mul(channels)?)?;
+            let rgba=bytes.get(pos..pos+channels)?;
+            let a=if has_alpha{rgba[3]}else{255};
+            let premultiply=|color:u8|((u16::from(color)*u16::from(a)+127)/255) as u8;
+            let dest=(y*w as usize+x)*4;
+            bgra[dest..dest+4].copy_from_slice(&[
+                premultiply(rgba[2]),premultiply(rgba[1]),premultiply(rgba[0]),a,
+            ]);
+        }
+    }
+    Some(IconPixels{width:w,height:h,bgra})
+}
+
 fn hex(b:u8)->Option<u8>{
     match b {b'0'..=b'9'=>Some(b-b'0'),b'a'..=b'f'=>Some(b-b'a'+10),
         b'A'..=b'F'=>Some(b-b'A'+10),_=>None}
@@ -135,6 +175,8 @@ pub fn decode_icon(path:&Path)->Option<IconPixels>{
 
 pub fn load_note_icon(note:&Notification,style:&Options)->Option<IconPixels>{
     if style.get("icons").is_some_and(|v|v=="0"||v=="false"){return None;}
+    // image-data has higher precedence than image-path and app_icon.
+    if let Some(image)=&note.image_data {return Some(image.clone());}
     if note.app_icon.is_empty(){return None;}
     let max_size=style.get("max-icon-size").and_then(|s|s.parse().ok()).unwrap_or(64);
     let path=resolve_icon(&note.app_icon,
@@ -145,6 +187,26 @@ pub fn load_note_icon(note:&Notification,style:&Options)->Option<IconPixels>{
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn freedesktop_raw_images_premultiply_alpha_and_honor_row_padding() {
+        let image=decode_raw_image(1,2,8,true,8,4,&[
+            255,128,0,128,0,0,0,0, 0,64,255,255,
+        ]).unwrap();
+        assert_eq!((image.width,image.height),(1,2));
+        assert_eq!(&image.bgra[0..4],&[0,64,128,128]);
+        assert_eq!(&image.bgra[4..8],&[255,64,0,255]);
+    }
+
+    #[test]
+    fn malformed_sender_image_metadata_is_bounded_and_rejected() {
+        assert!(decode_raw_image(1,1,-1,true,8,4,&[0;4]).is_none());
+        assert!(decode_raw_image(50000,1,200000,true,8,4,&[0;4]).is_none());
+        assert!(decode_raw_image(2,2,8,true,8,4,&[0;9]).is_none());
+        assert!(decode_raw_image(1,1,3,true,8,4,&[0;4]).is_none());
+        assert!(decode_raw_image(1,1,4,true,16,4,&[0;4]).is_none());
+        assert!(decode_raw_image(1,1,4,true,8,3,&[0;4]).is_none());
+    }
+
     #[test]
     fn rejects_traversal_and_decodes_file_uri() {
         assert!(!valid_icon_name("../payload"));

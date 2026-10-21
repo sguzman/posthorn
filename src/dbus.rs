@@ -77,10 +77,25 @@ impl FreedesktopNotifications {
             Some(2) => Urgency::Critical,
             _ => Urgency::Normal,
         };
+        // Historical Freedesktop aliases are still accepted by Mako. The
+        // modern image-data hint takes precedence over both image-path and
+        // the app_icon Notify argument.
+        let raw_hint = ["image-data","image_data","icon_data"].into_iter()
+            .find_map(|name| hints.get(name));
+        let image_data = raw_hint.and_then(|hint| {
+            let data: (i32,i32,i32,bool,i32,i32,Vec<u8>) =
+                hint.try_clone().ok()?.try_into().ok()?;
+            crate::icons::decode_raw_image(
+                data.0,data.1,data.2,data.3,data.4,data.5,&data.6)
+        });
+        let icon_path = ["image-path","image_path"].into_iter()
+            .map(text_hint).find(|s|!s.is_empty())
+            .unwrap_or_else(||app_icon.to_string());
         let request = Request {
             replaces_id,
             app_name: app_name.to_string(),
-            app_icon: app_icon.to_string(),
+            app_icon: icon_path,
+            image_data,
             summary: summary.to_string(),
             body: body.to_string(),
             category: text_hint("category"),
