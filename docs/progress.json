@@ -72,7 +72,7 @@
               "id": "T105",
               "emoji": "📐",
               "name": "Type/layout/style parity for all Mako config settings",
-              "progress": 12
+              "progress": 20
             }
           ]
         },
@@ -97,13 +97,13 @@
               "id": "T203",
               "emoji": "⏳",
               "name": "Timeout selection and timer/event scheduling",
-              "progress": 84
+              "progress": 89
             },
             {
               "id": "T204",
               "emoji": "🔗",
               "name": "Grouping, sorting, hidden placeholder and visibility",
-              "progress": 48
+              "progress": 55
             },
             {
               "id": "T205",
@@ -122,7 +122,7 @@
               "id": "T301",
               "emoji": "📬",
               "name": "Implement org.freedesktop.Notifications methods and signals",
-              "progress": 70
+              "progress": 74
             },
             {
               "id": "T302",
@@ -134,7 +134,7 @@
               "id": "T303",
               "emoji": "🔄",
               "name": "Correct startup, bus ownership and config reload behavior",
-              "progress": 15
+              "progress": 26
             }
           ]
         },
@@ -147,19 +147,19 @@
               "id": "T401",
               "emoji": "🧱",
               "name": "Layer-shell surfaces, anchors, output routing and scaling",
-              "progress": 52
+              "progress": 72
             },
             {
               "id": "T402",
               "emoji": "🖌️",
               "name": "Text, icons, colors, borders, progress and layout",
-              "progress": 63
+              "progress": 72
             },
             {
               "id": "T403",
               "emoji": "🖱️",
               "name": "Pointer, touch, button bindings and XDG activation",
-              "progress": 42
+              "progress": 46
             }
           ]
         },
@@ -199,7 +199,7 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 38
+          "progress": 44
         },
         {
           "emoji": "🎨",
@@ -209,7 +209,7 @@
         {
           "emoji": "📜",
           "name": "Mako history/control API parity",
-          "progress": 49
+          "progress": 55
         }
       ]
     },

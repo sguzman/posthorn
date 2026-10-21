@@ -16,9 +16,9 @@ and Clear All, channels, SQLite persistence, and a general local message broker.
 > notification lifecycle, timers, sorting/grouping projections, D-Bus
 > adapters on an isolated development bus, a continuously refreshed
 > Wayland layer-shell stack, Cairo/Pango rasterized text and icons, configured
-> on-notify shell hooks, basic mouse/touch bindings, and partial posthornctl.
+> on-notify shell hooks, basic mouse/touch bindings, category-aware history, and partial posthornctl.
 > **It does not claim the desktop notifications D-Bus name.** Exact automatic
-> layout, image-data hints, XDG activation, output/scaling behavior,
+> auto-height, image-data hints, XDG activation, output/scaling behavior,
 > control parity and live Hyprland QA remain.
 > **Keep using Mako.** Do not replace, disable or uninstall it for this build.
 
