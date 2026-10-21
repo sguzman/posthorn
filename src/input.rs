@@ -10,7 +10,7 @@ use crate::hooks::NotifyBinding;
 use crate::notification::{CloseReason,Notification};
 use crate::runtime::SharedRuntime;
 use crate::wayland::PointerClick;
-use crate::desktop::{style_for_note,style_for_note_group,stack_alignment};
+use crate::desktop::{style_for_note_index,visible_members_indexed,stack_alignment};
 use crate::wayland::PopupMargins;
 use crate::render::mako_stack_geometry;
 use crate::dbus::{BUS_NAME,OBJECT_PATH};
@@ -20,8 +20,10 @@ fn error(msg: impl std::fmt::Display) -> io::Error {
     io::Error::other(msg.to_string())
 }
 
-fn ordered_visible(runtime:&SharedRuntime) -> io::Result<(Vec<(Notification,usize)>,Vec<String>)> {
-    let notes=crate::desktop::visible_members(runtime)?;
+fn ordered_visible(runtime:&SharedRuntime)
+    -> io::Result<(Vec<crate::desktop::VisibleMember>,Vec<String>)>
+{
+    let notes=visible_members_indexed(runtime)?;
     let modes=runtime.modes().lock().map_err(|_|error("mode lock poisoned"))?
         .clone();
     Ok((notes,modes))
@@ -47,8 +49,9 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
     // Layer-shell's surface width is the largest notification width.
     // Narrow notifications may be left, centered, or right aligned.
     let mut margins=Vec::with_capacity(notes.len());
-    let dimensions:Vec<_>=notes.iter().map(|(n,count)|{
-        let style=style_for_note_group(runtime,n,&modes,*count);
+    let dimensions:Vec<_>=notes.iter().map(|entry|{
+        let n=&entry.notification;
+        let style=style_for_note_index(runtime,n,&modes,entry.group_index);
         margins.push(style.get("margin")
             .and_then(|s|PopupMargins::parse_mako(s))
             .unwrap_or(PopupMargins::uniform(10)));
@@ -56,7 +59,7 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
         // Hit-testing must use the same Pango shrink-wrapped height as
         // the renderer, not the configured maximum.
         let h=crate::render::measure_notification_height_group(
-            n,&style,if *count>=2{*count}else{0}
+            n,&style,if entry.group_count>=2{entry.group_count}else{0}
         ).map_err(error)? as f64;
         Ok::<(f64,f64),io::Error>((w,h))
     }).collect::<io::Result<Vec<_>>>()?;
@@ -65,10 +68,11 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
     if dimensions.is_empty(){return Ok(None);}
     let sizes:Vec<_>=dimensions.iter().map(|(w,h)|(*w as u32,*h as u32)).collect();
     let (_,_,positions)=mako_stack_geometry(&sizes,&margins,align).map_err(error)?;
-    for (((n,count),(w,h)),(x,y)) in notes.iter()
+    for ((entry,(w,h)),(x,y)) in notes.iter()
         .zip(dimensions.iter().copied()).zip(positions) {
         let (x,y)=(f64::from(x),f64::from(y));
-        let style=style_for_note_group(runtime,n,&modes,*count);
+        let n=&entry.notification;
+        let style=style_for_note_index(runtime,n,&modes,entry.group_index);
         if click.y >= y && click.y < y+h {
             if click.x<x || click.x>=x+w {return Ok(None);}
             let fallback=match click.button {
@@ -132,21 +136,21 @@ pub async fn dispatch_click(
 /// click binding may still dismiss the notification.
 pub fn can_invoke_action(runtime:&SharedRuntime,id:u32,key:&str)->io::Result<bool>{
     let config=runtime.config();
-    let (note,group_count)={
+    let (note,group_index)={
         let store=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?;
         let note=store.active().iter().find(|n|n.id==id).cloned();
         let grouping=config.global.get("group-by")
             .map(String::as_str).unwrap_or("none");
         let spec=GroupSpec::parse(grouping).map_err(error)?;
-        let count=group_ordered(store.active(),&spec).iter()
+        let index=group_ordered(store.active(),&spec).iter()
             .find(|group|group.ids.contains(&id))
-            .map(|group|group.ids.len()).unwrap_or(1);
-        (note,count)
+            .and_then(|group|group.index_of(id)).unwrap_or(-1);
+        (note,index)
     };
     let Some(note)=note else {return Ok(false)};
     let modes=runtime.modes().lock().map_err(|_|error("mode lock poisoned"))?
         .clone();
-    let style=style_for_note_group(runtime,&note,&modes,group_count);
+    let style=style_for_note_index(runtime,&note,&modes,group_index);
     Ok(style.get("actions").is_none_or(|v|
         v=="1"||v.eq_ignore_ascii_case("true"))
         && note.actions.iter().any(|a|a.key==key))
@@ -224,6 +228,30 @@ mod tests {
         assert!(!can_invoke_action(&runtime,disabled,"default").unwrap());
         assert!(can_invoke_action(&runtime,allowed,"default").unwrap());
         assert!(!can_invoke_action(&runtime,allowed,"unknown").unwrap());
+    }
+
+    #[test]
+    fn exposed_secondary_group_member_uses_its_own_input_binding() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=app-name\nmax-visible=4\nwidth=120\nheight=40\n             [grouped]\ninvisible=0\n             [group-index=1]\non-button-left=none\n"
+        ).unwrap());
+        let older=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),..Request::default()
+        });
+        let newer=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),..Request::default()
+        });
+        let members=visible_members_indexed(&runtime).unwrap();
+        assert_eq!(members.len(),2);
+        let first=&members[0];
+        let first_style=style_for_note_index(&runtime,&first.notification,
+            &["default".into()],first.group_index);
+        let top_height=crate::render::measure_notification_height_group(
+            &first.notification,&first_style,2).unwrap();
+        assert_eq!(hit_test(&runtime,click(20.0,15.0,272)).unwrap(),
+            Some((newer,NotifyBinding::InvokeDefaultAction)));
+        assert_eq!(hit_test(&runtime,click(20.0,f64::from(top_height)+22.0,272)).unwrap(),
+            Some((older,NotifyBinding::None)));
     }
 
     #[test]
