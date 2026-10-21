@@ -112,6 +112,8 @@ pub fn render_notification(note: &Notification, style: &Options) -> Result<Pixel
     layout.set_wrap(pango::WrapMode::WordChar);
     layout.set_markup(&safe_markup);
     pangocairo::functions::show_layout(&context, &layout);
+    drop(layout);
+    drop(context);
     surface.flush();
     let stride = surface.stride();
     let pixels = surface.with_data(|data| data.to_vec()).map_err(|e| e.to_string())?;
