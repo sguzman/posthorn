@@ -50,7 +50,8 @@ fn paint_icon(cr:&cairo::Context,icon:&IconPixels,x:f64,y:f64,scale:f64)
     let mut bitmap=cairo::ImageSurface::create(cairo::Format::ARgb32,
         icon.width as i32,icon.height as i32).map_err(|e|e.to_string())?;
     let stride=bitmap.stride() as usize;
-    bitmap.with_data(|pixels|{
+    {
+        let mut pixels=bitmap.data().map_err(|e|e.to_string())?;
         let row_bytes=icon.width as usize*4;
         for row in 0..icon.height as usize {
             let dest=row*stride;
@@ -58,7 +59,7 @@ fn paint_icon(cr:&cairo::Context,icon:&IconPixels,x:f64,y:f64,scale:f64)
             pixels[dest..dest+row_bytes]
                 .copy_from_slice(&icon.bgra[source..source+row_bytes]);
         }
-    }).map_err(|e|e.to_string())?;
+    }
     bitmap.mark_dirty();
     cr.save().map_err(|e|e.to_string())?;
     cr.translate(x,y);
