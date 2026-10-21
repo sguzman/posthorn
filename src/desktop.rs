@@ -79,8 +79,11 @@ pub fn visible_members(runtime:&SharedRuntime)
     let spec=config.global.get("group-by")
         .map(String::as_str).unwrap_or("none");
     let spec=GroupSpec::parse(spec).map_err(other)?;
-    let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
+    // Keep lock acquisition order consistent with SharedRuntime::schedule:
+    // store first, modes second. The reverse order can deadlock with a
+    // concurrent Notify() while the popup thread is reading groups.
     let store=runtime.store.lock().map_err(|_|poisoned())?;
+    let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let by_id=store.active();
     let mut selected=Vec::new();
     for group in group_ordered(by_id,&spec) {
@@ -106,8 +109,8 @@ pub fn displayable_groups(runtime:&SharedRuntime)->io::Result<usize>{
     let group_spec=config.global.get("group-by")
         .map(String::as_str).unwrap_or("none");
     let spec=GroupSpec::parse(group_spec).map_err(other)?;
-    let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let store=runtime.store.lock().map_err(|_|poisoned())?;
+    let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let mut count=0usize;
     for group in group_ordered(store.active(),&spec){
         if let Some(id)=group.ids.first(){
