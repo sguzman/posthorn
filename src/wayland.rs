@@ -508,6 +508,13 @@ impl LivePresenter {
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(frame) = frame { validate_frame(frame)?; }
         self.reclaim_released();
+        // Clearing a popup never requires a valid output. In particular, the
+        // target monitor may already have disappeared on hot-unplug.
+        let Some(frame) = frame else {
+            self.clear();
+            self.conn.flush()?;
+            return Ok(());
+        };
         // Poll pending name notifications before resolving the target.
         self.queue.dispatch_pending(&mut self.state)?;
         let output = if output_name.is_empty() {None} else {
@@ -515,11 +522,6 @@ impl LivePresenter {
                 .find(|(_,name)|name==output_name)
                 .ok_or_else(||format!("Wayland output not found: {output_name}"))?
                 .0.clone())
-        };
-        let Some(frame) = frame else {
-            self.clear();
-            self.conn.flush()?;
-            return Ok(());
         };
         let spec=PopupSurfaceSpec {
             width:frame.width,height:frame.height,corner,margins,
