@@ -61,6 +61,11 @@ expire/archive notifications with D-Bus close signals. It does **not**
 render popups, support ordinary `notify-send` destination routing, or replace
 the active Mako daemon. Do not install or autostart this experimental service.
 
+The separate `posthorn --experimental-popup-preview PATH` command opens a
+single temporary, synthetic category-colored Wayland popup using the supplied
+Mako-format configuration. This is **opt-in developer QA**, not the running
+notification daemon. It doesn't claim the desktop D-Bus name or affect Mako.
+
 ## License
 
 MIT. Mako's original authors are credited in [the source baseline](docs/SOURCE_BASELINE.md).
