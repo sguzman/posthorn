@@ -80,10 +80,6 @@ pub fn visible_members(runtime:&SharedRuntime)
     -> io::Result<Vec<(Notification,usize)>>
 {
     let config=runtime.config();
-    let limit=config.global.get("max-visible")
-        .and_then(|v|v.parse::<i32>().ok()).unwrap_or(5);
-    // Upstream Mako treats negative max-visible as unlimited.
-    let max_visible=if limit<0 {usize::MAX} else {limit as usize};
     let spec=config.global.get("group-by")
         .map(String::as_str).unwrap_or("none");
     let spec=GroupSpec::parse(spec).map_err(other)?;
@@ -99,10 +95,15 @@ pub fn visible_members(runtime:&SharedRuntime)
             if let Some(n)=by_id.iter().find(|n|&n.id==id){
                 let count=group.ids.len();
                 let style=style_for_note_group(runtime,n,&modes,count);
-                if style.get("invisible").is_some_and(|v|v=="1"||v=="true"){
+                // Upstream reads max-visible from the current matched
+                // notification style, allowing per-category overrides.
+                let limit=style.get("max-visible")
+                    .and_then(|v|v.parse::<i32>().ok()).unwrap_or(5);
+                if limit>=0&&selected.len()>=limit as usize {continue;}
+                if style.get("invisible").is_some_and(|v|
+                    v=="1"||v.eq_ignore_ascii_case("true")){
                     continue;
                 }
-                if selected.len()>=max_visible {break;}
                 selected.push((n.clone(),count));
             }
         }
@@ -339,6 +340,24 @@ mod tests {
             PopupMargins{top:7,right:0,bottom:3,left:0},
         ];
         assert_eq!(vertical_spacing(&margins),vec![9,7]);
+    }
+
+    #[test]
+    fn per_category_max_visible_controls_own_notification_selection(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "max-visible=1\n[category=urgent]\nmax-visible=3\n"
+        ).unwrap());
+        // Newest first: the third slot is permitted by the category rule.
+        let older=runtime.store.lock().unwrap().push(Request{
+            category:"urgent".into(),..Request::default()
+        });
+        let middle=runtime.store.lock().unwrap().push(Request{
+            category:"urgent".into(),..Request::default()
+        });
+        let newest=runtime.store.lock().unwrap().push(Request::default());
+        let shown=visible_notifications(&runtime).unwrap();
+        assert_eq!(shown.iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![newest,middle,older]);
     }
 
     #[test]
