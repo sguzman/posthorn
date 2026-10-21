@@ -9,6 +9,7 @@ use crate::config::Options;
 use crate::format::{decode_format, escape_markup, render_notification_format, FormatNotification};
 use crate::notification::Notification;
 use crate::raster::Color;
+use crate::icons::{IconPixels,load_note_icon};
 
 #[derive(Clone, Debug)]
 pub struct PixelFrame {
@@ -41,6 +42,33 @@ fn rounded(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, radius: f64) {
     cr.arc(x + r, y + h - r, r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
     cr.arc(x + r, y + r, r, std::f64::consts::PI, 3.0 * std::f64::consts::FRAC_PI_2);
     cr.close_path();
+}
+
+fn paint_icon(cr:&cairo::Context,icon:&IconPixels,x:f64,y:f64,scale:f64)
+    -> Result<(),String>
+{
+    let mut bitmap=cairo::ImageSurface::create(cairo::Format::ARgb32,
+        icon.width as i32,icon.height as i32).map_err(|e|e.to_string())?;
+    let stride=bitmap.stride() as usize;
+    bitmap.with_data(|pixels|{
+        let row_bytes=icon.width as usize*4;
+        for row in 0..icon.height as usize {
+            let dest=row*stride;
+            let source=row*row_bytes;
+            pixels[dest..dest+row_bytes]
+                .copy_from_slice(&icon.bgra[source..source+row_bytes]);
+        }
+    }).map_err(|e|e.to_string())?;
+    bitmap.mark_dirty();
+    cr.save().map_err(|e|e.to_string())?;
+    cr.translate(x,y);
+    cr.scale(scale,scale);
+    let result=(||{
+        cr.set_source_surface(&bitmap,0.0,0.0).map_err(|e|e.to_string())?;
+        cr.paint().map_err(|e|e.to_string())
+    })();
+    cr.restore().map_err(|e|e.to_string())?;
+    result
 }
 
 pub fn render_notification(note: &Notification, style: &Options) -> Result<PixelFrame, String> {
@@ -99,17 +127,62 @@ pub fn render_notification(note: &Notification, style: &Options) -> Result<Pixel
         escape_markup(&format!("{}\\n{}", note.summary, note.body))
     };
 
-    let available_w = (f64::from(width) - (border + padding)*2.0).max(1.0);
-    let available_h = (f64::from(height) - (border + padding)*2.0).max(1.0);
-    context.rectangle(border+padding, border+padding, available_w, available_h);
+    let interior_w=(f64::from(width)-(border+padding)*2.0).max(1.0);
+    let interior_h=(f64::from(height)-(border+padding)*2.0).max(1.0);
+    let mut text_x=border+padding;
+    let mut text_y=border+padding;
+    let mut available_w=interior_w;
+    let mut available_h=interior_h;
+
+    if let Some(icon)=load_note_icon(note,style) {
+        let location=style.get("icon-location").map(String::as_str).unwrap_or("left");
+        let max_size=f64::from(integer_option(style,"max-icon-size",64));
+        let w=f64::from(icon.width);
+        let h=f64::from(icon.height);
+        let horizontal=location=="left"||location=="right";
+        let reserved=if horizontal{available_w}else{available_h};
+        let max_length=(reserved-padding-1.0).max(0.0);
+        let scale=1.0f64.min(max_size/w.max(h))
+            .min(interior_w/w).min(interior_h/h)
+            .min(max_length/if horizontal{w}else{h});
+        if scale>0.0{
+            let (iw,ih)=(w*scale,h*scale);
+            let x=match location {
+                "right"=>f64::from(width)-border-padding-iw,
+                "top"|"bottom"=>border+padding+(interior_w-iw)/2.0,
+                _=>border+padding,
+            };
+            let y=match location {
+                "bottom"=>f64::from(height)-border-padding-ih,
+                "left"|"right"=>border+padding+(interior_h-ih)/2.0,
+                _=>border+padding,
+            };
+            paint_icon(&context,&icon,x,y,scale)?;
+            match location {
+                "right"=>available_w=(available_w-iw-padding).max(1.0),
+                "top"=>{text_y+=ih+padding;available_h=(available_h-ih-padding).max(1.0)},
+                "bottom"=>available_h=(available_h-ih-padding).max(1.0),
+                _=>{text_x+=iw+padding;available_w=(available_w-iw-padding).max(1.0)},
+            }
+        }
+    }
+
+    context.rectangle(text_x, text_y, available_w, available_h);
     context.clip();
-    context.move_to(border+padding, border+padding);
+    context.move_to(text_x, text_y);
     set_color(&context, foreground);
     let layout = pangocairo::functions::create_layout(&context);
     let font = style.get("font").map(String::as_str).unwrap_or("monospace 10");
     layout.set_font_description(Some(&pango::FontDescription::from_string(font)));
     layout.set_width((available_w as i32).saturating_mul(pango::SCALE));
     layout.set_wrap(pango::WrapMode::WordChar);
+    layout.set_height((available_h as i32).saturating_mul(pango::SCALE));
+    layout.set_ellipsize(pango::EllipsizeMode::End);
+    match style.get("text-alignment").map(String::as_str) {
+        Some("center")=>layout.set_alignment(pango::Alignment::Center),
+        Some("right")=>layout.set_alignment(pango::Alignment::Right),
+        _=>layout.set_alignment(pango::Alignment::Left),
+    }
     layout.set_markup(&safe_markup);
     pangocairo::functions::show_layout(&context, &layout);
     drop(layout);
@@ -168,6 +241,33 @@ mod tests {
             body: "Line 2".into(), category: "success".into(),
             ..Request::default() });
         store.active().iter().find(|n| n.id == id).unwrap().clone()
+    }
+
+    #[test]
+    fn draws_a_real_icon_in_left_slot_and_respects_icons_disabled() {
+        let dir=tempfile::tempdir().unwrap();
+        let path=dir.path().join("synthetic.png");
+        let pixbuf=gdk_pixbuf::Pixbuf::new(
+            gdk_pixbuf::Colorspace::Rgb,true,8,12,12
+        ).unwrap();
+        pixbuf.fill(0xFF0000FF);
+        pixbuf.savev(&path,"png",&[]).unwrap();
+        let mut note=fixture();
+        note.app_icon=path.to_string_lossy().into_owned();
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","160"),("height","70"),("padding","4"),
+            ("border-size","0"),("icon-location","left"),
+            ("max-icon-size","16"),("background-color","#305747"),
+        ] {
+            style.insert(key.into(),value.into());
+        }
+        let with=render_notification(&note,&style).unwrap();
+        let at=32usize*with.stride as usize+6*4;
+        assert_eq!(&with.pixels[at..at+4],&[0x00,0x00,0xFF,0xFF]);
+        style.insert("icons".into(),"0".into());
+        let without=render_notification(&note,&style).unwrap();
+        assert_eq!(&without.pixels[at..at+4],&[0x47,0x57,0x30,0xFF]);
     }
 
     #[test]
