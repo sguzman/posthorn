@@ -5,6 +5,7 @@
 //! notification daemon by itself.
 
 pub mod config;
+pub mod format;
 pub mod notification;
 
 pub const MAKO_BASELINE: &str = "v1.11.0";

@@ -5,31 +5,31 @@ Progress is the average of documented atomic task percentages. A task at 100%
 requires acceptance evidence; partial work stays below 100%. Future ideas
 do not count toward Mako MVP. No runtime parity is claimed yet.
 
-## 📯 M0 — Mako parity and MVP inauguration — `███░░░░░░░ 33%`
+## 📯 M0 — Mako parity and MVP inauguration — `████░░░░░░ 38%`
 **Acceptance gate:** Full upstream parity + Hyprland end-to-end QA
 
-### 🧭 P0 — Source baseline and safeguards — `█████████░ 88%`
+### 🧭 P0 — Source baseline and safeguards — `██████████ 96%`
 
 - 📌 T001 — Pin Mako v1.11.0 and document newer delta — `██████████ 100%`
 - 🎨 T002 — Assign OKLab/OKLCH Posthorn color and embed README swatch — `██████████ 100%`
 - 🔐 T003 — Keep live Mako untouched, isolate public test fixtures — `██████████ 100%`
-- 🧪 T004 — Validate Rust scaffold with CI and formatting — `█████░░░░░ 50%`
+- 🧪 T004 — Validate Rust scaffold with CI and formatting — `████████░░ 85%`
 
-### 🧩 P1 — Config, criteria and types port — `█████░░░░░ 48%`
+### 🧩 P1 — Config, criteria and types port — `█████░░░░░ 52%`
 
-- 📄 T101 — Parse Mako configuration sections and ordered overrides — `████████░░ 80%`
+- 📄 T101 — Parse Mako configuration sections and ordered overrides — `██████████ 100%`
 - 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `███████░░░ 70%`
 - 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `██░░░░░░░░ 15%`
 - 📂 T104 — Include files with Mako-compatible path behavior — `████████░░ 75%`
 - 📐 T105 — Type/layout/style parity for all Mako config settings — `░░░░░░░░░░ 0%`
 
-### 📨 P2 — Notification lifecycle and formatting — `████░░░░░░ 39%`
+### 📨 P2 — Notification lifecycle and formatting — `█████░░░░░ 53%`
 
-- 🆔 T201 — Allocate nonzero IDs, replacement by ID and app-scoped tag — `████████░░ 80%`
-- 🗃️ T202 — Bounded in-memory history, close and restore — `████████░░ 80%`
+- 🆔 T201 — Allocate nonzero IDs, replacement by ID and app-scoped tag — `██████████ 100%`
+- 🗃️ T202 — Bounded in-memory history, close and restore — `██████████ 100%`
 - ⏳ T203 — Timeout selection and timer/event scheduling — `████░░░░░░ 35%`
 - 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `░░░░░░░░░░ 0%`
-- 🔤 T205 — Pango markup/escaping, format specifiers and actions — `░░░░░░░░░░ 0%`
+- 🔤 T205 — Pango markup/escaping, format specifiers and actions — `███░░░░░░░ 30%`
 
 ### 🚌 P3 — D-Bus protocol and control surface — `░░░░░░░░░░ 0%`
 

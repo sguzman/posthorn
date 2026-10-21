@@ -54,7 +54,7 @@ impl Selector {
             && parse_bool(value).is_none() {
             return Err(format!("invalid boolean '{value}' for {key}"));
         }
-        if key == "urgency" && !["low", "normal", "critical"].contains(&value) {
+        if key == "urgency" && !["low", "normal", "critical", "high"].contains(&value.to_ascii_lowercase().as_str()) {
             return Err(format!("invalid urgency '{value}'"));
         }
         if key == "group-index" && value.parse::<i32>().is_err() {
@@ -281,7 +281,7 @@ fn parse_selectors(text: &str) -> Result<Vec<Selector>, String> {
 }
 
 fn parse_bool(text: &str) -> Option<bool> {
-    match text { "1" | "true" => Some(true), "0" | "false" => Some(false), _ => None }
+    match text.to_ascii_lowercase().as_str() { "1" | "true" => Some(true), "0" | "false" => Some(false), _ => None }
 }
 
 fn validate_option(key: &str, value: &str) -> Result<(), String> {
@@ -300,7 +300,8 @@ fn validate_option(key: &str, value: &str) -> Result<(), String> {
         }
     } else if key == "max-visible" {
         if value.parse::<i32>().is_ok() { return Ok(()); }
-    } else if STRINGS.contains(&key) { return Ok(()); }
+    } else if key == "format" { return crate::format::decode_format(value).map(|_| ()).map_err(|e| e.to_string()); }
+    else if STRINGS.contains(&key) { return Ok(()); }
     else if DIRECTIONS.contains(&key) {
         let items: Vec<_> = value.split(',').collect();
         if (1..=4).contains(&items.len()) && items.iter().all(|x|x.parse::<i32>().is_ok()) { return Ok(()); }

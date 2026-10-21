@@ -20,7 +20,8 @@ and Clear All, channels, SQLite persistence, and a general local message broker.
 
 See [milestones, phases, tasks, features and percentage bars](docs/ROADMAP.md),
 all calculated from the machine-readable [progress ledger](docs/progress.json).
-Progress reports for this repository should include percentage bars for every
+The [GitHub milestone and phase work queue](docs/ISSUES.md) links all 12
+tracking issues. Progress reports for this repository should include percentage bars for every
 milestone, phase, task, and feature touched by that report; avoid presenting
 unverified work as complete.
 

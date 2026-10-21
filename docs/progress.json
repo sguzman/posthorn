@@ -3,73 +3,385 @@
   "method": "Milestone/phase percentages are the arithmetic mean of atomic task percentages. A task is 100 only when acceptance evidence exists; provisional implementation stays below 100. Future features do not count toward Mako MVP.",
   "milestones": [
     {
-      "id": "M0", "emoji": "📯", "name": "Mako parity and MVP inauguration", "gate": "Full upstream parity + Hyprland end-to-end QA",
+      "id": "M0",
+      "emoji": "📯",
+      "name": "Mako parity and MVP inauguration",
+      "gate": "Full upstream parity + Hyprland end-to-end QA",
       "phases": [
-        {"id":"P0","emoji":"🧭","name":"Source baseline and safeguards","tasks":[
-          {"id":"T001","emoji":"📌","name":"Pin Mako v1.11.0 and document newer delta", "progress":100},
-          {"id":"T002","emoji":"🎨","name":"Assign OKLab/OKLCH Posthorn color and embed README swatch", "progress":100},
-          {"id":"T003","emoji":"🔐","name":"Keep live Mako untouched, isolate public test fixtures", "progress":100},
-          {"id":"T004","emoji":"🧪","name":"Validate Rust scaffold with CI and formatting", "progress":50}
-        ]},
-        {"id":"P1","emoji":"🧩","name":"Config, criteria and types port","tasks":[
-          {"id":"T101","emoji":"📄","name":"Parse Mako configuration sections and ordered overrides", "progress":80},
-          {"id":"T102","emoji":"🔎","name":"Match categories, modes, exact fields, quoted and regex selectors", "progress":70},
-          {"id":"T103","emoji":"🧰","name":"Complete option validation, built-in grouping and escaping semantics", "progress":15},
-          {"id":"T104","emoji":"📂","name":"Include files with Mako-compatible path behavior", "progress":75},
-          {"id":"T105","emoji":"📐","name":"Type/layout/style parity for all Mako config settings", "progress":0}
-        ]},
-        {"id":"P2","emoji":"📨","name":"Notification lifecycle and formatting","tasks":[
-          {"id":"T201","emoji":"🆔","name":"Allocate nonzero IDs, replacement by ID and app-scoped tag", "progress":80},
-          {"id":"T202","emoji":"🗃️","name":"Bounded in-memory history, close and restore", "progress":80},
-          {"id":"T203","emoji":"⏳","name":"Timeout selection and timer/event scheduling", "progress":35},
-          {"id":"T204","emoji":"🔗","name":"Grouping, sorting, hidden placeholder and visibility", "progress":0},
-          {"id":"T205","emoji":"🔤","name":"Pango markup/escaping, format specifiers and actions", "progress":0}
-        ]},
-        {"id":"P3","emoji":"🚌","name":"D-Bus protocol and control surface","tasks":[
-          {"id":"T301","emoji":"📬","name":"Implement org.freedesktop.Notifications methods and signals", "progress":0},
-          {"id":"T302","emoji":"🧾","name":"Implement full Mako D-Bus control interface, properties and JSON", "progress":0},
-          {"id":"T303","emoji":"🔄","name":"Correct startup, bus ownership and config reload behavior", "progress":0}
-        ]},
-        {"id":"P4","emoji":"🪟","name":"Wayland protocol and rendering","tasks":[
-          {"id":"T401","emoji":"🧱","name":"Layer-shell surfaces, anchors, output routing and scaling", "progress":0},
-          {"id":"T402","emoji":"🖌️","name":"Text, icons, colors, borders, progress and layout", "progress":0},
-          {"id":"T403","emoji":"🖱️","name":"Pointer, touch, button bindings and XDG activation", "progress":0}
-        ]},
-        {"id":"P5","emoji":"🎛️","name":"CLI and exact workstation parity","tasks":[
-          {"id":"T501","emoji":"⌨️","name":"Port makoctl operations with compatibility tests", "progress":0},
-          {"id":"T502","emoji":"🔔","name":"Reproduce category colors, per-category sounds and quiet mode", "progress":0},
-          {"id":"T503","emoji":"🧪","name":"End-to-end on Hyprland, notify-send and Edge activation", "progress":0},
-          {"id":"T504","emoji":"🚀","name":"MVP inauguration and opt-in reversible Mako switch", "progress":0}
-        ]}
+        {
+          "id": "P0",
+          "emoji": "🧭",
+          "name": "Source baseline and safeguards",
+          "tasks": [
+            {
+              "id": "T001",
+              "emoji": "📌",
+              "name": "Pin Mako v1.11.0 and document newer delta",
+              "progress": 100
+            },
+            {
+              "id": "T002",
+              "emoji": "🎨",
+              "name": "Assign OKLab/OKLCH Posthorn color and embed README swatch",
+              "progress": 100
+            },
+            {
+              "id": "T003",
+              "emoji": "🔐",
+              "name": "Keep live Mako untouched, isolate public test fixtures",
+              "progress": 100
+            },
+            {
+              "id": "T004",
+              "emoji": "🧪",
+              "name": "Validate Rust scaffold with CI and formatting",
+              "progress": 85
+            }
+          ]
+        },
+        {
+          "id": "P1",
+          "emoji": "🧩",
+          "name": "Config, criteria and types port",
+          "tasks": [
+            {
+              "id": "T101",
+              "emoji": "📄",
+              "name": "Parse Mako configuration sections and ordered overrides",
+              "progress": 100
+            },
+            {
+              "id": "T102",
+              "emoji": "🔎",
+              "name": "Match categories, modes, exact fields, quoted and regex selectors",
+              "progress": 70
+            },
+            {
+              "id": "T103",
+              "emoji": "🧰",
+              "name": "Complete option validation, built-in grouping and escaping semantics",
+              "progress": 15
+            },
+            {
+              "id": "T104",
+              "emoji": "📂",
+              "name": "Include files with Mako-compatible path behavior",
+              "progress": 75
+            },
+            {
+              "id": "T105",
+              "emoji": "📐",
+              "name": "Type/layout/style parity for all Mako config settings",
+              "progress": 0
+            }
+          ]
+        },
+        {
+          "id": "P2",
+          "emoji": "📨",
+          "name": "Notification lifecycle and formatting",
+          "tasks": [
+            {
+              "id": "T201",
+              "emoji": "🆔",
+              "name": "Allocate nonzero IDs, replacement by ID and app-scoped tag",
+              "progress": 100
+            },
+            {
+              "id": "T202",
+              "emoji": "🗃️",
+              "name": "Bounded in-memory history, close and restore",
+              "progress": 100
+            },
+            {
+              "id": "T203",
+              "emoji": "⏳",
+              "name": "Timeout selection and timer/event scheduling",
+              "progress": 35
+            },
+            {
+              "id": "T204",
+              "emoji": "🔗",
+              "name": "Grouping, sorting, hidden placeholder and visibility",
+              "progress": 0
+            },
+            {
+              "id": "T205",
+              "emoji": "🔤",
+              "name": "Pango markup/escaping, format specifiers and actions",
+              "progress": 30
+            }
+          ]
+        },
+        {
+          "id": "P3",
+          "emoji": "🚌",
+          "name": "D-Bus protocol and control surface",
+          "tasks": [
+            {
+              "id": "T301",
+              "emoji": "📬",
+              "name": "Implement org.freedesktop.Notifications methods and signals",
+              "progress": 0
+            },
+            {
+              "id": "T302",
+              "emoji": "🧾",
+              "name": "Implement full Mako D-Bus control interface, properties and JSON",
+              "progress": 0
+            },
+            {
+              "id": "T303",
+              "emoji": "🔄",
+              "name": "Correct startup, bus ownership and config reload behavior",
+              "progress": 0
+            }
+          ]
+        },
+        {
+          "id": "P4",
+          "emoji": "🪟",
+          "name": "Wayland protocol and rendering",
+          "tasks": [
+            {
+              "id": "T401",
+              "emoji": "🧱",
+              "name": "Layer-shell surfaces, anchors, output routing and scaling",
+              "progress": 0
+            },
+            {
+              "id": "T402",
+              "emoji": "🖌️",
+              "name": "Text, icons, colors, borders, progress and layout",
+              "progress": 0
+            },
+            {
+              "id": "T403",
+              "emoji": "🖱️",
+              "name": "Pointer, touch, button bindings and XDG activation",
+              "progress": 0
+            }
+          ]
+        },
+        {
+          "id": "P5",
+          "emoji": "🎛️",
+          "name": "CLI and exact workstation parity",
+          "tasks": [
+            {
+              "id": "T501",
+              "emoji": "⌨️",
+              "name": "Port makoctl operations with compatibility tests",
+              "progress": 0
+            },
+            {
+              "id": "T502",
+              "emoji": "🔔",
+              "name": "Reproduce category colors, per-category sounds and quiet mode",
+              "progress": 0
+            },
+            {
+              "id": "T503",
+              "emoji": "🧪",
+              "name": "End-to-end on Hyprland, notify-send and Edge activation",
+              "progress": 0
+            },
+            {
+              "id": "T504",
+              "emoji": "🚀",
+              "name": "MVP inauguration and opt-in reversible Mako switch",
+              "progress": 0
+            }
+          ]
+        }
       ],
       "features": [
-        {"emoji":"🔔","name":"Desktop notification parity", "progress":0},
-        {"emoji":"🎨","name":"Mako category coloring and sound parity", "progress":0},
-        {"emoji":"📜","name":"Mako history/control API parity", "progress":0}
+        {
+          "emoji": "🔔",
+          "name": "Desktop notification parity",
+          "progress": 0
+        },
+        {
+          "emoji": "🎨",
+          "name": "Mako category coloring and sound parity",
+          "progress": 0
+        },
+        {
+          "emoji": "📜",
+          "name": "Mako history/control API parity",
+          "progress": 0
+        }
       ]
     },
-    {"id":"M1","emoji":"📑","name":"Post-MVP TOML configuration", "phases":[{"id":"P6","emoji":"🧱","name":"TOML compatibility bridge","tasks":[
-      {"id":"T601","emoji":"🔁","name":"Round-trip converter for existing Mako config", "progress":0},
-      {"id":"T602","emoji":"📝","name":"Native TOML schema, validation and migration", "progress":0}
-    ]}], "features":[{"emoji":"📑","name":"TOML configuration","progress":0}]},
-    {"id":"M2","emoji":"🪟","name":"Post-MVP GUI notification center", "phases":[{"id":"P7","emoji":"🖼️","name":"Native history panel","tasks":[
-      {"id":"T701","emoji":"🗂️","name":"Browse and activate previous notifications", "progress":0},
-      {"id":"T702","emoji":"🧹","name":"Clear all, dismiss, grouping and keyboard navigation", "progress":0}
-    ]}], "features":[{"emoji":"🪟","name":"Graphical notification history and clear all","progress":0}]},
-    {"id":"M3","emoji":"📡","name":"Post-MVP channels and general IPC", "phases":[{"id":"P8","emoji":"📨","name":"Local broker protocol","tasks":[
-      {"id":"T801","emoji":"🛤️","name":"Namespace/channel ontology, publish and subscribe", "progress":0},
-      {"id":"T802","emoji":"🔒","name":"Unix socket protocol and permission model", "progress":0}
-    ]}], "features":[{"emoji":"📡","name":"Application-to-application channels","progress":0}]},
-    {"id":"M4","emoji":"🗄️","name":"Post-MVP SQLite persistence", "phases":[{"id":"P9","emoji":"💽","name":"Durable storage","tasks":[
-      {"id":"T901","emoji":"🗃️","name":"SQLite schema, migration and retention policy", "progress":0},
-      {"id":"T902","emoji":"⏪","name":"Durable subscription cursor and message replay", "progress":0}
-    ]}], "features":[{"emoji":"🗄️","name":"SQLite message storage","progress":0}]},
-    {"id":"M5","emoji":"🔀","name":"Post-MVP message broker capabilities", "phases":[{"id":"P10","emoji":"⚙️","name":"Reliable delivery and operations","tasks":[
-      {"id":"T1001","emoji":"📬","name":"Consumer groups, acknowledgments and retries", "progress":0},
-      {"id":"T1002","emoji":"🔍","name":"Observability, searchable streams and policy controls", "progress":0}
-    ]}], "features":[
-      {"emoji":"📥","name":"Work queues and fan-out delivery","progress":0},
-      {"emoji":"🧭","name":"Monitoring and administrative controls","progress":0}
-    ]}
+    {
+      "id": "M1",
+      "emoji": "📑",
+      "name": "Post-MVP TOML configuration",
+      "phases": [
+        {
+          "id": "P6",
+          "emoji": "🧱",
+          "name": "TOML compatibility bridge",
+          "tasks": [
+            {
+              "id": "T601",
+              "emoji": "🔁",
+              "name": "Round-trip converter for existing Mako config",
+              "progress": 0
+            },
+            {
+              "id": "T602",
+              "emoji": "📝",
+              "name": "Native TOML schema, validation and migration",
+              "progress": 0
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "emoji": "📑",
+          "name": "TOML configuration",
+          "progress": 0
+        }
+      ]
+    },
+    {
+      "id": "M2",
+      "emoji": "🪟",
+      "name": "Post-MVP GUI notification center",
+      "phases": [
+        {
+          "id": "P7",
+          "emoji": "🖼️",
+          "name": "Native history panel",
+          "tasks": [
+            {
+              "id": "T701",
+              "emoji": "🗂️",
+              "name": "Browse and activate previous notifications",
+              "progress": 0
+            },
+            {
+              "id": "T702",
+              "emoji": "🧹",
+              "name": "Clear all, dismiss, grouping and keyboard navigation",
+              "progress": 0
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "emoji": "🪟",
+          "name": "Graphical notification history and clear all",
+          "progress": 0
+        }
+      ]
+    },
+    {
+      "id": "M3",
+      "emoji": "📡",
+      "name": "Post-MVP channels and general IPC",
+      "phases": [
+        {
+          "id": "P8",
+          "emoji": "📨",
+          "name": "Local broker protocol",
+          "tasks": [
+            {
+              "id": "T801",
+              "emoji": "🛤️",
+              "name": "Namespace/channel ontology, publish and subscribe",
+              "progress": 0
+            },
+            {
+              "id": "T802",
+              "emoji": "🔒",
+              "name": "Unix socket protocol and permission model",
+              "progress": 0
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "emoji": "📡",
+          "name": "Application-to-application channels",
+          "progress": 0
+        }
+      ]
+    },
+    {
+      "id": "M4",
+      "emoji": "🗄️",
+      "name": "Post-MVP SQLite persistence",
+      "phases": [
+        {
+          "id": "P9",
+          "emoji": "💽",
+          "name": "Durable storage",
+          "tasks": [
+            {
+              "id": "T901",
+              "emoji": "🗃️",
+              "name": "SQLite schema, migration and retention policy",
+              "progress": 0
+            },
+            {
+              "id": "T902",
+              "emoji": "⏪",
+              "name": "Durable subscription cursor and message replay",
+              "progress": 0
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "emoji": "🗄️",
+          "name": "SQLite message storage",
+          "progress": 0
+        }
+      ]
+    },
+    {
+      "id": "M5",
+      "emoji": "🔀",
+      "name": "Post-MVP message broker capabilities",
+      "phases": [
+        {
+          "id": "P10",
+          "emoji": "⚙️",
+          "name": "Reliable delivery and operations",
+          "tasks": [
+            {
+              "id": "T1001",
+              "emoji": "📬",
+              "name": "Consumer groups, acknowledgments and retries",
+              "progress": 0
+            },
+            {
+              "id": "T1002",
+              "emoji": "🔍",
+              "name": "Observability, searchable streams and policy controls",
+              "progress": 0
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "emoji": "📥",
+          "name": "Work queues and fan-out delivery",
+          "progress": 0
+        },
+        {
+          "emoji": "🧭",
+          "name": "Monitoring and administrative controls",
+          "progress": 0
+        }
+      ]
+    }
   ]
 }
