@@ -52,7 +52,10 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
             .and_then(|s|PopupMargins::parse_mako(s))
             .unwrap_or(PopupMargins::uniform(10)));
         let w=style.get("width").and_then(|v|v.parse::<u32>().ok()).unwrap_or(300) as f64;
-        let h=style.get("height").and_then(|v|v.parse::<u32>().ok()).unwrap_or(100) as f64;
+        // Hit-testing must use the same Pango shrink-wrapped height as
+        // the renderer, not the configured maximum.
+        let h=crate::render::measure_notification_height(n,&style)
+            .map_err(error)? as f64;
         (w,h)
     }).collect();
     let gaps=vertical_spacing(&margins);
