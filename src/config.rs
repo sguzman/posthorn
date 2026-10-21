@@ -67,7 +67,15 @@ impl Selector {
         let observed = match self.key.as_str() {
             "app-name" => n.app_name,
             "app-icon" => n.app_icon,
-            "urgency" => n.urgency,
+            "urgency" => {
+                // Mako accepts urgency aliases and compares enum values, not spellings.
+                let expected = self.value.to_ascii_lowercase();
+                let observed = n.urgency.to_ascii_lowercase();
+                return match expected.as_str() {
+                    "high" | "critical" => observed == "critical" || observed == "high",
+                    _ => expected == observed,
+                };
+            },
             "category" => n.category,
             "desktop-entry" => n.desktop_entry,
             "summary" | "summary~" => n.summary,
@@ -229,6 +237,8 @@ impl Config {
                 if !["+priority", "-priority", "+time", "-time"].contains(&value) {
                     return Err(err(&location,"invalid sort order"));
                 }
+                // Mako sets a bit per sort dimension; the last direction wins.
+                self.sort.retain(|existing| &existing[1..] != &value[1..]);
                 self.sort.push(value.into());
             } else {
                 validate_option(key, value).map_err(|e|err(&location,e))?;
@@ -288,7 +298,7 @@ fn validate_option(key: &str, value: &str) -> Result<(), String> {
     const BOOL: &[&str] = &["markup", "actions", "icons", "ignore-timeout", "invisible", "history"];
     const NONNEG: &[&str] = &["width", "height", "border-size", "max-icon-size",
         "icon-border-radius", "default-timeout"];
-    const STRINGS: &[&str] = &["font", "format", "icon-path", "output", "group-by"];
+    const STRINGS: &[&str] = &["font", "icon-path", "output"];
     const COLORS: &[&str] = &["background-color", "text-color", "border-color"];
     const DIRECTIONS: &[&str] = &["padding", "margin", "outer-margin", "border-radius"];
     const BINDS: &[&str] = &["on-button-left", "on-button-right", "on-button-middle", "on-touch", "on-notify"];
@@ -302,6 +312,17 @@ fn validate_option(key: &str, value: &str) -> Result<(), String> {
         if value.parse::<i32>().is_ok() { return Ok(()); }
     } else if key == "format" { return crate::format::decode_format(value).map(|_| ()).map_err(|e| e.to_string()); }
     else if STRINGS.contains(&key) { return Ok(()); }
+    else if key == "group-by" {
+        const FIELDS: &[&str] = &[
+            "app-name", "app-icon", "actionable", "expiring", "urgency",
+            "category", "desktop-entry", "summary", "body", "grouped",
+            "group-index", "anchor", "output", "none",
+        ];
+        // Mako accepts comma-separated criteria *field names*, not selector values.
+        if value.split(',').all(|field| FIELDS.contains(&field)) {
+            return Ok(());
+        }
+    }
     else if DIRECTIONS.contains(&key) {
         let items: Vec<_> = value.split(',').collect();
         if (1..=4).contains(&items.len()) && items.iter().all(|x|x.parse::<i32>().is_ok()) { return Ok(()); }
@@ -367,6 +388,26 @@ mod tests {
         assert!(Config::parse("magic-feature=1\n").is_err());
         assert!(Config::parse("[category=success]\nwidth=0\n").is_err());
         assert!(Config::parse("[summary~=\"(\"]\nwidth=440\n").is_err());
+    }
+    #[test]
+    fn validates_format_and_group_spec_instead_of_accepting_any_string() {
+        assert!(Config::parse("format=%z\n").is_err());
+        assert!(Config::parse("format=<b>%s</b>\\\\n%b\n").is_ok());
+        assert!(Config::parse("group-by=app-name,summary,category\n").is_ok());
+        assert!(Config::parse("group-by=magic-field\n").is_err());
+        assert!(Config::parse("group-by=app-name,,summary\n").is_err());
+    }
+    #[test]
+    fn urgency_matches_upstream_aliases_case_insensitively() {
+        let c = Config::parse("[urgency=HIGH]\nwidth=440\n").unwrap();
+        let mut n = note("general", &["default"]);
+        n.urgency = "critical";
+        assert_eq!(c.style_for(&n)["width"], "440");
+    }
+    #[test]
+    fn repeated_sort_direction_replaces_previous_bit() {
+        let c = Config::parse("sort=+time\nsort=-time\nsort=+priority\n").unwrap();
+        assert_eq!(c.sort, vec!["-time", "+priority"]);
     }
     #[test]
     fn latest_matching_rule_wins() {
