@@ -9,5 +9,6 @@ pub mod dbus;
 pub mod control;
 pub mod format;
 pub mod notification;
+pub mod timers;
 
 pub const MAKO_BASELINE: &str = "v1.11.0";
