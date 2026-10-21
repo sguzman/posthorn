@@ -10,7 +10,7 @@ use crate::grouping::{GroupSpec,group_ordered};
 use crate::notification::{Notification, Urgency};
 use crate::render::{compose_stack, render_notification, PixelFrame};
 use crate::runtime::SharedRuntime;
-use crate::wayland::{LivePresenter, ScreenCorner,PointerClick};
+use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PointerClick};
 
 fn poisoned() -> io::Error { io::Error::other("notification state lock poisoned") }
 fn other(e: impl std::fmt::Display) -> io::Error { io::Error::other(e.to_string()) }
@@ -87,7 +87,10 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<P
             let margin=runtime.config().global.get("margin")
                 .and_then(|s|s.split(',').next())
                 .and_then(|s|s.parse::<i32>().ok()).unwrap_or(10);
-            viewer.update_frame(frame.as_ref(),corner,margin)
+            let layer=runtime.config().global.get("layer")
+                .and_then(|s|PopupLayer::from_mako(s))
+                .unwrap_or(PopupLayer::Top);
+            viewer.update_frame_with_layer(frame.as_ref(),corner,margin,layer)
                 .map_err(other)?;
             previous=notes;
             previous_modes=modes;

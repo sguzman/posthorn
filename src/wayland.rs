@@ -23,6 +23,30 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopupLayer {
+    Background, Bottom, Top, Overlay,
+}
+impl PopupLayer {
+    pub fn from_mako(value:&str)->Option<Self>{
+        match value {
+            "background"=>Some(Self::Background),
+            "bottom"=>Some(Self::Bottom),
+            "top"=>Some(Self::Top),
+            "overlay"=>Some(Self::Overlay),
+            _=>None,
+        }
+    }
+    fn protocol(self)->Layer{
+        match self {
+            Self::Background=>Layer::Background,
+            Self::Bottom=>Layer::Bottom,
+            Self::Top=>Layer::Top,
+            Self::Overlay=>Layer::Overlay,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScreenCorner {
     TopLeft,
     TopCenter,
@@ -377,6 +401,13 @@ impl LivePresenter {
     pub fn update_frame(
         &mut self, frame: Option<&PixelFrame>, corner: ScreenCorner, margin: i32,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        self.update_frame_with_layer(frame,corner,margin,PopupLayer::Top)
+    }
+
+    pub fn update_frame_with_layer(
+        &mut self, frame: Option<&PixelFrame>, corner: ScreenCorner, margin: i32,
+        selected_layer: PopupLayer,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if margin < 0 {return Err("negative margin".into());}
         if let Some(frame) = frame { validate_frame(frame)?; }
         self.clear();
@@ -393,7 +424,7 @@ impl LivePresenter {
         let surface = self.compositor.create_surface(&self.qh, ());
         self.state.active_surface=Some(surface.clone());
         let layer = self.shell.get_layer_surface(
-            &surface, None, Layer::Top, "posthorn-private-preview".into(), &self.qh, (),
+            &surface, None, selected_layer.protocol(), "posthorn-private-preview".into(), &self.qh, (),
         );
         layer.set_anchor(corner.anchors());
         layer.set_size(frame.width, frame.height);
@@ -522,6 +553,15 @@ mod tests {
         assert!(validate_frame(&frame).is_ok());
         assert!(validate_frame(&PixelFrame { pixels: vec![0; 60], ..frame.clone() }).is_err());
         assert!(validate_frame(&PixelFrame { stride: 4, ..frame }).is_err());
+    }
+
+    #[test]
+    fn all_mako_layer_names_translate_without_ambiguity() {
+        assert_eq!(PopupLayer::from_mako("top"),Some(PopupLayer::Top));
+        assert_eq!(PopupLayer::from_mako("overlay"),Some(PopupLayer::Overlay));
+        assert_eq!(PopupLayer::from_mako("bottom"),Some(PopupLayer::Bottom));
+        assert_eq!(PopupLayer::from_mako("background"),Some(PopupLayer::Background));
+        assert_eq!(PopupLayer::from_mako("other"),None);
     }
 
     #[test]
