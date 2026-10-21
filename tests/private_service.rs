@@ -10,7 +10,7 @@ use posthorn::service::{open_private_service, tick_expirations, PRIVATE_BUS_NAME
 use zbus::{Proxy, zvariant::OwnedValue};
 
 #[tokio::test]
-async fn private_service_expires_and_archives_a_notification() -> Result<(), Box<dyn std::error::Error>> {
+async fn private_service_expires_and_archives_a_notification() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = Config::parse(
         "default-timeout=35\nignore-timeout=1\nmax-history=3\n"
     )?;

@@ -12,6 +12,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --all-targets
-      - run: dbus-run-session -- cargo test --test dbus_wire --features dbus-integration
+      - run: dbus-run-session -- cargo test --tests --features dbus-integration
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
       - run: python3 tools/render_roadmap.py && git diff --exit-code -- docs/ROADMAP.md
