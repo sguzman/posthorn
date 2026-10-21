@@ -1,0 +1,179 @@
+//! Mako-compatible app-icon lookup and image decoding.
+//!
+//! The first pass accepts absolute paths, file:// URLs, themed icon names,
+//! and freedesktop pixmaps. Notification image-data hints and SVG theme scaling
+//! are further MVP work. Sender-provided icon names cannot escape search roots.
+
+use std::fs;
+use std::path::{Path,PathBuf};
+use gdk_pixbuf::Pixbuf;
+use crate::config::Options;
+use crate::notification::Notification;
+
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct IconPixels {
+    pub width:u32,
+    pub height:u32,
+    /// Premultiplied little-endian ARGB8888 as Cairo and wl_shm expect.
+    pub bgra:Vec<u8>,
+}
+
+fn hex(b:u8)->Option<u8>{
+    match b {b'0'..=b'9'=>Some(b-b'0'),b'a'..=b'f'=>Some(b-b'a'+10),
+        b'A'..=b'F'=>Some(b-b'A'+10),_=>None}
+}
+
+fn url_decode(input:&str)->Option<String> {
+    let bytes=input.as_bytes();
+    let mut decoded=Vec::with_capacity(bytes.len());
+    let mut i=0;
+    while i<bytes.len(){
+        if bytes[i]==b'%' && i+2<bytes.len(){
+            if let (Some(hi),Some(lo))=(hex(bytes[i+1]),hex(bytes[i+2])){
+                let value=(hi<<4)|lo;
+                if value==0{return None;}
+                decoded.push(value);
+                i+=3;
+                continue;
+            }
+        }
+        decoded.push(bytes[i]);
+        i+=1;
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn valid_icon_name(name:&str)->bool {
+    !name.is_empty()&&name.len()<=1024&&name.bytes().all(|b|
+        b.is_ascii_alphanumeric()||[b'-',b'_',b'.'].contains(&b))
+}
+
+fn icon_files(dir:&Path,name:&str)->Vec<PathBuf>{
+    let Ok(entries)=fs::read_dir(dir) else {return Vec::new()};
+    let prefix=format!("{name}.");
+    entries.flatten().filter_map(|e|{
+        let path=e.path();
+        let good=path.is_file()&&path.file_name()
+            .is_some_and(|n|n.to_string_lossy().starts_with(&prefix));
+        good.then_some(path)
+    }).collect()
+}
+
+/// Mako searches the selected icon theme before falling back to pixmaps.
+/// Filenames are validated so names can't navigate out of a theme directory.
+pub fn resolve_icon(name:&str,path_spec:&str,max_size:u32)->Option<PathBuf>{
+    if name.starts_with('/') {return Some(PathBuf::from(name));}
+    if let Some(uri)=name.strip_prefix("file://"){
+        let path=url_decode(uri)?;
+        return path.starts_with('/').then_some(PathBuf::from(path));
+    }
+    if !valid_icon_name(name){return None;}
+    let themes=path_spec.split(':')
+        .filter(|x|!x.is_empty())
+        .map(PathBuf::from)
+        .chain(std::iter::once(PathBuf::from("/usr/share/icons/hicolor")));
+    for root in themes {
+        let Ok(sizes)=fs::read_dir(root) else {continue};
+        let mut choices=Vec::new();
+        for folder in sizes.flatten() {
+            let size_dir=folder.path();
+            if !size_dir.is_dir(){continue;}
+            let size_str=folder.file_name().to_string_lossy().into_owned();
+            let Some(size)=size_str.split(|c:char|!c.is_ascii_digit())
+                .next().and_then(|s|s.parse::<u32>().ok()) else{continue};
+            let Ok(categories)=fs::read_dir(&size_dir) else{continue};
+            for cat in categories.flatten(){
+                let category=cat.path();
+                if category.is_dir(){
+                    for path in icon_files(&category,name){
+                        choices.push((size,path));
+                    }
+                }
+            }
+        }
+        // Prefer exact size, otherwise largest <= size; fallback to nearest.
+        choices.sort_by(|(a,pa),(b,pb)|{
+            let rank=|v:u32| if v==max_size{(0,0)}
+                else if v<max_size{(1,max_size-v)}
+                else{(2,v-max_size)};
+            rank(*a).cmp(&rank(*b)).then_with(||pa.cmp(pb))
+        });
+        if let Some((_,path))=choices.into_iter().next(){return Some(path);}
+    }
+    icon_files(Path::new("/usr/share/pixmaps"),name).into_iter().next()
+}
+
+/// Read a GdkPixbuf into a bounded, Cairo-compatible ARGB32 buffer.
+pub fn decode_icon(path:&Path)->Option<IconPixels>{
+    let image=Pixbuf::from_file(path).ok()?;
+    let (w,h)=(u32::try_from(image.width()).ok()?,u32::try_from(image.height()).ok()?);
+    if w==0||h==0||w>4096||h>4096||u64::from(w)*u64::from(h)>4_194_304{
+        return None;
+    }
+    let channels=usize::try_from(image.n_channels()).ok()?;
+    let stride=usize::try_from(image.rowstride()).ok()?;
+    if ![3,4].contains(&channels)||image.bits_per_sample()!=8{return None;}
+    let source=image.read_pixel_bytes();
+    let source: &[u8]=source.as_ref();
+    let mut out=vec![0;usize::try_from(u64::from(w)*u64::from(h)*4).ok()?];
+    let row_bytes=(w as usize).checked_mul(channels)?;
+    for y in 0..h as usize {
+        let start=y.checked_mul(stride)?;
+        let src=source.get(start..start.checked_add(row_bytes)?)?;
+        for x in 0..w as usize{
+            let p=&src[x*channels..(x+1)*channels];
+            let a=if channels==4{p[3]}else{255};
+            let to_bg=|v:u8| ->u8{
+                ((u16::from(v)*u16::from(a)+127)/255) as u8
+            };
+            let at=(y*w as usize+x)*4;
+            out[at..at+4].copy_from_slice(&[to_bg(p[2]),to_bg(p[1]),to_bg(p[0]),a]);
+        }
+    }
+    Some(IconPixels{width:w,height:h,bgra:out})
+}
+
+pub fn load_note_icon(note:&Notification,style:&Options)->Option<IconPixels>{
+    if style.get("icons").is_some_and(|v|v=="0"||v=="false"){return None;}
+    if note.app_icon.is_empty(){return None;}
+    let max_size=style.get("max-icon-size").and_then(|s|s.parse().ok()).unwrap_or(64);
+    let path=resolve_icon(&note.app_icon,
+        style.get("icon-path").map(String::as_str).unwrap_or(""),max_size)?;
+    decode_icon(&path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn rejects_traversal_and_decodes_file_uri() {
+        assert!(!valid_icon_name("../payload"));
+        assert!(resolve_icon("../payload","/usr/share/icons",64).is_none());
+        assert!(resolve_icon("bad/file","/usr/share/icons",64).is_none());
+        assert_eq!(resolve_icon("file:///tmp/hello%20world.png","",64),
+            Some(PathBuf::from("/tmp/hello world.png")));
+        assert!(resolve_icon("file:///%00hidden","",64).is_none());
+    }
+
+    #[test]
+    fn themed_lookup_respects_size_and_safe_paths() {
+        let root=tempfile::tempdir().unwrap();
+        for size in [16,48,128] {
+            let folder=root.path().join(format!("{size}x{size}/apps"));
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join("posthorn.png"),b"fixture").unwrap();
+        }
+        assert_eq!(resolve_icon("posthorn",root.path().to_str().unwrap(),64),
+            Some(root.path().join("48x48/apps/posthorn.png")));
+        assert_eq!(resolve_icon("posthorn",root.path().to_str().unwrap(),16),
+            Some(root.path().join("16x16/apps/posthorn.png")));
+    }
+
+    #[test]
+    fn malformed_pixel_data_is_not_accepted_as_an_icon() {
+        let dir=tempfile::tempdir().unwrap();
+        let path=dir.path().join("broken.png");
+        fs::write(&path,b"not an image").unwrap();
+        assert!(decode_icon(&path).is_none());
+    }
+}

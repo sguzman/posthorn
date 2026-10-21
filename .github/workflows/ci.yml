@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libpango1.0-dev libcairo2-dev
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libpango1.0-dev libcairo2-dev libgdk-pixbuf-2.0-dev
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --all-targets
       - run: dbus-run-session -- cargo test --tests --features dbus-integration -- --test-threads=1
