@@ -262,7 +262,7 @@ mod tests {
         ).unwrap();
         let image=service.store.lock().unwrap().active()[0]
             .image_data.clone().expect("image data decoded");
-        assert_eq!(&image.bgra,[0,64,128,128]);
+        assert_eq!(image.bgra.as_slice(), &[0,64,128,128]);
         service.apply_notify("sender",id,"new-icon","Changed","",
             Vec::new(),HashMap::new(),-1).unwrap();
         assert!(service.store.lock().unwrap().active()[0].image_data.is_none());
