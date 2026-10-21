@@ -530,6 +530,11 @@ impl LivePresenter {
         if self.active.as_ref().is_some_and(|live|live.spec==spec){
             return self.redraw_active(frame);
         }
+        // Geometry changes recreate the layer. They must obey the same
+        // outstanding-buffer bound as same-size redraws.
+        if self.retired.len() + usize::from(self.active.is_some()) >= 32 {
+            return Err("Wayland compositor has not released 32 old buffers".into());
+        }
         self.clear();
         // Preserve registered seat and pointer objects across redraws.
         self.state.size = None;
