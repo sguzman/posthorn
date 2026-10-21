@@ -27,7 +27,9 @@ fn four_notification_categories_produce_four_different_pixel_backgrounds() {
             actionable: false, group_index: -1, hidden: false,
         };
         let frame = render_notification(note, &config.style_for(&traits)).unwrap();
-        let idx = (65 * frame.stride as usize) + 130 * 4;
+        // Mako's height setting is a maximum; select a pixel inside
+        // the measured shrink-wrapped frame, not at a fixed y=65.
+        let idx = ((frame.height as usize-4) * frame.stride as usize) + 130 * 4;
         assert_eq!(&frame.pixels[idx..idx+4], &rgb[..], "wrong pixels for {category}");
     }
 }
