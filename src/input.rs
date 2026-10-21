@@ -135,12 +135,22 @@ pub async fn dispatch_click(
 /// The Mako actions=0 option suppresses ActionInvoked, while the matching
 /// click binding may still dismiss the notification.
 pub fn can_invoke_action(runtime:&SharedRuntime,id:u32,key:&str)->io::Result<bool>{
-    let note=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?
-        .active().iter().find(|n|n.id==id).cloned();
+    let config=runtime.config();
+    let (note,group_count)={
+        let store=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?;
+        let note=store.active().iter().find(|n|n.id==id).cloned();
+        let grouping=config.global.get("group-by")
+            .map(String::as_str).unwrap_or("none");
+        let spec=GroupSpec::parse(grouping).map_err(error)?;
+        let count=group_ordered(store.active(),&spec).iter()
+            .find(|group|group.ids.contains(&id))
+            .map(|group|group.ids.len()).unwrap_or(1);
+        (note,count)
+    };
     let Some(note)=note else {return Ok(false)};
     let modes=runtime.modes().lock().map_err(|_|error("mode lock poisoned"))?
         .clone();
-    let style=style_for_note(runtime,&note,&modes);
+    let style=style_for_note_group(runtime,&note,&modes,group_count);
     Ok(style.get("actions").is_none_or(|v|v=="1"||v=="true")
         && note.actions.iter().any(|a|a.key==key))
 }
@@ -215,6 +225,26 @@ mod tests {
         assert!(!can_invoke_action(&runtime,disabled,"default").unwrap());
         assert!(can_invoke_action(&runtime,allowed,"default").unwrap());
         assert!(!can_invoke_action(&runtime,allowed,"unknown").unwrap());
+    }
+
+    #[test]
+    fn grouped_actions_disabled_criterion_suppresses_signal() {
+        let config=Config::parse(
+            "group-by=app-name\n[grouped]\nactions=0\n"
+        ).unwrap();
+        let runtime=SharedRuntime::new(config);
+        let request=||Request{
+            app_name:"grouped-app".into(),
+            actions:vec![crate::notification::Action{
+                key:"default".into(),label:"Open".into(),
+            }],
+            ..Request::default()
+        };
+        let first=runtime.store.lock().unwrap().push(request());
+        assert!(can_invoke_action(&runtime,first,"default").unwrap());
+        let second=runtime.store.lock().unwrap().push(request());
+        assert!(!can_invoke_action(&runtime,first,"default").unwrap());
+        assert!(!can_invoke_action(&runtime,second,"default").unwrap());
     }
 
     #[test]
