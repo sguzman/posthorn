@@ -3,6 +3,7 @@
 //! The D-Bus adapter and timer driver share this state. No database, channels,
 //! or UI code is introduced during the strict Mako MVP port.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -15,6 +16,8 @@ use crate::timers::ExpirationScheduler;
 pub struct SharedRuntime {
     pub store: Arc<Mutex<NotificationStore>>,
     timers: Arc<Mutex<ExpirationScheduler>>,
+    /// Category/mode-specific history setting captured when a message arrives.
+    history_policies: Arc<Mutex<HashMap<u32,bool>>>,
     config: Arc<Config>,
     modes: Arc<Mutex<Vec<String>>>,
 }
@@ -26,6 +29,7 @@ impl SharedRuntime {
         Self {
             store: Arc::new(Mutex::new(store)),
             timers: Arc::new(Mutex::new(ExpirationScheduler::default())),
+            history_policies: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(config),
             modes: Arc::new(Mutex::new(vec!["default".into()])),
         }
@@ -76,6 +80,10 @@ impl SharedRuntime {
         let timeout = note.timeout_ms(default_ms, ignore_sender);
         self.timers.lock().map_err(|_| "expiration scheduler lock poisoned")?
             .set(id, now, timeout);
+        let history=style.get("history")
+            .is_none_or(|v|v=="1"||v.eq_ignore_ascii_case("true"));
+        self.history_policies.lock().map_err(|_| "history policy lock poisoned")?
+            .insert(id,history);
         // Only configured commands are executable, never message fields.
         // Match Mako's quiet-mode on-notify=none override without suppressing
         // the notification or changing its category color.
@@ -96,10 +104,14 @@ impl SharedRuntime {
         -> Result<bool, &'static str>
     {
         let mut store = self.store.lock().map_err(|_| "notification store lock poisoned")?;
-        let closed = store.close(id, reason, save_history, true).is_some();
+        let mut policies=self.history_policies.lock()
+            .map_err(|_| "history policy lock poisoned")?;
+        let history_enabled=policies.get(&id).copied().unwrap_or(true);
+        let closed=store.close(id, reason, save_history, history_enabled).is_some();
         if closed {
             self.timers.lock().map_err(|_| "expiration scheduler lock poisoned")?
                 .cancel(id);
+            policies.remove(&id);
         }
         Ok(closed)
     }
@@ -107,9 +119,19 @@ impl SharedRuntime {
     /// Returns IDs actually expired (already-dismissed timer IDs are ignored).
     pub fn expire(&self, now: Instant) -> Result<Vec<u32>, &'static str> {
         let mut store = self.store.lock().map_err(|_| "notification store lock poisoned")?;
-        let mut timers = self.timers.lock()
-            .map_err(|_| "expiration scheduler lock poisoned")?;
-        Ok(timers.expire_active(now, &mut store, true))
+        let expired=self.timers.lock()
+            .map_err(|_| "expiration scheduler lock poisoned")?
+            .take_expired(now);
+        let mut policies=self.history_policies.lock()
+            .map_err(|_| "history policy lock poisoned")?;
+        let mut closed=Vec::new();
+        for id in expired {
+            let allow_history=policies.remove(&id).unwrap_or(true);
+            if store.close(id,CloseReason::Expired,true,allow_history).is_some() {
+                closed.push(id);
+            }
+        }
+        Ok(closed)
     }
 
     pub fn next_deadline(&self) -> Result<Option<Instant>, &'static str> {
@@ -206,6 +228,52 @@ mod tests {
             Some(first + Duration::from_millis(700)));
         assert!(runtime.expire(first + Duration::from_millis(499)).unwrap().is_empty());
         assert_eq!(runtime.expire(first + Duration::from_millis(700)).unwrap(),vec![id]);
+    }
+
+    #[test]
+    fn per_category_history_rules_apply_on_dismissal_and_expiration() {
+        let config=Config::parse(
+            "default-timeout=100\n[category=transient]\nhistory=0\n"
+        ).unwrap();
+        let runtime=SharedRuntime::new(config);
+        let now=Instant::now();
+        let a=runtime.store.lock().unwrap().push(Request {
+            category:"transient".into(),..Request::default()
+        });
+        let b=runtime.store.lock().unwrap().push(Request {
+            category:"ordinary".into(),..Request::default()
+        });
+        runtime.schedule(a,now).unwrap();
+        runtime.schedule(b,now).unwrap();
+        assert!(runtime.close(a,CloseReason::Dismissed,true).unwrap());
+        assert!(runtime.store.lock().unwrap().history().is_empty());
+        assert_eq!(runtime.expire(now+Duration::from_millis(100)).unwrap(),vec![b]);
+        assert_eq!(runtime.store.lock().unwrap().history()[0].id,b);
+
+        let c=runtime.store.lock().unwrap().push(Request {
+            category:"transient".into(),..Request::default()
+        });
+        runtime.schedule(c,now).unwrap();
+        assert_eq!(runtime.expire(now+Duration::from_millis(100)).unwrap(),vec![c]);
+        assert_eq!(runtime.store.lock().unwrap().history().len(),1);
+    }
+
+    #[test]
+    fn replacing_notification_updates_its_history_policy() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "[category=transient]\nhistory=0\n"
+        ).unwrap());
+        let now=Instant::now();
+        let id=runtime.store.lock().unwrap().push(Request {
+            category:"transient".into(),..Request::default()
+        });
+        runtime.schedule(id,now).unwrap();
+        runtime.store.lock().unwrap().push(Request {
+            replaces_id:id,category:"durable".into(),..Request::default()
+        });
+        runtime.schedule(id,now).unwrap();
+        assert!(runtime.close(id,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(runtime.store.lock().unwrap().history().len(),1);
     }
 
     #[test]
