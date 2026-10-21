@@ -153,6 +153,7 @@ struct ConfigureState {
     pointer_y: f64,
     clicks: Vec<PointerClick>,
     output_names: Vec<(wl_output::WlOutput,String)>,
+    released_buffers: Vec<wl_buffer::WlBuffer>,
 }
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for ConfigureState {
@@ -167,7 +168,16 @@ delegate_noop!(ConfigureState: ignore wl_surface::WlSurface);
 delegate_noop!(ConfigureState: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
 delegate_noop!(ConfigureState: ignore wl_shm::WlShm);
 delegate_noop!(ConfigureState: ignore wl_shm_pool::WlShmPool);
-delegate_noop!(ConfigureState: ignore wl_buffer::WlBuffer);
+impl Dispatch<wl_buffer::WlBuffer, ()> for ConfigureState {
+    fn event(
+        state: &mut Self, buffer: &wl_buffer::WlBuffer, event: wl_buffer::Event,
+        _: &(), _: &Connection, _: &QueueHandle<Self>,
+    ) {
+        if let wl_buffer::Event::Release = event {
+            state.released_buffers.push(buffer.clone());
+        }
+    }
+}
 
 impl Dispatch<wl_output::WlOutput, ()> for ConfigureState {
     fn event(
@@ -410,6 +420,8 @@ pub struct LivePresenter {
     state: ConfigureState,
     _seat: Option<wl_seat::WlSeat>,
     active: Option<LiveSurface>,
+    // Buffers stay allocated until the compositor explicitly releases them.
+    retired: Vec<ShmAllocation>,
 }
 
 #[derive(Clone,Debug,Eq,PartialEq)]
@@ -421,14 +433,25 @@ struct PopupSurfaceSpec {
     output_name:String,
 }
 
+struct ShmAllocation {
+    buffer: wl_buffer::WlBuffer,
+    pool: wl_shm_pool::WlShmPool,
+    // Keep the owned backing file while the compositor holds this buffer.
+    _backing: std::fs::File,
+}
+
+impl ShmAllocation {
+    fn destroy(self) {
+        self.buffer.destroy();
+        self.pool.destroy();
+    }
+}
+
 struct LiveSurface {
     spec:PopupSurfaceSpec,
     layer: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
     surface: wl_surface::WlSurface,
-    buffer: wl_buffer::WlBuffer,
-    pool: wl_shm_pool::WlShmPool,
-    // Retain backing storage until no compositor buffer references it.
-    _backing: std::fs::File,
+    frame: ShmAllocation,
 }
 
 impl LivePresenter {
@@ -455,7 +478,7 @@ impl LivePresenter {
         }
         Ok(Self {
             conn, queue, qh, compositor, shell, shm,
-            state, _seat: seat, active: None,
+            state, _seat: seat, active: None, retired: Vec::new(),
         })
     }
 
@@ -484,6 +507,7 @@ impl LivePresenter {
         margins: PopupMargins, selected_layer: PopupLayer, output_name:&str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(frame) = frame { validate_frame(frame)?; }
+        self.reclaim_released();
         // Poll pending name notifications before resolving the target.
         self.queue.dispatch_pending(&mut self.state)?;
         let output = if output_name.is_empty() {None} else {
@@ -551,7 +575,8 @@ impl LivePresenter {
         surface.commit();
         self.conn.flush()?;
         self.active = Some(LiveSurface {
-            spec,layer,surface,pool,buffer,_backing:backing
+            spec,layer,surface,
+            frame: ShmAllocation { buffer, pool, _backing: backing },
         });
         Ok(())
     }
@@ -563,6 +588,9 @@ impl LivePresenter {
     fn redraw_active(&mut self,frame:&PixelFrame)
         -> Result<(),Box<dyn std::error::Error>>
     {
+        if self.retired.len() >= 32 {
+            return Err("Wayland compositor has not released 32 old buffers".into());
+        }
         let Some(live)=self.active.as_mut() else {
             return Err("cannot redraw an unmapped Wayland notification".into());
         };
@@ -575,15 +603,44 @@ impl LivePresenter {
         live.surface.attach(Some(&buffer),0,0);
         live.surface.damage_buffer(0,0,frame.width as i32,frame.height as i32);
         live.surface.commit();
-        // The compositor retains the committed shm storage independently;
-        // destroy the old client handles only after submitting the new frame.
-        let old_buffer=std::mem::replace(&mut live.buffer,buffer);
-        let old_pool=std::mem::replace(&mut live.pool,pool);
-        live._backing=backing;
-        old_buffer.destroy();
-        old_pool.destroy();
+        // Never destroy or drop the old allocation until wl_buffer.release.
+        // The compositor might still be reading the old frame.
+        let old=std::mem::replace(&mut live.frame,
+            ShmAllocation{buffer,pool,_backing:backing});
+        self.retire(old);
         self.conn.flush()?;
         Ok(())
+    }
+
+    fn retire(&mut self, frame: ShmAllocation) {
+        if let Some(index)=self.state.released_buffers.iter()
+            .position(|buffer|buffer==&frame.buffer)
+        {
+            self.state.released_buffers.swap_remove(index);
+            frame.destroy();
+        } else {
+            self.retired.push(frame);
+        }
+    }
+
+    fn reclaim_released(&mut self) {
+        // Retain the release of an actively attached buffer until it is
+        // replaced; all other releases can be reclaimed immediately.
+        let mut released=std::mem::take(&mut self.state.released_buffers);
+        let active=self.active.as_ref().map(|live|live.frame.buffer.clone());
+        self.retired.retain(|buffer|{
+            if let Some(index)=released.iter().position(|id|id==&buffer.buffer){
+                released.swap_remove(index);
+                buffer.buffer.destroy();
+                buffer.pool.destroy();
+                false
+            }else{
+                true
+            }
+        });
+        self.state.released_buffers=active.into_iter().filter(|a|
+            released.iter().any(|buffer|buffer==a)
+        ).collect();
     }
 
     pub fn poll_events(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -601,6 +658,7 @@ impl LivePresenter {
             if ready { read.read()?; }
         }
         self.queue.dispatch_pending(&mut self.state)?;
+        self.reclaim_released();
         if self.state.closed {
             self.clear();
             self.state.closed = false;
@@ -618,10 +676,9 @@ impl LivePresenter {
         self.state.touch_contacts.clear();
         self.state.clicks.clear();
         if let Some(old) = self.active.take() {
-            old.buffer.destroy();
-            old.pool.destroy();
             old.layer.destroy();
             old.surface.destroy();
+            self.retire(old.frame);
         }
     }
 }
@@ -629,6 +686,11 @@ impl LivePresenter {
 impl Drop for LivePresenter {
     fn drop(&mut self) {
         self.clear();
+        // At connection teardown the compositor releases its references;
+        // proactively destroy the remaining client-side handles.
+        for frame in self.retired.drain(..) {
+            frame.destroy();
+        }
         let _ = self.conn.flush();
     }
 }
