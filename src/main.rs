@@ -72,21 +72,13 @@ async fn main() -> ExitCode {
             }
         }
         (Some("--experimental-private-desktop"), Some(path)) => {
-            let config = match Config::from_path(Path::new(&path)) {
-                Ok(config) => config,
-                Err(err) => { eprintln!("{err}"); return ExitCode::FAILURE; }
-            };
-            match posthorn::desktop::run_private_desktop(config).await {
+            match posthorn::desktop::run_private_desktop_from_path(Path::new(&path)).await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(err) => { eprintln!("Posthorn private desktop failed: {err}"); ExitCode::FAILURE }
             }
         }
         (Some("--experimental-private-service"), Some(path)) => {
-            let config = match Config::from_path(Path::new(&path)) {
-                Ok(config) => config,
-                Err(error) => { eprintln!("{error}"); return ExitCode::FAILURE; }
-            };
-            match posthorn::service::run_private_service(config).await {
+            match posthorn::service::run_private_service_from_path(Path::new(&path)).await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(error) => { eprintln!("Posthorn test D-Bus service failed: {error}"); ExitCode::FAILURE }
             }

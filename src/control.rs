@@ -65,7 +65,8 @@ impl MakoControl {
                 // currently displayed notification. If grouping is disabled,
                 // this reduces to exactly one notification.
                 let spec = if let Some(runtime) = &self.runtime {
-                    let raw = runtime.config().global.get("group-by")
+                    let config=runtime.config();
+                    let raw = config.global.get("group-by")
                         .map(String::as_str).unwrap_or("none");
                     GroupSpec::parse(raw).map_err(|e|
                         zbus::fdo::Error::NotSupported(e)
@@ -257,10 +258,16 @@ impl MakoControl {
     }
 
     #[zbus(name = "Reload")]
-    fn reload(&self) -> zbus::fdo::Result<()> {
-        Err(zbus::fdo::Error::NotSupported(
-            "reload requires a live config path and surface integration".into(),
-        ))
+    async fn reload(
+        &self, #[zbus(connection)] conn:&Connection
+    ) -> zbus::fdo::Result<()> {
+        let runtime=self.runtime.as_ref().ok_or_else(||zbus::fdo::Error::NotSupported(
+            "no file-backed runtime is attached".into()
+        ))?;
+        runtime.reload().map_err(|e|zbus::fdo::Error::Failed(e))?;
+        crate::signals::invalidate(conn,"Notifications").await
+            .map_err(|e|zbus::fdo::Error::Failed(e.to_string()))?;
+        Ok(())
     }
 }
 

@@ -40,6 +40,7 @@ pub fn style_for_note(
 pub fn style_for_note_group(
     runtime:&SharedRuntime,n:&Notification,modes:&[String],group_count:usize,
 )->Options {
+    let config=runtime.config();
     let mode_views: Vec<&str>=modes.iter().map(String::as_str).collect();
     let traits=Traits {
         app_name:&n.app_name, app_icon:&n.app_icon, category:&n.category,
@@ -47,14 +48,14 @@ pub fn style_for_note_group(
         urgency:match n.urgency {
             Urgency::Low=>"low",Urgency::Normal=>"normal",Urgency::Critical=>"critical"
         },
-        anchor:runtime.config().global.get("anchor")
+        anchor:config.global.get("anchor")
             .map(String::as_str).unwrap_or("top-right"),
         output:"",modes:&mode_views,
         requested_timeout_ms:n.requested_timeout_ms,
         actionable:!n.actions.is_empty(),
         group_index:if group_count>=2{0}else{-1},hidden:false,
     };
-    runtime.config().style_for(&traits)
+    config.style_for(&traits)
 }
 
 /// Select only the first visible member from each Mako grouping pass.
@@ -69,11 +70,12 @@ pub fn visible_notifications(runtime:&SharedRuntime)->io::Result<Vec<Notificatio
 pub fn visible_members(runtime:&SharedRuntime)
     -> io::Result<Vec<(Notification,usize)>>
 {
-    let limit=runtime.config().global.get("max-visible")
+    let config=runtime.config();
+    let limit=config.global.get("max-visible")
         .and_then(|v|v.parse::<i32>().ok()).unwrap_or(5);
     // Upstream Mako treats negative max-visible as unlimited.
     let max_visible=if limit<0 {usize::MAX} else {limit as usize};
-    let spec=runtime.config().global.get("group-by")
+    let spec=config.global.get("group-by")
         .map(String::as_str).unwrap_or("none");
     let spec=GroupSpec::parse(spec).map_err(other)?;
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
@@ -99,7 +101,8 @@ pub fn visible_members(runtime:&SharedRuntime)
 /// Count real groups eligible for display, excluding explicitly invisible
 /// categories. This excludes them from synthetic hidden-count placeholders.
 pub fn displayable_groups(runtime:&SharedRuntime)->io::Result<usize>{
-    let group_spec=runtime.config().global.get("group-by")
+    let config=runtime.config();
+    let group_spec=config.global.get("group-by")
         .map(String::as_str).unwrap_or("none");
     let spec=GroupSpec::parse(group_spec).map_err(other)?;
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
@@ -121,6 +124,7 @@ pub fn displayable_groups(runtime:&SharedRuntime)->io::Result<usize>{
 /// Render the active, ordered messages at the present instant, including
 /// configured category colors. Returns None for an empty notification list.
 pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> {
+    let config=runtime.config();
     let notes=visible_members(runtime)?;
     let displayable=displayable_groups(runtime)?;
     let total=runtime.store.lock().map_err(|_|poisoned())?.active().len();
@@ -142,12 +146,12 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
         let traits=Traits{
             app_name:"",app_icon:"",category:"",desktop_entry:"",
             summary:"",body:"",urgency:"normal",
-            anchor:runtime.config().global.get("anchor")
+            anchor:config.global.get("anchor")
                 .map(String::as_str).unwrap_or("top-right"),
             output:"",modes:&mode_views,requested_timeout_ms:-1,
             actionable:false,group_index:-1,hidden:true,
         };
-        let style=runtime.config().style_for(&traits);
+        let style=config.style_for(&traits);
         if !style.get("invisible").is_some_and(|x|x=="1"||x=="true"){
             frames.push(render_hidden_placeholder(hidden,total,&style).map_err(other)?);
             margins.push(style.get("margin")
@@ -155,7 +159,7 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
                 .unwrap_or(PopupMargins::uniform(10)));
         }
     }
-    let align=stack_alignment(runtime.config().global.get("anchor")
+    let align=stack_alignment(config.global.get("anchor")
         .map(String::as_str).unwrap_or("top-right"));
     compose_stack_spaced(&frames,&vertical_spacing(&margins),align).map_err(other)
 }
@@ -163,25 +167,29 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
 fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<PointerClick>) -> io::Result<()> {
     let mut viewer=LivePresenter::connect().map_err(other)?;
     let (mut previous, mut previous_modes)=(Vec::new(),Vec::new());
+    let mut previous_revision=u64::MAX;
     loop {
         let notes: Vec<_>=runtime.store.lock().map_err(|_|poisoned())?
             .active().iter().cloned().collect();
         let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
-        if notes!=previous || modes!=previous_modes {
+        let revision=runtime.revision();
+        if notes!=previous || modes!=previous_modes || revision!=previous_revision {
+            let config=runtime.config();
             let frame=snapshot_frame(&runtime)?;
-            let corner=runtime.config().global.get("anchor")
+            let corner=config.global.get("anchor")
                 .and_then(|s|ScreenCorner::from_mako(s))
                 .unwrap_or(ScreenCorner::TopRight);
-            let margins=runtime.config().global.get("margin")
+            let margins=config.global.get("margin")
                 .and_then(|s|PopupMargins::parse_mako(s))
                 .unwrap_or(PopupMargins::uniform(10));
-            let layer=runtime.config().global.get("layer")
+            let layer=config.global.get("layer")
                 .and_then(|s|PopupLayer::from_mako(s))
                 .unwrap_or(PopupLayer::Top);
             viewer.update_frame_with_options(frame.as_ref(),corner,margins,layer)
                 .map_err(other)?;
             previous=notes;
             previous_modes=modes;
+            previous_revision=revision;
         }
         viewer.poll_events().map_err(other)?;
         for click in viewer.take_clicks() {
@@ -198,6 +206,19 @@ pub async fn run_private_desktop(config: crate::config::Config)
     -> Result<(),Box<dyn std::error::Error + Send + Sync>>
 {
     let (conn,runtime)=crate::service::open_private_service(config).await?;
+    run_private_desktop_instance(conn,runtime).await
+}
+
+pub async fn run_private_desktop_from_path(path:&std::path::Path)
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=crate::service::open_private_service_from_path(path).await?;
+    run_private_desktop_instance(conn,runtime).await
+}
+
+async fn run_private_desktop_instance(conn:zbus::Connection,runtime:SharedRuntime)
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
     let visual_runtime=runtime.clone();
     let (sender,mut clicks)=tokio::sync::mpsc::unbounded_channel();
     let mut visual=tokio::task::spawn_blocking(move || render_loop(visual_runtime,sender));

@@ -4,6 +4,7 @@
 //! org.freedesktop.Notifications, so it cannot replace Mako by accident.
 //! Display integration and final compositor behavior remain future MVP work.
 
+use std::path::Path;
 use std::time::Duration;
 
 use zbus::{connection, Connection};
@@ -21,7 +22,12 @@ pub const PRIVATE_BUS_NAME: &str = "org.posthorn.Development";
 async fn open_named_service(config: Config, name: &str)
     -> zbus::Result<(Connection, SharedRuntime)>
 {
-    let runtime = SharedRuntime::new(config);
+    open_named_runtime(SharedRuntime::new(config),name).await
+}
+
+async fn open_named_runtime(runtime:SharedRuntime,name:&str)
+    -> zbus::Result<(Connection,SharedRuntime)>
+{
     let conn = connection::Builder::session()?
         .name(name)?
         .serve_at(OBJECT_PATH, FreedesktopNotifications::with_runtime(runtime.clone()))?
@@ -29,6 +35,14 @@ async fn open_named_service(config: Config, name: &str)
         .build()
         .await?;
     Ok((conn, runtime))
+}
+
+/// A private service with reload enabled for its explicit config path.
+pub async fn open_private_service_from_path(path:&Path)
+    -> Result<(Connection,SharedRuntime),Box<dyn std::error::Error+Send+Sync>>
+{
+    let runtime=SharedRuntime::from_path(path)?;
+    Ok(open_named_runtime(runtime,PRIVATE_BUS_NAME).await?)
 }
 
 /// Construct the private test daemon. It never uses Mako's real bus name.
@@ -65,6 +79,19 @@ pub async fn run_private_service(config: Config)
     -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 {
     let (conn, runtime) = open_private_service(config).await?;
+    run_private_service_instance(conn,runtime).await
+}
+
+pub async fn run_private_service_from_path(path:&Path)
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service_from_path(path).await?;
+    run_private_service_instance(conn,runtime).await
+}
+
+async fn run_private_service_instance(conn:Connection,runtime:SharedRuntime)
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
     eprintln!(
         "Posthorn headless development service on {PRIVATE_BUS_NAME};          no Wayland popups; Mako remains the desktop notification daemon"
     );

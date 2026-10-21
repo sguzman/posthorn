@@ -4,7 +4,9 @@
 //! or UI code is introduced during the strict Mako MVP port.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::path::{Path,PathBuf};
+use std::sync::atomic::{AtomicU64,Ordering};
+use std::sync::{Arc, Mutex,RwLock};
 use std::time::Instant;
 
 use crate::config::{Config, Traits};
@@ -18,7 +20,9 @@ pub struct SharedRuntime {
     timers: Arc<Mutex<ExpirationScheduler>>,
     /// Category/mode-specific history setting captured when a message arrives.
     history_policies: Arc<Mutex<HashMap<u32,bool>>>,
-    config: Arc<Config>,
+    config: Arc<RwLock<Arc<Config>>>,
+    source_path: Option<Arc<PathBuf>>,
+    revision: Arc<AtomicU64>,
     modes: Arc<Mutex<Vec<String>>>,
 }
 
@@ -30,12 +34,49 @@ impl SharedRuntime {
             store: Arc::new(Mutex::new(store)),
             timers: Arc::new(Mutex::new(ExpirationScheduler::default())),
             history_policies: Arc::new(Mutex::new(HashMap::new())),
-            config: Arc::new(config),
+            config: Arc::new(RwLock::new(Arc::new(config))),
+            source_path: None,
+            revision: Arc::new(AtomicU64::new(0)),
             modes: Arc::new(Mutex::new(vec!["default".into()])),
         }
     }
 
-    pub fn config(&self) -> &Config { &self.config }
+    /// Return one immutable configuration snapshot. Readers never see a
+    /// partially parsed or partially installed replacement.
+    pub fn config(&self)->Arc<Config>{
+        self.config.read().expect("config read lock poisoned").clone()
+    }
+
+    pub fn revision(&self)->u64{
+        self.revision.load(Ordering::Acquire)
+    }
+
+    pub fn from_path(path:&Path)->Result<Self,crate::config::ConfigError>{
+        let mut runtime=Self::new(Config::from_path(path)?);
+        runtime.source_path=Some(Arc::new(path.to_path_buf()));
+        Ok(runtime)
+    }
+
+    /// Reload only a source-backed instance. Parse before taking the write
+    /// lock; invalid or missing files never displace the working config.
+    pub fn reload(&self)->Result<(),String>{
+        let path=self.source_path.as_ref()
+            .ok_or("reload requires a configuration file path")?;
+        let updated=Config::from_path(path).map_err(|e|e.to_string())?;
+        let sort=SortPolicy::from_config(&updated.sort);
+        let max_history=updated.max_history;
+        // Store and new configuration are updated under the same gate used
+        // by the notification lifecycle. Existing deadlines stay unchanged.
+        let mut store=self.store.lock()
+            .map_err(|_|"notification store lock poisoned")?;
+        let mut active=self.config.write()
+            .map_err(|_|"config write lock poisoned")?;
+        *active=Arc::new(updated);
+        store.set_sort_policy(sort);
+        store.set_max_history(max_history);
+        self.revision.fetch_add(1,Ordering::Release);
+        Ok(())
+    }
 
     pub fn modes(&self) -> Arc<Mutex<Vec<String>>> {
         Arc::clone(&self.modes)
@@ -54,6 +95,7 @@ impl SharedRuntime {
     }
 
     fn schedule_impl(&self, id: u32, now: Instant, run_hook: bool) -> Result<(), &'static str> {
+        let config=self.config();
         let store = self.store.lock().map_err(|_| "notification store lock poisoned")?;
         let note = store.active().iter().find(|n| n.id == id)
             .ok_or("notification is not active")?;
@@ -68,12 +110,12 @@ impl SharedRuntime {
                 crate::notification::Urgency::Normal => "normal",
                 crate::notification::Urgency::Critical => "critical",
             },
-            anchor: self.config.global.get("anchor").map(String::as_str).unwrap_or("top-right"),
+            anchor: config.global.get("anchor").map(String::as_str).unwrap_or("top-right"),
             output: "", modes: &mode_views,
             requested_timeout_ms: note.requested_timeout_ms,
             actionable: !note.actions.is_empty(), group_index: -1, hidden: false,
         };
-        let style = self.config.style_for(&traits);
+        let style = config.style_for(&traits);
         let default_ms = style.get("default-timeout")
             .and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
         let ignore_sender = style.get("ignore-timeout")
@@ -274,6 +316,35 @@ mod tests {
         });
         runtime.schedule(id,now).unwrap();
         assert!(runtime.close(id,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(runtime.store.lock().unwrap().history().len(),1);
+    }
+
+    #[test]
+    fn reload_replaces_valid_source_atomically_and_preserves_invalid_source() {
+        let dir=tempfile::tempdir().unwrap();
+        let path=dir.path().join("mako.conf");
+        std::fs::write(&path,
+            "default-timeout=500\nbackground-color=#305747\nmax-history=5\n").unwrap();
+        let runtime=SharedRuntime::from_path(&path).unwrap();
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        let now=Instant::now();
+        runtime.schedule_without_hook(id,now).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),Some(now+Duration::from_millis(500)));
+        std::fs::write(&path,"default-timeout=broken\n").unwrap();
+        assert!(runtime.reload().is_err());
+        assert_eq!(runtime.revision(),0);
+        assert_eq!(runtime.config().global["background-color"],"#305747");
+        std::fs::write(&path,
+            "default-timeout=800\nbackground-color=#684148\nmax-history=1\n").unwrap();
+        runtime.reload().unwrap();
+        assert_eq!(runtime.revision(),1);
+        assert_eq!(runtime.config().global["background-color"],"#684148");
+        assert_eq!(runtime.next_deadline().unwrap(),Some(now+Duration::from_millis(500)));
+        let other=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(other,now).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),Some(now+Duration::from_millis(500)));
+        assert_eq!(runtime.expire(now+Duration::from_millis(500)).unwrap(),vec![id]);
+        assert_eq!(runtime.expire(now+Duration::from_millis(800)).unwrap(),vec![other]);
         assert_eq!(runtime.store.lock().unwrap().history().len(),1);
     }
 

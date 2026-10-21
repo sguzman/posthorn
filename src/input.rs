@@ -32,6 +32,7 @@ fn ordered_visible(runtime:&SharedRuntime) -> io::Result<(Vec<(Notification,usiz
 pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
     -> io::Result<Option<(u32,NotifyBinding)>>
 {
+    let config=runtime.config();
     if !click.x.is_finite()||!click.y.is_finite()||click.x<0.0||click.y<0.0 {
         return Ok(None);
     }
@@ -61,7 +62,7 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
     }).collect::<io::Result<Vec<_>>>()?;
     let gaps=vertical_spacing(&margins);
     let max_width=dimensions.iter().map(|(w,_)|*w).fold(0.0f64,f64::max);
-    let align=stack_alignment(runtime.config().global.get("anchor")
+    let align=stack_alignment(config.global.get("anchor")
         .map(String::as_str).unwrap_or("top-right"));
     let mut y=0.0f64;
     for (index,((n,count),(w,h))) in notes.iter().zip(dimensions.iter().copied()).enumerate() {
@@ -103,6 +104,7 @@ pub async fn dispatch_click(
     conn:&Connection,runtime:&SharedRuntime,click:PointerClick,
 ) -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
+    let config=runtime.config();
     let Some((id,binding))=hit_test(runtime,click)? else {return Ok(())};
     match binding {
         NotifyBinding::None=>{}
@@ -114,7 +116,7 @@ pub async fn dispatch_click(
             for id in ids {closed(conn,runtime,id,true).await?;}
         }
         NotifyBinding::DismissGroup=>{
-            let raw=runtime.config().global.get("group-by")
+            let raw=config.global.get("group-by")
                 .map(String::as_str).unwrap_or("none");
             let spec=GroupSpec::parse(raw).map_err(error)?;
             let ids={
