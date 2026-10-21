@@ -57,3 +57,20 @@ async fn private_service_expires_and_archives_a_notification() -> Result<(), Box
         "dismissed notification must not retain an expiration timer");
     Ok(())
 }
+
+#[tokio::test]
+async fn private_control_menu_invokes_existing_action_without_shell()
+    -> Result<(),Box<dyn std::error::Error + Send + Sync>>
+{
+    use posthorn::ctl::{execute,Command};
+    let (conn,_runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let id:u32=desktop.call("Notify",&(
+        "menu-fixture",0u32,"","Title","Body",
+        vec!["default".to_owned(),"Open".to_owned()],
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert!(id>0);
+    execute(Command::Menu{id,program:vec!["cat".into()]}).await?;
+    Ok(())
+}
