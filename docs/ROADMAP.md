@@ -5,7 +5,7 @@ Progress is the average of documented atomic task percentages. A task at 100%
 requires acceptance evidence; partial work stays below 100%. Future ideas
 do not count toward Mako MVP. No runtime parity is claimed yet.
 
-## 📯 M0 — Mako parity and MVP inauguration — `███████░░░ 72%`
+## 📯 M0 — Mako parity and MVP inauguration — `███████░░░ 73%`
 **Acceptance gate:** Full upstream parity + Hyprland end-to-end QA
 
 ### 🧭 P0 — Source baseline and safeguards — `██████████ 99%`
@@ -15,20 +15,20 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🔐 T003 — Keep live Mako untouched, isolate public test fixtures — `██████████ 100%`
 - 🧪 T004 — Validate Rust scaffold with CI and formatting — `██████████ 97%`
 
-### 🧩 P1 — Config, criteria and types port — `███████░░░ 70%`
+### 🧩 P1 — Config, criteria and types port — `███████░░░ 73%`
 
 - 📄 T101 — Parse Mako configuration sections and ordered overrides — `██████████ 100%`
 - 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `████████░░ 84%`
-- 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `█████░░░░░ 54%`
+- 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `██████░░░░ 57%`
 - 📂 T104 — Include files with Mako-compatible path behavior — `████████░░ 75%`
-- 📐 T105 — Type/layout/style parity for all Mako config settings — `████░░░░░░ 38%`
+- 📐 T105 — Type/layout/style parity for all Mako config settings — `█████░░░░░ 49%`
 
-### 📨 P2 — Notification lifecycle and formatting — `█████████░ 86%`
+### 📨 P2 — Notification lifecycle and formatting — `█████████░ 87%`
 
 - 🆔 T201 — Allocate nonzero IDs, replacement by ID and app-scoped tag — `██████████ 100%`
 - 🗃️ T202 — Bounded in-memory history, close and restore — `██████████ 100%`
 - ⏳ T203 — Timeout selection and timer/event scheduling — `█████████░ 89%`
-- 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `████████░░ 77%`
+- 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `████████░░ 81%`
 - 🔤 T205 — Pango markup/escaping, format specifiers and actions — `███████░░░ 65%`
 
 ### 🚌 P3 — D-Bus protocol and control surface — `███████░░░ 72%`
@@ -37,11 +37,11 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `████████░░ 75%`
 - 🔄 T303 — Correct startup, bus ownership and config reload behavior — `██████░░░░ 57%`
 
-### 🪟 P4 — Wayland protocol and rendering — `████████░░ 75%`
+### 🪟 P4 — Wayland protocol and rendering — `████████░░ 78%`
 
-- 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `████████░░ 82%`
-- 🖌️ T402 — Text, icons, colors, borders, progress and layout — `█████████░ 90%`
-- 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `█████░░░░░ 54%`
+- 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `████████░░ 84%`
+- 🖌️ T402 — Text, icons, colors, borders, progress and layout — `█████████░ 92%`
+- 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `██████░░░░ 59%`
 
 ### 🎛️ P5 — CLI and exact workstation parity — `███░░░░░░░ 27%`
 
@@ -52,7 +52,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 **Feature inventory** (separate from task-based milestone percentage):
 
-- 🔔 Desktop notification parity — `██████░░░░ 62%`
+- 🔔 Desktop notification parity — `███████░░░ 65%`
 - 🎨 Mako category coloring and sound parity — `████░░░░░░ 40%`
 - 📜 Mako history/control API parity — `███████░░░ 73%`
 

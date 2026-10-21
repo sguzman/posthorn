@@ -60,7 +60,7 @@
               "id": "T103",
               "emoji": "🧰",
               "name": "Complete option validation, built-in grouping and escaping semantics",
-              "progress": 54
+              "progress": 57
             },
             {
               "id": "T104",
@@ -72,7 +72,7 @@
               "id": "T105",
               "emoji": "📐",
               "name": "Type/layout/style parity for all Mako config settings",
-              "progress": 38
+              "progress": 49
             }
           ]
         },
@@ -103,7 +103,7 @@
               "id": "T204",
               "emoji": "🔗",
               "name": "Grouping, sorting, hidden placeholder and visibility",
-              "progress": 77
+              "progress": 81
             },
             {
               "id": "T205",
@@ -147,19 +147,19 @@
               "id": "T401",
               "emoji": "🧱",
               "name": "Layer-shell surfaces, anchors, output routing and scaling",
-              "progress": 82
+              "progress": 84
             },
             {
               "id": "T402",
               "emoji": "🖌️",
               "name": "Text, icons, colors, borders, progress and layout",
-              "progress": 90
+              "progress": 92
             },
             {
               "id": "T403",
               "emoji": "🖱️",
               "name": "Pointer, touch, button bindings and XDG activation",
-              "progress": 54
+              "progress": 59
             }
           ]
         },
@@ -199,7 +199,7 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 62
+          "progress": 65
         },
         {
           "emoji": "🎨",
