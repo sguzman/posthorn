@@ -21,6 +21,7 @@ pub const CONTROL_PATH: &str = "/fr/emersion/Mako";
 pub struct MakoControl {
     store: Arc<Mutex<NotificationStore>>,
     modes: Arc<Mutex<Vec<String>>>,
+    runtime: Option<SharedRuntime>,
 }
 
 impl MakoControl {
@@ -28,12 +29,13 @@ impl MakoControl {
         Self {
             store,
             modes: Arc::new(Mutex::new(vec!["default".into()])),
+            runtime: None,
         }
     }
 
     /// Share active modes with the same runtime used by the D-Bus receiver.
     pub fn with_runtime(runtime: SharedRuntime) -> Self {
-        Self { store: Arc::clone(&runtime.store), modes: runtime.modes() }
+        Self { store: Arc::clone(&runtime.store), modes: runtime.modes(), runtime: Some(runtime) }
     }
 
     fn snapshot(&self, history: bool) -> zbus::fdo::Result<Vec<HashMap<String, OwnedValue>>> {
@@ -59,18 +61,26 @@ impl MakoControl {
                 "group dismissal awaits the Mako group-by port".into(),
             ));
         }
-        let mut store = self.store.lock().map_err(|_| internal_error())?;
-        let ids = if all {
-            store.active().iter().map(|n| n.id).collect::<Vec<_>>()
-        } else if id == 0 {
-            store.active().front().map(|n| vec![n.id]).unwrap_or_default()
-        } else if store.active().iter().any(|n| n.id == id) {
-            vec![id]
-        } else {
-            Vec::new()
+        let ids = {
+            let store = self.store.lock().map_err(|_| internal_error())?;
+            if all {
+                store.active().iter().map(|n| n.id).collect::<Vec<_>>()
+            } else if id == 0 {
+                store.active().front().map(|n| vec![n.id]).unwrap_or_default()
+            } else if store.active().iter().any(|n| n.id == id) {
+                vec![id]
+            } else {
+                Vec::new()
+            }
         };
         for notification_id in &ids {
-            store.close(*notification_id, CloseReason::Dismissed, history, true);
+            if let Some(runtime) = &self.runtime {
+                runtime.close(*notification_id, CloseReason::Dismissed, history)
+                    .map_err(|e| zbus::fdo::Error::Failed(e.into()))?;
+            } else {
+                self.store.lock().map_err(|_| internal_error())?
+                    .close(*notification_id, CloseReason::Dismissed, history, true);
+            }
         }
         Ok(ids)
     }
@@ -178,6 +188,10 @@ impl MakoControl {
         &self, #[zbus(connection)] conn: &Connection,
     ) -> zbus::fdo::Result<()> {
         let restored = self.store.lock().map_err(|_| internal_error())?.restore();
+        if let (Some(runtime), Some(id)) = (&self.runtime, restored) {
+            runtime.schedule_without_hook(id, std::time::Instant::now())
+                .map_err(|e| zbus::fdo::Error::Failed(e.into()))?;
+        }
         if restored.is_some() {
             crate::signals::invalidate(conn, "Notifications").await
                 .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;

@@ -40,6 +40,16 @@ impl SharedRuntime {
     /// Schedule the latest snapshot, never an earlier replaced payload.
     /// Lock order is store -> scheduler everywhere to avoid deadlocks.
     pub fn schedule(&self, id: u32, now: Instant) -> Result<(), &'static str> {
+        self.schedule_impl(id, now, true)
+    }
+
+    /// Restore already-seen notifications without replaying the on-notify
+    /// sound or any configured external hook.
+    pub fn schedule_without_hook(&self, id: u32, now: Instant) -> Result<(), &'static str> {
+        self.schedule_impl(id, now, false)
+    }
+
+    fn schedule_impl(&self, id: u32, now: Instant, run_hook: bool) -> Result<(), &'static str> {
         let store = self.store.lock().map_err(|_| "notification store lock poisoned")?;
         let note = store.active().iter().find(|n| n.id == id)
             .ok_or("notification is not active")?;
@@ -73,7 +83,7 @@ impl SharedRuntime {
             .and_then(|s| NotifyBinding::parse(s).ok());
         drop(modes);
         drop(store);
-        if let Some(NotifyBinding::Exec(command)) = binding {
+        if let (true, Some(NotifyBinding::Exec(command))) = (run_hook, binding) {
             if let Err(error) = NotifyBinding::Exec(command).run_exec(id) {
                 eprintln!("posthorn on-notify hook failed: {error}");
             }
@@ -178,6 +188,24 @@ mod tests {
         let id = runtime.store.lock().unwrap().push(Request::default());
         runtime.schedule(id, Instant::now()).unwrap();
         assert!(runtime.next_deadline().unwrap().is_none());
+    }
+
+    #[test]
+    fn restored_note_rearms_its_deadline_without_replaying_sound() {
+        let runtime = SharedRuntime::new(Config::parse(
+            "default-timeout=500\n"
+        ).unwrap());
+        let first = Instant::now();
+        let id = runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule(id, first).unwrap();
+        assert!(runtime.close(id, CloseReason::Dismissed, true).unwrap());
+        assert!(runtime.next_deadline().unwrap().is_none());
+        assert_eq!(runtime.store.lock().unwrap().restore(), Some(id));
+        runtime.schedule_without_hook(id, first + Duration::from_millis(200)).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(first + Duration::from_millis(700)));
+        assert!(runtime.expire(first + Duration::from_millis(499)).unwrap().is_empty());
+        assert_eq!(runtime.expire(first + Duration::from_millis(700)).unwrap(),vec![id]);
     }
 
     #[test]

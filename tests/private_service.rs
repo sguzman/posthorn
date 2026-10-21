@@ -51,5 +51,10 @@ async fn private_service_expires_and_archives_a_notification() -> Result<(), Box
     let dismissed: Vec<HashMap<String, OwnedValue>> =
         control.call("ListNotifications", &()).await?;
     assert!(dismissed.is_empty());
+    assert!(runtime.next_deadline()?.is_none(),
+        "dismissed notification must not retain an expiration timer");
+    execute(Command::Restore).await?;
+    assert!(runtime.next_deadline()?.is_some(),
+        "restored notification must be rescheduled");
     Ok(())
 }
