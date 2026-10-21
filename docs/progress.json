@@ -35,7 +35,7 @@
               "id": "T004",
               "emoji": "🧪",
               "name": "Validate Rust scaffold with CI and formatting",
-              "progress": 95
+              "progress": 97
             }
           ]
         },
@@ -60,7 +60,7 @@
               "id": "T103",
               "emoji": "🧰",
               "name": "Complete option validation, built-in grouping and escaping semantics",
-              "progress": 38
+              "progress": 45
             },
             {
               "id": "T104",
@@ -97,7 +97,7 @@
               "id": "T203",
               "emoji": "⏳",
               "name": "Timeout selection and timer/event scheduling",
-              "progress": 67
+              "progress": 80
             },
             {
               "id": "T204",
@@ -109,7 +109,7 @@
               "id": "T205",
               "emoji": "🔤",
               "name": "Pango markup/escaping, format specifiers and actions",
-              "progress": 30
+              "progress": 55
             }
           ]
         },
@@ -122,19 +122,19 @@
               "id": "T301",
               "emoji": "📬",
               "name": "Implement org.freedesktop.Notifications methods and signals",
-              "progress": 50
+              "progress": 67
             },
             {
               "id": "T302",
               "emoji": "🧾",
               "name": "Implement full Mako D-Bus control interface, properties and JSON",
-              "progress": 45
+              "progress": 63
             },
             {
               "id": "T303",
               "emoji": "🔄",
               "name": "Correct startup, bus ownership and config reload behavior",
-              "progress": 0
+              "progress": 15
             }
           ]
         },
@@ -147,13 +147,13 @@
               "id": "T401",
               "emoji": "🧱",
               "name": "Layer-shell surfaces, anchors, output routing and scaling",
-              "progress": 20
+              "progress": 38
             },
             {
               "id": "T402",
               "emoji": "🖌️",
               "name": "Text, icons, colors, borders, progress and layout",
-              "progress": 15
+              "progress": 48
             },
             {
               "id": "T403",
@@ -172,13 +172,13 @@
               "id": "T501",
               "emoji": "⌨️",
               "name": "Port makoctl operations with compatibility tests",
-              "progress": 0
+              "progress": 38
             },
             {
               "id": "T502",
               "emoji": "🔔",
               "name": "Reproduce category colors, per-category sounds and quiet mode",
-              "progress": 5
+              "progress": 35
             },
             {
               "id": "T503",
@@ -199,17 +199,17 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 12
+          "progress": 25
         },
         {
           "emoji": "🎨",
           "name": "Mako category coloring and sound parity",
-          "progress": 10
+          "progress": 35
         },
         {
           "emoji": "📜",
           "name": "Mako history/control API parity",
-          "progress": 25
+          "progress": 45
         }
       ]
     },

@@ -30,10 +30,10 @@ change how they call the Freedesktop Notification protocol. Until parity:
 | --- | --- | --- |
 | `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; format/group spec validation and sort handling strengthened |
 | `notification.c` | IDs, replace, close, timeout, history, groups, format | Partial; deterministic timers, urgency/time sorting and group projections |
-| `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Adapters compile; not registered, incomplete controls and signals |
-| `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Layer-shell configure probe; no mapped notification surfaces |
-| `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | ARGB8888 rounded-background raster only; text/icons not implemented |
-| `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Not started |
+| `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Active on private development bus with expiration signals and property invalidations; system notification name not claimed; controls incomplete |
+| `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Layer-shell configure probe and isolated one-shot SHM pixel presenter; no continuous runtime surface management |
+| `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango text and markup, backgrounds and borders; icons, per-output scaling and Mako layout rules pending |
+| `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Private headless service, shared mode/timeout state, on-notify shell hooks and partial posthornctl; full loop/menu/reload pending |
 
 ## Explicit nonclaims
 
