@@ -4,6 +4,8 @@
 //! full D-Bus error behavior before treating this as makoctl parity.
 
 use std::collections::HashMap;
+use std::io::Write;
+use std::process::{Command as ProcessCommand, Stdio};
 use zbus::{zvariant::OwnedValue, Connection, Proxy};
 
 use crate::control::{CONTROL_INTERFACE, CONTROL_PATH};
@@ -13,6 +15,7 @@ use crate::service::PRIVATE_BUS_NAME;
 pub enum Command {
     Dismiss { id: u32, all: bool, group: bool, history: bool },
     Restore,
+    Menu { id: u32, program: Vec<String> },
     Invoke { id: u32, action: String },
     List { history: bool, json: bool },
     Reload,
@@ -32,6 +35,26 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
             if rest.is_empty() || rest == ["-j"] {
                 Ok(Command::List { history: command == "history", json: !rest.is_empty() })
             } else { Err("usage: posthornctl list|history [-j]".into()) }
+        }
+        "menu" => {
+            let mut id=0;
+            let mut i=0;
+            while i<rest.len() {
+                if rest[i]=="-n" {
+                    i+=1;
+                    id=rest.get(i).ok_or("missing notification ID")?
+                        .parse().map_err(|_|"invalid notification ID")?;
+                    i+=1;
+                } else if rest[i]=="--" {
+                    i+=1;
+                    break;
+                } else {
+                    break;
+                }
+            }
+            let program=rest[i..].to_vec();
+            if program.is_empty(){return Err("missing menu command".into());}
+            Ok(Command::Menu{id,program})
         }
         "dismiss" => {
             let mut id = 0u32;
@@ -121,6 +144,43 @@ pub fn update_modes(mut current: Vec<String>, edits: &[(char, String)]) -> Vec<S
     } else { current }
 }
 
+/// Resolve a menu program's selected title to the Freedesktop action key.
+fn selected_action_key(
+    actions: &HashMap<String,String>, selected: &str,
+) -> Option<String> {
+    let mut entries:Vec<_>=actions.iter().collect();
+    entries.sort_by(|a,b|a.0.cmp(b.0));
+    entries.into_iter().find(|(_,title)|*title==selected)
+        .map(|(key,_)|key.clone())
+}
+
+/// Pass labels via stdin and read a selection from a user-configured menu
+/// application, without evaluating the labels in a shell.
+fn choose_from_menu(
+    program: &[String], actions: &HashMap<String,String>,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    if program.is_empty() || actions.is_empty() {
+        return Err("menu command and actions are required".into());
+    }
+    let mut entries:Vec<_>=actions.iter().collect();
+    entries.sort_by(|a,b|a.0.cmp(b.0));
+    let mut child=ProcessCommand::new(&program[0]).args(&program[1..])
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
+    if let Some(mut input)=child.stdin.take() {
+        for (_,label) in entries {
+            writeln!(input,"{label}")?;
+        }
+    }
+    let output=child.wait_with_output()?;
+    if !output.status.success(){return Err(format!(
+        "menu command exited with {}",output.status
+    ).into());}
+    let result=String::from_utf8(output.stdout)?;
+    let selected=result.lines().next().ok_or("no action selected")?;
+    selected_action_key(actions,selected)
+        .ok_or_else(||"menu returned a title not present in notification actions".into())
+}
+
 fn value_string(map: &HashMap<String,OwnedValue>, key: &str) -> Option<String> {
     map.get(key).and_then(|v| String::try_from(v.clone()).ok())
         .filter(|s| !s.is_empty())
@@ -147,7 +207,7 @@ fn json_entry(map: &HashMap<String,OwnedValue>) -> serde_json::Value {
 
 pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if command == Command::Help {
-        println!("posthornctl (development, private D-Bus only)\n          dismiss [-n id] [-a|-g] [-h] | restore | invoke [-n id] [action]\n          list [-j] | history [-j] | mode [-s|-a|-r|-t mode] | reload");
+        println!("posthornctl (development, private D-Bus only)\n          dismiss [-n id] [-a|-g] [-h] | restore | invoke [-n id] [action]\n          list [-j] | history [-j] | menu [-n id] -- program [args...] | mode [-s|-a|-r|-t mode] | reload");
         return Ok(());
     }
     let conn=Connection::session().await?;
@@ -180,6 +240,20 @@ pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error +
                     println!("{id}: {name}: {summary}");
                 }
             }
+        }
+        Command::Menu {id,program} => {
+            let records:Vec<HashMap<String,OwnedValue>>=
+                proxy.call("ListNotifications",&()).await?;
+            let note=records.iter().find(|record| {
+                id==0 || record.get("id").and_then(|v|u32::try_from(v).ok())==Some(id)
+            }).ok_or("notification not found")?;
+            let notification_id=note.get("id")
+                .and_then(|v|u32::try_from(v).ok()).ok_or("missing notification ID")?;
+            let actions:HashMap<String,String>=note.get("actions")
+                .and_then(|v|HashMap::try_from(v.clone()).ok())
+                .ok_or("notification has no actions")?;
+            let action=choose_from_menu(&program,&actions)?;
+            let _: ()=proxy.call("InvokeAction",&(notification_id,action)).await?;
         }
         Command::Reload => {let _: ()=proxy.call("Reload",&()).await?;}
         Command::Modes {edit} => {
@@ -214,6 +288,26 @@ mod tests {
         let selected=vec![('s',"quiet".into()),('s',"custom".into())];
         assert_eq!(update_modes(vec!["default".into()],&selected),vec!["quiet","custom"]);
     }
+    #[test]
+    fn menu_parse_requires_command_and_supports_explicit_notification_id() {
+        assert_eq!(parse_command(&v(&["menu","-n","34","--","cat"])).unwrap(),
+            Command::Menu{id:34,program:vec!["cat".into()]});
+        assert!(parse_command(&v(&["menu","-n","34"])).is_err());
+        assert!(parse_command(&v(&["menu"])).is_err());
+    }
+
+    #[test]
+    fn selecting_menu_title_recovers_correct_action_key() {
+        let actions:HashMap<_,_>=[
+            ("default".into(),"Open".into()),
+            ("dismiss".into(),"Ignore".into())
+        ].into();
+        assert_eq!(selected_action_key(&actions,"Open"),Some("default".into()));
+        assert!(selected_action_key(&actions,"no such title").is_none());
+        let chosen=choose_from_menu(&["cat".into()],&actions).unwrap();
+        assert_eq!(chosen,"default");
+    }
+
     #[test]
     fn accepts_mako_list_and_default_invoke() {
         assert_eq!(parse_command(&v(&["history","-j"])).unwrap(),
