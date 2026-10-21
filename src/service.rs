@@ -22,7 +22,7 @@ pub async fn open_private_service(config: Config) -> zbus::Result<(Connection, S
     let conn = connection::Builder::session()?
         .name(PRIVATE_BUS_NAME)?
         .serve_at(OBJECT_PATH, FreedesktopNotifications::with_runtime(runtime.clone()))?
-        .serve_at(CONTROL_PATH, MakoControl::new(runtime.store.clone()))?
+        .serve_at(CONTROL_PATH, MakoControl::with_runtime(runtime.clone()))?
         .build()
         .await?;
     Ok((conn, runtime))

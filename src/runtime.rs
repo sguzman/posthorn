@@ -15,6 +15,7 @@ pub struct SharedRuntime {
     pub store: Arc<Mutex<NotificationStore>>,
     timers: Arc<Mutex<ExpirationScheduler>>,
     config: Arc<Config>,
+    modes: Arc<Mutex<Vec<String>>>,
 }
 
 impl SharedRuntime {
@@ -25,10 +26,15 @@ impl SharedRuntime {
             store: Arc::new(Mutex::new(store)),
             timers: Arc::new(Mutex::new(ExpirationScheduler::default())),
             config: Arc::new(config),
+            modes: Arc::new(Mutex::new(vec!["default".into()])),
         }
     }
 
     pub fn config(&self) -> &Config { &self.config }
+
+    pub fn modes(&self) -> Arc<Mutex<Vec<String>>> {
+        Arc::clone(&self.modes)
+    }
 
     /// Schedule the latest snapshot, never an earlier replaced payload.
     /// Lock order is store -> scheduler everywhere to avoid deadlocks.
@@ -36,7 +42,8 @@ impl SharedRuntime {
         let store = self.store.lock().map_err(|_| "notification store lock poisoned")?;
         let note = store.active().iter().find(|n| n.id == id)
             .ok_or("notification is not active")?;
-        let modes = ["default"];
+        let modes = self.modes.lock().map_err(|_| "mode state lock poisoned")?;
+        let mode_views: Vec<&str> = modes.iter().map(String::as_str).collect();
         let traits = Traits {
             app_name: &note.app_name, app_icon: &note.app_icon,
             category: &note.category, desktop_entry: &note.desktop_entry,
@@ -46,7 +53,7 @@ impl SharedRuntime {
                 crate::notification::Urgency::Normal => "normal",
                 crate::notification::Urgency::Critical => "critical",
             },
-            anchor: "top-right", output: "", modes: &modes,
+            anchor: "top-right", output: "", modes: &mode_views,
             requested_timeout_ms: note.requested_timeout_ms,
             actionable: !note.actions.is_empty(), group_index: -1, hidden: false,
         };
@@ -127,6 +134,18 @@ mod tests {
         assert_eq!(runtime.next_deadline().unwrap(), None);
         assert!(runtime.close(id, CloseReason::Dismissed, true).unwrap());
         assert!(runtime.expire(now + Duration::from_secs(20)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn mode_changes_affect_new_notification_timeout_rules() {
+        let runtime = SharedRuntime::new(
+            Config::parse("default-timeout=1000\n[mode=quiet]\ndefault-timeout=0\n").unwrap()
+        );
+        runtime.modes().lock().unwrap().clear();
+        runtime.modes().lock().unwrap().push("quiet".into());
+        let id = runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule(id, Instant::now()).unwrap();
+        assert!(runtime.next_deadline().unwrap().is_none());
     }
 
     #[test]

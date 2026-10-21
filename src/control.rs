@@ -12,6 +12,7 @@ use zbus::{interface, zvariant::{OwnedValue, Value}, Connection};
 
 use crate::dbus::{BUS_NAME, OBJECT_PATH};
 use crate::notification::{CloseReason, Notification, NotificationStore, Urgency};
+use crate::runtime::SharedRuntime;
 
 pub const CONTROL_INTERFACE: &str = "fr.emersion.Mako";
 pub const CONTROL_PATH: &str = "/fr/emersion/Mako";
@@ -28,6 +29,11 @@ impl MakoControl {
             store,
             modes: Arc::new(Mutex::new(vec!["default".into()])),
         }
+    }
+
+    /// Share active modes with the same runtime used by the D-Bus receiver.
+    pub fn with_runtime(runtime: SharedRuntime) -> Self {
+        Self { store: Arc::clone(&runtime.store), modes: runtime.modes() }
     }
 
     fn snapshot(&self, history: bool) -> zbus::fdo::Result<Vec<HashMap<String, OwnedValue>>> {
