@@ -127,7 +127,7 @@ async fn emit_notification_signal(
     conn: &Connection,
     name: &str,
     id: u32,
-    extra: impl serde::Serialize + zbus::zvariant::DynamicType,
+    extra: impl serde::Serialize + zbus::zvariant::DynamicType + zbus::zvariant::Type,
 ) -> zbus::fdo::Result<()> {
     conn.emit_signal(
         None::<&str>, OBJECT_PATH, BUS_NAME, name, &(id, extra),
@@ -194,12 +194,12 @@ impl MakoControl {
         Ok(self.modes.lock().map_err(|_| internal_error())?.clone())
     }
 
-    #[zbus(property, name = "Modes", emits_changed_signal = "invalidates")]
+    #[zbus(property, name = "Modes")]
     fn modes(&self) -> zbus::fdo::Result<Vec<String>> {
         self.list_modes()
     }
 
-    #[zbus(property, name = "Notifications", emits_changed_signal = "invalidates")]
+    #[zbus(property, name = "Notifications")]
     fn notifications(&self) -> zbus::fdo::Result<Vec<HashMap<String, OwnedValue>>> {
         self.snapshot(false)
     }
