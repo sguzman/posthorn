@@ -250,6 +250,7 @@ pub fn notification_text(map:&HashMap<String,OwnedValue>)->String{
     }
     if let Some(actions)=map.get("actions")
         .and_then(|v|HashMap::<String,String>::try_from(v.clone()).ok())
+        .filter(|actions|!actions.is_empty())
     {
         result.push_str("  Actions:\n");
         let mut pairs:Vec<_>=actions.into_iter().collect();
@@ -348,6 +349,8 @@ mod tests {
             "Notification 7: Task completed\n  App name: Backup\n  Category: success\n  Desktop entry: backup.desktop\n  Urgency: normal\n  Actions:\n    default: Open\n");
         let mut fields=HashMap::new();
         fields.insert("id".into(),OwnedValue::from(9u32));
+        assert_eq!(notification_text(&fields),"Notification 9:\n");
+        fields.insert("actions".into(),OwnedValue::from(HashMap::<String,String>::new()));
         assert_eq!(notification_text(&fields),"Notification 9:\n");
     }
 
