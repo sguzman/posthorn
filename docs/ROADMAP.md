@@ -29,19 +29,19 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🗃️ T202 — Bounded in-memory history, close and restore — `██████████ 100%`
 - ⏳ T203 — Timeout selection and timer/event scheduling — `█████████░ 89%`
 - 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `████████░░ 77%`
-- 🔤 T205 — Pango markup/escaping, format specifiers and actions — `██████░░░░ 64%`
+- 🔤 T205 — Pango markup/escaping, format specifiers and actions — `███████░░░ 65%`
 
-### 🚌 P3 — D-Bus protocol and control surface — `███████░░░ 71%`
+### 🚌 P3 — D-Bus protocol and control surface — `███████░░░ 72%`
 
 - 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `████████░░ 83%`
-- 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `███████░░░ 74%`
+- 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `████████░░ 75%`
 - 🔄 T303 — Correct startup, bus ownership and config reload behavior — `██████░░░░ 57%`
 
-### 🪟 P4 — Wayland protocol and rendering — `███████░░░ 74%`
+### 🪟 P4 — Wayland protocol and rendering — `████████░░ 75%`
 
-- 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `████████░░ 81%`
+- 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `████████░░ 82%`
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `█████████░ 90%`
-- 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `█████░░░░░ 51%`
+- 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `█████░░░░░ 54%`
 
 ### 🎛️ P5 — CLI and exact workstation parity — `███░░░░░░░ 27%`
 
@@ -52,9 +52,9 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 **Feature inventory** (separate from task-based milestone percentage):
 
-- 🔔 Desktop notification parity — `██████░░░░ 61%`
+- 🔔 Desktop notification parity — `██████░░░░ 62%`
 - 🎨 Mako category coloring and sound parity — `████░░░░░░ 40%`
-- 📜 Mako history/control API parity — `███████░░░ 72%`
+- 📜 Mako history/control API parity — `███████░░░ 73%`
 
 ## 📑 M1 — Post-MVP TOML configuration — `░░░░░░░░░░ 0%`
 
