@@ -194,7 +194,9 @@ async fn dbus_inline_image_and_progress_reach_rendered_pixels()
     assert!(note.image_data.is_some());
     drop(store);
     let frame=snapshot_frame(&runtime)?.unwrap();
-    let px=frame.height as usize/2*frame.stride as usize+6*4;
+    // The Mako margin is part of the surface; sample *inside* the
+    // notification's icon, not the now-transparent left gutter.
+    let px=frame.height as usize/2*frame.stride as usize+10*4;
     assert_eq!(&frame.pixels[px..px+4],&[0,0,255,255]);
     Ok(())
 }
