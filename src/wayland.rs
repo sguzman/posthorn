@@ -688,7 +688,7 @@ mod tests {
         assert_eq!(spec,spec.clone());
         assert_ne!(spec,PopupSurfaceSpec{width:500,..spec.clone()});
         assert_ne!(spec,PopupSurfaceSpec{output_name:"HDMI-A-1".into(),..spec.clone()});
-        assert_ne!(spec,PopupSurfaceSpec{layer:PopupLayer::Overlay,..spec});
+        assert_ne!(spec,PopupSurfaceSpec{layer:PopupLayer::Overlay,..spec.clone()});
     }
 
     #[test]
