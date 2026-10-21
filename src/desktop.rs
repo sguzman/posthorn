@@ -96,9 +96,20 @@ pub fn visible_members(runtime:&SharedRuntime)
         .map(|m|(m.notification,m.group_count)).collect())
 }
 
+#[derive(Debug)]
+struct VisibleProjection {
+    members:Vec<VisibleMember>,
+    hidden_count:usize,
+    total_count:usize,
+}
+
 pub fn visible_members_indexed(runtime:&SharedRuntime)
     -> io::Result<Vec<VisibleMember>>
 {
+    Ok(visible_projection(runtime)?.members)
+}
+
+fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
     let config=runtime.config();
     let spec=config.global.get("group-by")
         .map(String::as_str).unwrap_or("none");
@@ -109,7 +120,9 @@ pub fn visible_members_indexed(runtime:&SharedRuntime)
     let store=runtime.store.lock().map_err(|_|poisoned())?;
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let by_id=store.active();
+    let total_count=by_id.len();
     let mut selected=Vec::new();
+    let mut hidden_count=0usize;
     let mut displayed_groups=0usize;
     for group in group_ordered(by_id,&spec) {
         let count=group.ids.len();
@@ -119,7 +132,12 @@ pub fn visible_members_indexed(runtime:&SharedRuntime)
                 let style=style_for_note_index(runtime,note,&modes,group_index);
                 let limit=style.get("max-visible")
                     .and_then(|v|v.parse::<i32>().ok()).unwrap_or(5);
-                if limit>=0&&displayed_groups>=limit as usize {continue;}
+                if limit>=0&&displayed_groups>=limit as usize {
+                    // Upstream increments hidden count for every excluded
+                    // notification, including secondary grouped members.
+                    hidden_count+=1;
+                    continue;
+                }
                 if style.get("invisible").is_some_and(|v|
                     v=="1"||v.eq_ignore_ascii_case("true")) {
                     continue;
@@ -131,7 +149,9 @@ pub fn visible_members_indexed(runtime:&SharedRuntime)
             }
         }
     }
-    Ok(selected)
+    Ok(VisibleProjection{
+        members:selected,hidden_count,total_count,
+    })
 }
 
 /// Count real groups eligible for display, excluding explicitly invisible
@@ -161,10 +181,10 @@ pub fn displayable_groups(runtime:&SharedRuntime)->io::Result<usize>{
 /// configured category colors. Returns None for an empty notification list.
 pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> {
     let config=runtime.config();
-    let notes=visible_members_indexed(runtime)?;
-    let displayable=displayable_groups(runtime)?;
-    let total=runtime.store.lock().map_err(|_|poisoned())?.active().len();
-    let hidden=displayable.saturating_sub(notes.len());
+    let projection=visible_projection(runtime)?;
+    let notes=projection.members;
+    let total=projection.total_count;
+    let hidden=projection.hidden_count;
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let mut frames=Vec::with_capacity(notes.len());
     let mut margins=Vec::with_capacity(notes.len());
@@ -455,6 +475,27 @@ mod tests {
         assert_eq!(displayable_groups(&runtime).unwrap(),2);
         assert_ne!(shown[0].id,old);
         assert_eq!(runtime.store.lock().unwrap().active().len(),3);
+    }
+
+    #[test]
+    fn hidden_count_tracks_notifications_not_only_overflowing_groups(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=app-name\nmax-visible=1\n"
+        ).unwrap());
+        runtime.store.lock().unwrap().push(Request{
+            app_name:"other".into(),..Request::default()
+        });
+        runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),..Request::default()
+        });
+        runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),..Request::default()
+        });
+        let projection=visible_projection(&runtime).unwrap();
+        assert_eq!(projection.members.len(),1);
+        assert_eq!(projection.hidden_count,2,
+            "overflow counts the secondary group member and next group");
+        assert_eq!(projection.total_count,3);
     }
 
     #[test]
