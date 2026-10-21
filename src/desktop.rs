@@ -297,6 +297,20 @@ mod tests {
     }
 
     #[test]
+    fn explicit_output_name_affects_mako_style_selection() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "output=DP-2\n[output=DP-2]\nbackground-color=#305747\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        let note=runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==id).unwrap().clone();
+        let modes=["default".to_string()];
+        let style=style_for_note(&runtime,&note,&modes);
+        assert_eq!(style.get("background-color").map(String::as_str),
+            Some("#305747"));
+    }
+
+    #[test]
     fn adjacent_mako_margins_use_the_larger_edge() {
         let margins=[
             PopupMargins{top:1,right:0,bottom:9,left:0},
