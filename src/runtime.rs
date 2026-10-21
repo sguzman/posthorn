@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use crate::config::{Config, Traits};
 use crate::notification::{CloseReason, NotificationStore, SortPolicy};
+use crate::hooks::NotifyBinding;
 use crate::timers::ExpirationScheduler;
 
 #[derive(Clone, Debug)]
@@ -65,6 +66,19 @@ impl SharedRuntime {
         let timeout = note.timeout_ms(default_ms, ignore_sender);
         self.timers.lock().map_err(|_| "expiration scheduler lock poisoned")?
             .set(id, now, timeout);
+        // Only configured commands are executable, never message fields.
+        // Match Mako's quiet-mode on-notify=none override without suppressing
+        // the notification or changing its category color.
+        let binding = style.get("on-notify")
+            .and_then(|s| NotifyBinding::parse(s).ok());
+        drop(modes);
+        drop(store);
+        if let Some(NotifyBinding::Exec(command)) = binding {
+            if let Err(error) = NotifyBinding::Exec(command).run_exec(id) {
+                eprintln!("posthorn on-notify hook failed: {error}");
+            }
+        }
+        // Non-exec notify bindings are not integrated with D-Bus signals yet.
         Ok(())
     }
 

@@ -17,5 +17,6 @@ pub mod wayland;
 pub mod raster;
 pub mod render;
 pub mod grouping;
+pub mod hooks;
 
 pub const MAKO_BASELINE: &str = "v1.11.0";
