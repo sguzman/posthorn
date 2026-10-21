@@ -74,3 +74,49 @@ async fn private_control_menu_invokes_existing_action_without_shell()
     execute(Command::Menu{id,program:vec!["cat".into()]}).await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn pointer_button_bindings_dispatch_through_private_desktop_bus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::input::dispatch_click;
+    use posthorn::wayland::PointerClick;
+    let config=Config::parse(
+        "width=160\nheight=90\nmargin=6\n         on-button-left=invoke-default-action\n         on-button-right=dismiss\n         default-timeout=0\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let id:u32=desktop.call("Notify",&(
+        "input-fixture",0u32,"","Button","Visible",
+        vec!["default".to_string(),"Open".to_string()],
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    dispatch_click(&conn,&runtime,PointerClick{x:30.0,y:20.0,button:272,serial:21}).await?;
+    let current:Vec<HashMap<String,OwnedValue>>=
+        control.call("ListNotifications",&()).await?;
+    let history:Vec<HashMap<String,OwnedValue>>=
+        control.call("ListHistory",&()).await?;
+    assert!(current.is_empty());
+    assert_eq!(history.len(),1);
+    assert_eq!(u32::try_from(history[0].get("id").unwrap())?,id);
+
+    let second:u32=desktop.call("Notify",&(
+        "input-fixture",0u32,"","Second","Visible",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_ne!(id,second);
+    dispatch_click(&conn,&runtime,PointerClick{x:30.0,y:20.0,button:273,serial:22}).await?;
+    let current:Vec<HashMap<String,OwnedValue>>=
+        control.call("ListNotifications",&()).await?;
+    assert!(current.is_empty());
+
+    // A transparent margin must never dismiss the third notification.
+    let _:u32=desktop.call("Notify",&(
+        "input-fixture",0u32,"","Third","Visible",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    dispatch_click(&conn,&runtime,PointerClick{x:30.0,y:90.0,button:273,serial:23}).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),1);
+    Ok(())
+}
