@@ -91,6 +91,27 @@ impl ScreenCorner {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PopupMargins {
+    pub top:i32, pub right:i32, pub bottom:i32, pub left:i32,
+}
+impl PopupMargins {
+    pub fn uniform(n:i32)->Self{
+        Self{top:n,right:n,bottom:n,left:n}
+    }
+    /// Mako's one-to-four value CSS-style margin syntax.
+    pub fn parse_mako(raw:&str)->Option<Self>{
+        let values:Vec<i32>=raw.split(',').map(|v|v.trim().parse()).collect::<Result<_,_>>().ok()?;
+        match values.as_slice() {
+            [a]=>Some(Self::uniform(*a)),
+            [v,h]=>Some(Self{top:*v,right:*h,bottom:*v,left:*h}),
+            [t,h,b]=>Some(Self{top:*t,right:*h,bottom:*b,left:*h}),
+            [t,r,b,l]=>Some(Self{top:*t,right:*r,bottom:*b,left:*l}),
+            _=>None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PopupBounds {
     pub width: u32,
     pub height: u32,
@@ -408,7 +429,13 @@ impl LivePresenter {
         &mut self, frame: Option<&PixelFrame>, corner: ScreenCorner, margin: i32,
         selected_layer: PopupLayer,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if margin < 0 {return Err("negative margin".into());}
+        self.update_frame_with_options(frame,corner,PopupMargins::uniform(margin),selected_layer)
+    }
+
+    pub fn update_frame_with_options(
+        &mut self, frame: Option<&PixelFrame>, corner: ScreenCorner,
+        margins: PopupMargins, selected_layer: PopupLayer,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(frame) = frame { validate_frame(frame)?; }
         self.clear();
         let Some(frame) = frame else {
@@ -432,10 +459,10 @@ impl LivePresenter {
         layer.set_exclusive_zone(0);
         let anchor=corner.anchors();
         layer.set_margin(
-            if anchor.contains(Anchor::Top) {margin} else {0},
-            if anchor.contains(Anchor::Right) {margin} else {0},
-            if anchor.contains(Anchor::Bottom) {margin} else {0},
-            if anchor.contains(Anchor::Left) {margin} else {0},
+            if anchor.contains(Anchor::Top) {margins.top} else {0},
+            if anchor.contains(Anchor::Right) {margins.right} else {0},
+            if anchor.contains(Anchor::Bottom) {margins.bottom} else {0},
+            if anchor.contains(Anchor::Left) {margins.left} else {0},
         );
         surface.commit();
         while self.state.size.is_none() && !self.state.closed {
@@ -553,6 +580,20 @@ mod tests {
         assert!(validate_frame(&frame).is_ok());
         assert!(validate_frame(&PixelFrame { pixels: vec![0; 60], ..frame.clone() }).is_err());
         assert!(validate_frame(&PixelFrame { stride: 4, ..frame }).is_err());
+    }
+
+    #[test]
+    fn directional_margins_match_mako_one_to_four_value_parsing() {
+        assert_eq!(PopupMargins::parse_mako("10"),Some(PopupMargins::uniform(10)));
+        assert_eq!(PopupMargins::parse_mako("10,20"),
+            Some(PopupMargins{top:10,right:20,bottom:10,left:20}));
+        assert_eq!(PopupMargins::parse_mako("10,20,30"),
+            Some(PopupMargins{top:10,right:20,bottom:30,left:20}));
+        assert_eq!(PopupMargins::parse_mako("1,2,3,4"),
+            Some(PopupMargins{top:1,right:2,bottom:3,left:4}));
+        assert_eq!(PopupMargins::parse_mako("-2"),
+            Some(PopupMargins::uniform(-2)));
+        assert!(PopupMargins::parse_mako("1,2,3,4,5").is_none());
     }
 
     #[test]

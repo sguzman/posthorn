@@ -10,7 +10,7 @@ use crate::grouping::{GroupSpec,group_ordered};
 use crate::notification::{Notification, Urgency};
 use crate::render::{compose_stack, render_notification, PixelFrame};
 use crate::runtime::SharedRuntime;
-use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PointerClick};
+use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins,PointerClick};
 
 fn poisoned() -> io::Error { io::Error::other("notification state lock poisoned") }
 fn other(e: impl std::fmt::Display) -> io::Error { io::Error::other(e.to_string()) }
@@ -84,13 +84,13 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<P
             let corner=runtime.config().global.get("anchor")
                 .and_then(|s|ScreenCorner::from_mako(s))
                 .unwrap_or(ScreenCorner::TopRight);
-            let margin=runtime.config().global.get("margin")
-                .and_then(|s|s.split(',').next())
-                .and_then(|s|s.parse::<i32>().ok()).unwrap_or(10);
+            let margins=runtime.config().global.get("margin")
+                .and_then(|s|PopupMargins::parse_mako(s))
+                .unwrap_or(PopupMargins::uniform(10));
             let layer=runtime.config().global.get("layer")
                 .and_then(|s|PopupLayer::from_mako(s))
                 .unwrap_or(PopupLayer::Top);
-            viewer.update_frame_with_layer(frame.as_ref(),corner,margin,layer)
+            viewer.update_frame_with_options(frame.as_ref(),corner,margins,layer)
                 .map_err(other)?;
             previous=notes;
             previous_modes=modes;
