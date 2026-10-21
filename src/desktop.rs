@@ -6,6 +6,7 @@
 use std::io;
 use std::time::Duration;
 use crate::config::{Options, Traits};
+use crate::grouping::{GroupSpec,group_ordered};
 use crate::notification::{Notification, Urgency};
 use crate::render::{compose_stack, render_notification, PixelFrame};
 use crate::runtime::SharedRuntime;
@@ -33,13 +34,32 @@ pub fn style_for_note(
     runtime.config().style_for(&traits)
 }
 
+/// Select only the first visible member from each Mako grouping pass.
+/// The hidden-count placeholder is separate TODO work; this prevents
+/// duplicate group popups and applies max-visible to groups rather than IDs.
+pub fn visible_notifications(runtime:&SharedRuntime) -> io::Result<Vec<Notification>> {
+    let max_visible=runtime.config().global.get("max-visible")
+        .and_then(|v|v.parse::<usize>().ok()).unwrap_or(5);
+    let spec=runtime.config().global.get("group-by")
+        .map(String::as_str).unwrap_or("none");
+    let spec=GroupSpec::parse(spec).map_err(other)?;
+    let store=runtime.store.lock().map_err(|_|poisoned())?;
+    let by_id=store.active();
+    let mut selected=Vec::new();
+    for group in group_ordered(by_id,&spec).into_iter().take(max_visible) {
+        if let Some(id)=group.ids.first(){
+            if let Some(n)=by_id.iter().find(|n|&n.id==id){
+                selected.push(n.clone());
+            }
+        }
+    }
+    Ok(selected)
+}
+
 /// Render the active, ordered messages at the present instant, including
 /// configured category colors. Returns None for an empty notification list.
 pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> {
-    let max_visible=runtime.config().global.get("max-visible")
-        .and_then(|value| value.parse::<usize>().ok()).unwrap_or(5);
-    let notes: Vec<Notification>=runtime.store.lock().map_err(|_|poisoned())?
-        .active().iter().take(max_visible).cloned().collect();
+    let notes=visible_notifications(runtime)?;
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let mut frames=Vec::with_capacity(notes.len());
     for note in &notes {
@@ -138,6 +158,22 @@ mod tests {
         runtime.close(a,CloseReason::Dismissed,false).unwrap();
         let after=snapshot_frame(&runtime).unwrap().unwrap();
         assert_eq!(after.height,40);
+    }
+
+    #[test]
+    fn grouping_hides_secondary_members_but_keeps_distinct_apps_visible() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=app-name\nmax-visible=2\n"
+        ).unwrap());
+        let mut store=runtime.store.lock().unwrap();
+        let older=store.push(Request{app_name:"alpha".into(),..Request::default()});
+        let separate=store.push(Request{app_name:"beta".into(),..Request::default()});
+        let newer=store.push(Request{app_name:"alpha".into(),..Request::default()});
+        drop(store);
+        let visible=visible_notifications(&runtime).unwrap();
+        assert_eq!(visible.len(),2);
+        assert_eq!(visible.iter().map(|n|n.id).collect::<Vec<_>>(),vec![newer,separate]);
+        assert!(!visible.iter().any(|n|n.id==older));
     }
 
     #[test]

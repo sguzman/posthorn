@@ -19,10 +19,7 @@ fn error(msg: impl std::fmt::Display) -> io::Error {
 }
 
 fn ordered_visible(runtime:&SharedRuntime) -> io::Result<(Vec<Notification>,Vec<String>)> {
-    let limit=runtime.config().global.get("max-visible")
-        .and_then(|s|s.parse::<usize>().ok()).unwrap_or(5);
-    let notes=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?
-        .active().iter().take(limit).cloned().collect();
+    let notes=crate::desktop::visible_notifications(runtime)?;
     let modes=runtime.modes().lock().map_err(|_|error("mode lock poisoned"))?
         .clone();
     Ok((notes,modes))
