@@ -224,6 +224,43 @@ fn json_entry(map: &HashMap<String,OwnedValue>) -> serde_json::Value {
     })
 }
 
+/// Match makoctl's human-readable list/history layout. The app icon and
+/// message body are intentionally omitted, as in upstream v1.11.0.
+pub fn notification_text(map:&HashMap<String,OwnedValue>)->String{
+    let id=map.get("id").and_then(|v|u32::try_from(v).ok()).unwrap_or(0);
+    let summary=value_string(map,"summary").unwrap_or_default();
+    let mut result=format!("Notification {id}:{title}\\n",
+        title=if summary.is_empty(){String::new()}else{format!(" {summary}")});
+    for (field,title) in [
+        ("app-name","App name"),
+        ("category","Category"),
+        ("desktop-entry","Desktop entry"),
+    ]{
+        if let Some(value)=value_string(map,field){
+            result.push_str(&format!("  {title}: {value}\\n"));
+        }
+    }
+    let urgency=map.get("urgency").and_then(|v|u8::try_from(v).ok());
+    let urgency=match urgency {
+        Some(0)=>Some("low"),Some(1)=>Some("normal"),
+        Some(2)=>Some("critical"),_=>None
+    };
+    if let Some(urgency)=urgency {
+        result.push_str(&format!("  Urgency: {urgency}\\n"));
+    }
+    if let Some(actions)=map.get("actions")
+        .and_then(|v|HashMap::<String,String>::try_from(v.clone()).ok())
+    {
+        result.push_str("  Actions:\\n");
+        let mut pairs:Vec<_>=actions.into_iter().collect();
+        pairs.sort_by(|a,b|a.0.cmp(&b.0));
+        for (key,label) in pairs{
+            result.push_str(&format!("    {key}: {label}\\n"));
+        }
+    }
+    result
+}
+
 pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if command == Command::Help {
         println!("posthornctl (development, private D-Bus only)\n          dismiss [-n id] [-a|-g] [-h] | restore | invoke [-n id] [action]\n          list [-j] | history [-j] | menu [-n id] -- program [args...] | mode [-s|-a|-r|-t mode] | reload");
@@ -252,11 +289,8 @@ pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error +
                 let values: Vec<_>=records.iter().map(json_entry).collect();
                 println!("{}",serde_json::to_string_pretty(&values)?);
             } else {
-                for r in &records {
-                    let id=r.get("id").and_then(|v|u32::try_from(v).ok()).unwrap_or(0);
-                    let name=value_string(r,"app-name").unwrap_or_default();
-                    let summary=value_string(r,"summary").unwrap_or_default();
-                    println!("{id}: {name}: {summary}");
+                for record in &records{
+                    print!("{}",notification_text(record));
                 }
             }
         }
@@ -293,6 +327,30 @@ pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error +
 mod tests {
     use super::*;
     fn v(args:&[&str])->Vec<String> {args.iter().map(|s|s.to_string()).collect()}
+    #[test]
+    fn human_readable_listing_follows_upstream_makoctl_structure(){
+        use zbus::zvariant::Value;
+        let mut fields=HashMap::new();
+        fields.insert("id".into(),OwnedValue::from(7u32));
+        for (key,value) in [
+            ("summary","Task completed"),
+            ("app-name","Backup"),
+            ("category","success"),
+            ("desktop-entry","backup.desktop"),
+        ]{
+            fields.insert(key.into(),OwnedValue::try_from(Value::from(value)).unwrap());
+        }
+        fields.insert("urgency".into(),OwnedValue::from(1u8));
+        fields.insert("actions".into(),OwnedValue::from(
+            HashMap::from([("default".to_string(),"Open".to_string())])
+        ));
+        assert_eq!(notification_text(&fields),
+            "Notification 7: Task completed\\n  App name: Backup\\n  Category: success\\n  Desktop entry: backup.desktop\\n  Urgency: normal\\n  Actions:\\n    default: Open\\n");
+        let mut fields=HashMap::new();
+        fields.insert("id".into(),OwnedValue::from(9u32));
+        assert_eq!(notification_text(&fields),"Notification 9:\\n");
+    }
+
     #[test]
     fn parses_dismiss_without_conflicting_flags() {
         assert_eq!(parse_command(&v(&["dismiss","-n","42","-h"])).unwrap(),
