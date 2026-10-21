@@ -275,6 +275,27 @@ pub fn render_notification(note: &Notification, style: &Options) -> Result<Pixel
 /// Compose ordered Mako-style popup frames into a single layer-shell surface.
 /// Each frame is already rendered and has an independent background. The
 /// transparent gaps are intentionally *not* colored by the compositor.
+/// Paint Mako's synthetic '(N more)' notification, retaining the style of
+/// [hidden] criteria and the %h/%t format substitutions. This is not stored
+/// in notification history or exposed as a real D-Bus notification.
+pub fn render_hidden_placeholder(
+    hidden:usize,total:usize,style:&Options,
+) -> Result<PixelFrame,String> {
+    let raw=style.get("format").map(String::as_str).unwrap_or("(%h more)");
+    let decoded=decode_format(raw).map_err(|e|e.to_string())?;
+    let literal=crate::format::render_hidden_format(&decoded,hidden,total);
+    // The ordinary render path parses the format a second time; preserve
+    // literal percent and backslashes in the computed placeholder.
+    let encoded=literal.replace('\\',"\\\\").replace('%',"%%");
+    let mut prepared=style.clone();
+    prepared.insert("format".into(),encoded);
+    prepared.insert("icons".into(),"0".into());
+    let mut store=crate::notification::NotificationStore::new(0);
+    store.push(crate::notification::Request::default());
+    let note=store.active().front().ok_or("failed to create hidden placeholder")?;
+    render_notification(note,&prepared)
+}
+
 pub fn compose_stack(frames: &[PixelFrame], gap: u32) -> Result<Option<PixelFrame>, String> {
     compose_stack_aligned(frames,gap,StackAlignment::Left)
 }
@@ -400,6 +421,18 @@ mod tests {
         // The text moves into the freed icon slot; this point may contain a
         // text glyph rather than background after icons are disabled.
         assert_ne!(&without.pixels[at..at+4],&[0x00,0x00,0xFF,0xFF]);
+    }
+
+    #[test]
+    fn hidden_placeholder_uses_own_format_and_shrink_wraps() {
+        let mut style=Options::new();
+        style.insert("width".into(),"180".into());
+        style.insert("height".into(),"100".into());
+        style.insert("format".into(),"<b>(%h of %t more)</b>".into());
+        let image=render_hidden_placeholder(3,8,&style).unwrap();
+        assert_eq!(image.width,180);
+        assert!(image.height<100);
+        assert!(image.pixels.iter().any(|x|*x!=0));
     }
 
     #[test]

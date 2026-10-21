@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::config::{Options, Traits};
 use crate::grouping::{GroupSpec,group_ordered};
 use crate::notification::{Notification, Urgency};
-use crate::render::{compose_stack_spaced, render_notification, PixelFrame,StackAlignment};
+use crate::render::{compose_stack_spaced, render_notification, render_hidden_placeholder, PixelFrame,StackAlignment};
 use crate::runtime::SharedRuntime;
 use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins,PointerClick};
 
@@ -78,6 +78,14 @@ pub fn visible_notifications(runtime:&SharedRuntime) -> io::Result<Vec<Notificat
 /// configured category colors. Returns None for an empty notification list.
 pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> {
     let notes=visible_notifications(runtime)?;
+    let (hidden,total)={
+        let store=runtime.store.lock().map_err(|_|poisoned())?;
+        let name=runtime.config().global.get("group-by")
+            .map(String::as_str).unwrap_or("none");
+        let spec=GroupSpec::parse(name).map_err(other)?;
+        let all_groups=group_ordered(store.active(),&spec).len();
+        (all_groups.saturating_sub(notes.len()),store.active().len())
+    };
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let mut frames=Vec::with_capacity(notes.len());
     let mut margins=Vec::with_capacity(notes.len());
@@ -87,6 +95,24 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
             .and_then(|s|PopupMargins::parse_mako(s))
             .unwrap_or(PopupMargins::uniform(10)));
         frames.push(render_notification(note,&style).map_err(other)?);
+    }
+    if hidden>0 {
+        let mode_views:Vec<&str>=modes.iter().map(String::as_str).collect();
+        let traits=Traits{
+            app_name:"",app_icon:"",category:"",desktop_entry:"",
+            summary:"",body:"",urgency:"normal",
+            anchor:runtime.config().global.get("anchor")
+                .map(String::as_str).unwrap_or("top-right"),
+            output:"",modes:&mode_views,requested_timeout_ms:-1,
+            actionable:false,group_index:-1,hidden:true,
+        };
+        let style=runtime.config().style_for(&traits);
+        if !style.get("invisible").is_some_and(|x|x=="1"||x=="true"){
+            frames.push(render_hidden_placeholder(hidden,total,&style).map_err(other)?);
+            margins.push(style.get("margin")
+                .and_then(|s|PopupMargins::parse_mako(s))
+                .unwrap_or(PopupMargins::uniform(10)));
+        }
     }
     let align=stack_alignment(runtime.config().global.get("anchor")
         .map(String::as_str).unwrap_or("top-right"));
@@ -222,6 +248,26 @@ mod tests {
             runtime.store.lock().unwrap().push(Request::default());
         }
         assert_eq!(visible_notifications(&runtime).unwrap().len(),7);
+    }
+
+    #[test]
+    fn max_visible_adds_a_hidden_placeholder_without_mutating_store() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "max-visible=1\nwidth=140\nheight=70\nmargin=4\n"
+        ).unwrap());
+        for id in 0..3 {
+            runtime.store.lock().unwrap().push(Request{
+                summary:format!("message-{id}"),..Request::default()
+            });
+        }
+        let first=visible_notifications(&runtime).unwrap();
+        assert_eq!(first.len(),1);
+        let frame=snapshot_frame(&runtime).unwrap().unwrap();
+        let styles=style_for_note(&runtime,&first[0],&["default".into()]);
+        let first_height=crate::render::measure_notification_height(&first[0],&styles).unwrap();
+        assert!(frame.height>first_height+4,"hidden placeholder must be visible");
+        assert_eq!(runtime.store.lock().unwrap().active().len(),3);
+        assert!(runtime.store.lock().unwrap().history().is_empty());
     }
 
     #[test]
