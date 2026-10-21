@@ -37,6 +37,7 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
         return Ok(None);
     }
     let name=match click.button {
+        0=>"on-touch",
         272=>"on-button-left",
         273=>"on-button-right",
         274=>"on-button-middle",
@@ -140,6 +141,8 @@ mod tests {
         assert_eq!(hit_test(&runtime,click(90.0,10.0,272)).unwrap(),
             Some((newest,NotifyBinding::None)));
         assert_eq!(hit_test(&runtime,click(90.0,10.0,273)).unwrap(),
+            Some((newest,NotifyBinding::Dismiss{save_history:true})));
+        assert_eq!(hit_test(&runtime,click(90.0,10.0,0)).unwrap(),
             Some((newest,NotifyBinding::Dismiss{save_history:true})));
         assert_eq!(hit_test(&runtime,click(90.0,42.0,272)).unwrap(),None);
         assert_eq!(hit_test(&runtime,click(90.0,50.0,272)).unwrap(),
