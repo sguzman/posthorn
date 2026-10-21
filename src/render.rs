@@ -72,9 +72,84 @@ fn paint_icon(cr:&cairo::Context,icon:&IconPixels,x:f64,y:f64,scale:f64)
     result
 }
 
+/// Mako treats `height` as a maximum, not a fixed popup height. Measure
+/// the Pango layout before painting so rounded bottom borders are drawn at the
+/// actual notification height, instead of cropping a taller buffer.
+pub fn measure_notification_height(
+    note:&Notification,style:&Options,
+) -> Result<u32,String> {
+    let width=integer_option(style,"width",300);
+    let cap=integer_option(style,"height",100);
+    if width==0||cap==0||width>4096||cap>4096{
+        return Err("invalid notification dimensions".into());
+    }
+    let border=integer_option(style,"border-size",2).min(width/2);
+    let padding=style.get("padding")
+        .and_then(|s|s.split(',').next()).and_then(|s|s.parse::<u32>().ok())
+        .unwrap_or(5);
+    let frame_padding=border.saturating_add(padding);
+    let icon=load_note_icon(note,style);
+    let icon_location=style.get("icon-location").map(String::as_str).unwrap_or("left");
+    let vertical=icon_location=="top"||icon_location=="bottom";
+    let max_size=integer_option(style,"max-icon-size",64);
+    let icon_size=icon.as_ref().map(|img|{
+        let ratio=1.0f64.min(f64::from(max_size)/f64::from(img.width.max(img.height)));
+        ((f64::from(img.width)*ratio).round() as u32,
+         (f64::from(img.height)*ratio).round() as u32)
+    });
+    let text_width=width.saturating_sub(frame_padding.saturating_mul(2))
+        .saturating_sub(
+            if !vertical{icon_size.map_or(0,|(w,_)|w.saturating_add(padding.saturating_mul(2)))}
+            else{0}
+        ).max(1);
+    let text_height=cap.saturating_sub(frame_padding.saturating_mul(2))
+        .saturating_sub(
+            if vertical{icon_size.map_or(0,|(_,h)|h.saturating_add(padding.saturating_mul(2)))}
+            else{0}
+        ).max(1);
+
+    let markup=style.get("markup")
+        .is_none_or(|v|v=="1"||v.eq_ignore_ascii_case("true"));
+    let format=style.get("format").map(String::as_str).unwrap_or("<b>%s</b>\\n%b");
+    let decoded=decode_format(format).map_err(|e|e.to_string())?;
+    let text=render_notification_format(&decoded,&FormatNotification{
+        id:note.id,app_name:&note.app_name,summary:&note.summary,body:&note.body,group_count:0,
+    },markup&&pango::parse_markup(&note.body,'\0').is_ok());
+    let safe=if pango::parse_markup(&text,'\0').is_ok(){
+        text
+    }else{
+        escape_markup(&format!("{}\\n{}",note.summary,note.body))
+    };
+    let dummy=cairo::ImageSurface::create(cairo::Format::ARgb32,1,1)
+        .map_err(|e|e.to_string())?;
+    let context=cairo::Context::new(&dummy).map_err(|e|e.to_string())?;
+    let layout=pangocairo::functions::create_layout(&context);
+    layout.set_font_description(Some(&pango::FontDescription::from_string(
+        style.get("font").map(String::as_str).unwrap_or("monospace 10")
+    )));
+    layout.set_width((text_width as i32).saturating_mul(pango::SCALE));
+    layout.set_height((text_height as i32).saturating_mul(pango::SCALE));
+    layout.set_wrap(pango::WrapMode::WordChar);
+    layout.set_ellipsize(pango::EllipsizeMode::End);
+    layout.set_markup(&safe);
+    let measured=if layout.character_count()>0{
+        layout.pixel_size().1.max(0) as u32
+    }else{0};
+    let text=measured.min(text_height);
+    let content=if let Some((_,icon_h))=icon_size{
+        if vertical{text.saturating_add(icon_h).saturating_add(padding)}
+        else{text.max(icon_h)}
+    }else{text};
+    let mut actual=content.saturating_add(frame_padding.saturating_mul(2));
+    let radius=style.get("border-radius").and_then(|s|s.split(',').next())
+        .and_then(|s|s.parse::<u32>().ok()).unwrap_or(0);
+    actual=actual.max(radius.saturating_mul(2).saturating_add(border.saturating_mul(2)));
+    Ok(actual.min(cap).max(1))
+}
+
 pub fn render_notification(note: &Notification, style: &Options) -> Result<PixelFrame, String> {
     let width = integer_option(style, "width", 300);
-    let height = integer_option(style, "height", 100);
+    let height = measure_notification_height(note,style)?;
     if width == 0 || height == 0 || width > 4096 || height > 4096
         || u64::from(width) * u64::from(height) * 4 > 64 * 1024 * 1024
     {
@@ -267,6 +342,35 @@ mod tests {
             body: "Line 2".into(), category: "success".into(),
             ..Request::default() });
         store.active().iter().find(|n| n.id == id).unwrap().clone()
+    }
+
+    #[test]
+    fn shrink_wrapped_notification_is_shorter_than_max_height() {
+        let mut style=Options::new();
+        for (key,value) in [("width","360"),("height","160"),
+            ("font","Sans 11"),("border-size","2"),("padding","6")]{
+            style.insert(key.into(),value.into());
+        }
+        let frame=render_notification(&fixture(),&style).unwrap();
+        assert!(frame.height<160, "short text should not fill Mako max-height");
+        assert!(frame.height>=20, "short text should still have a readable frame");
+    }
+
+    #[test]
+    fn multiline_and_long_notifications_measure_differently() {
+        let mut one=fixture();
+        one.summary="Short".into();
+        one.body="".into();
+        let mut multi=fixture();
+        multi.summary="Short".into();
+        multi.body="A\\nB\\nC\\nD".into();
+        let mut style=Options::new();
+        style.insert("width".into(),"160".into());
+        style.insert("height".into(),"140".into());
+        let first=render_notification(&one,&style).unwrap();
+        let second=render_notification(&multi,&style).unwrap();
+        assert!(second.height>first.height);
+        assert!(second.height<=140);
     }
 
     #[test]
