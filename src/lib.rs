@@ -6,6 +6,7 @@
 
 pub mod config;
 pub mod dbus;
+pub mod control;
 pub mod format;
 pub mod notification;
 
