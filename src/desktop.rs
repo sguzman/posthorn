@@ -38,8 +38,10 @@ pub fn style_for_note(
 /// The hidden-count placeholder is separate TODO work; this prevents
 /// duplicate group popups and applies max-visible to groups rather than IDs.
 pub fn visible_notifications(runtime:&SharedRuntime) -> io::Result<Vec<Notification>> {
-    let max_visible=runtime.config().global.get("max-visible")
-        .and_then(|v|v.parse::<usize>().ok()).unwrap_or(5);
+    let limit=runtime.config().global.get("max-visible")
+        .and_then(|v|v.parse::<i32>().ok()).unwrap_or(5);
+    // Upstream Mako treats negative max-visible as unlimited.
+    let max_visible=if limit<0 {usize::MAX} else {limit as usize};
     let spec=runtime.config().global.get("group-by")
         .map(String::as_str).unwrap_or("none");
     let spec=GroupSpec::parse(spec).map_err(other)?;
@@ -167,6 +169,15 @@ mod tests {
         runtime.close(a,CloseReason::Dismissed,false).unwrap();
         let after=snapshot_frame(&runtime).unwrap().unwrap();
         assert_eq!(after.height,40);
+    }
+
+    #[test]
+    fn negative_max_visible_keeps_all_groups_in_display_order() {
+        let runtime=SharedRuntime::new(Config::parse("max-visible=-1\n").unwrap());
+        for _ in 0..7 {
+            runtime.store.lock().unwrap().push(Request::default());
+        }
+        assert_eq!(visible_notifications(&runtime).unwrap().len(),7);
     }
 
     #[test]
