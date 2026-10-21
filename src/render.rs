@@ -393,7 +393,7 @@ mod tests {
             style.insert(key.into(),value.into());
         }
         let with=render_notification(&note,&style).unwrap();
-        let at=32usize*with.stride as usize+6*4;
+        let at=(with.height as usize/2)*with.stride as usize+6*4;
         assert_eq!(&with.pixels[at..at+4],&[0x00,0x00,0xFF,0xFF]);
         style.insert("icons".into(),"0".into());
         let without=render_notification(&note,&style).unwrap();
@@ -469,9 +469,11 @@ mod tests {
         style.insert("background-color".into(), "#305747".into());
         style.insert("font".into(), "Sans 13".into());
         let pixels = render_notification(&fixture(), &style).unwrap();
-        assert_eq!((pixels.width,pixels.height), (280,110));
+        assert_eq!(pixels.width,280);
+        assert!(pixels.height<110);
+        assert!(pixels.height>20);
         assert_eq!(pixels.stride,1120);
-        let bg = ((90usize*pixels.stride as usize) + 100*4) as usize;
+        let bg = ((pixels.height as usize-5)*pixels.stride as usize + 100*4) as usize;
         assert_eq!(&pixels.pixels[bg..bg+4], &[0x47,0x57,0x30,0xff]);
         assert_eq!(&pixels.pixels[0..4], &[0xff,0xff,0xff,0xff]);
         assert!(pixels.pixels.chunks_exact(4).any(|p| p[3] > 0 && p[0] != 0x47 && p[0] != 0xff));

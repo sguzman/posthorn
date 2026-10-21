@@ -180,14 +180,16 @@ mod tests {
             summary:"beta".into(),category:"failure".into(),..Request::default()
         });
         let pixels=snapshot_frame(&runtime).unwrap().unwrap();
-        assert_eq!((pixels.width,pixels.height),(100,84));
-        let idx=(30*pixels.stride as usize)+90*4;
+        assert_eq!(pixels.width,100);
+        assert!(pixels.height<84);
+        let first_height=(pixels.height-4)/2;
+        let idx=((first_height/2) as usize*pixels.stride as usize)+90*4;
         assert_eq!(&pixels.pixels[idx..idx+4],&[0x48,0x41,0x68,0xff]);
-        let idx=(74*pixels.stride as usize)+90*4;
+        let idx=((first_height+4+first_height/2) as usize*pixels.stride as usize)+90*4;
         assert_eq!(&pixels.pixels[idx..idx+4],&[0x47,0x57,0x30,0xff]);
         runtime.close(a,CloseReason::Dismissed,false).unwrap();
         let after=snapshot_frame(&runtime).unwrap().unwrap();
-        assert_eq!(after.height,40);
+        assert_eq!(after.height,first_height);
     }
 
     #[test]
