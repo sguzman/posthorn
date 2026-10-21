@@ -60,7 +60,7 @@
               "id": "T103",
               "emoji": "🧰",
               "name": "Complete option validation, built-in grouping and escaping semantics",
-              "progress": 45
+              "progress": 49
             },
             {
               "id": "T104",
@@ -103,7 +103,7 @@
               "id": "T204",
               "emoji": "🔗",
               "name": "Grouping, sorting, hidden placeholder and visibility",
-              "progress": 65
+              "progress": 77
             },
             {
               "id": "T205",
@@ -153,7 +153,7 @@
               "id": "T402",
               "emoji": "🖌️",
               "name": "Text, icons, colors, borders, progress and layout",
-              "progress": 82
+              "progress": 84
             },
             {
               "id": "T403",
@@ -199,7 +199,7 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 50
+          "progress": 53
         },
         {
           "emoji": "🎨",
@@ -209,7 +209,7 @@
         {
           "emoji": "📜",
           "name": "Mako history/control API parity",
-          "progress": 59
+          "progress": 61
         }
       ]
     },

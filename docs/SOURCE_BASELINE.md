@@ -29,10 +29,10 @@ change how they call the Freedesktop Notification protocol. Until parity:
 | Upstream source | Posthorn scope | State |
 | --- | --- | --- |
 | `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; format/group spec validation and sort handling strengthened |
-| `notification.c` | IDs, replace, close, timeout, history, groups, format | Timers, dismiss/restore and per-notification history-policy decisions tested; grouped visibility and hidden-count placeholder partial |
+| `notification.c` | IDs, replace, close, timeout, history, groups, format | Timers, dismiss/restore and per-notification history policy; grouped visibility, invisible selectors, count formatting and hidden placeholders tested; advanced grouping partial |
 | `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Active on private development bus; standard name registration exercised only in isolated CI; signals and control API partial |
 | `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Private desktop has stacked SHM layer-shell surface, pointer/touch, nine anchors, four layers and directional margins; output/scale QA pending |
-| `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango markup/colors/icons with measured popup heights, variable-width aligned stacks, configurable hidden placeholder and vertical spacing; precise layout, image-data hints and HiDPI incomplete |
+| `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango markup/colors/icons with measured popup heights, group count formatting, aligned stacks, configurable hidden placeholders and vertical spacing; precise layout, image-data hints and HiDPI incomplete |
 | `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Private live/headless services, configured hooks, mode state, partial posthornctl including menu; exact text output and reload incomplete |
 
 ## Explicit nonclaims
