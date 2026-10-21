@@ -7,10 +7,11 @@
 use wayland_client::{
     delegate_noop,
     globals::{registry_queue_init, GlobalListContents},
-    protocol::{wl_buffer, wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface},
+    protocol::{wl_buffer, wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface, wl_touch},
     WEnum,
     Connection, Dispatch, QueueHandle,
 };
+use std::collections::HashMap;
 use std::io::Write;
 use nix::poll::{poll, PollFd, PollFlags};
 use std::os::fd::AsFd;
@@ -74,6 +75,9 @@ struct ConfigureState {
     size: Option<(u32, u32)>,
     closed: bool,
     pointer: Option<wl_pointer::WlPointer>,
+    touch: Option<wl_touch::WlTouch>,
+    touch_contacts: HashMap<i32,(f64,f64)>,
+    active_surface: Option<wl_surface::WlSurface>,
     pointer_inside: bool,
     pointer_x: f64,
     pointer_y: f64,
@@ -109,6 +113,14 @@ impl Dispatch<wl_seat::WlSeat, ()> for ConfigureState {
                     if let Some(pointer) = state.pointer.take() { pointer.release(); }
                     state.pointer_inside = false;
                 }
+                if flags.contains(wl_seat::Capability::Touch) {
+                    if state.touch.is_none() {
+                        state.touch = Some(seat.get_touch(qh, ()));
+                    }
+                } else {
+                    if let Some(touch)=state.touch.take(){touch.release();}
+                    state.touch_contacts.clear();
+                }
             }
         }
     }
@@ -120,8 +132,8 @@ impl Dispatch<wl_pointer::WlPointer, ()> for ConfigureState {
         _: &(), _: &Connection, _: &QueueHandle<Self>,
     ) {
         match event {
-            wl_pointer::Event::Enter { surface_x, surface_y, .. } => {
-                state.pointer_inside = true;
+            wl_pointer::Event::Enter { surface, surface_x, surface_y, .. } => {
+                state.pointer_inside = state.active_surface.as_ref()==Some(&surface);
                 state.pointer_x = surface_x;
                 state.pointer_y = surface_y;
             }
@@ -142,6 +154,33 @@ impl Dispatch<wl_pointer::WlPointer, ()> for ConfigureState {
     }
 }
 
+
+impl Dispatch<wl_touch::WlTouch, ()> for ConfigureState {
+    fn event(
+        state:&mut Self,_:&wl_touch::WlTouch,event:wl_touch::Event,
+        _:&(),_:&Connection,_:&QueueHandle<Self>,
+    ){
+        match event {
+            wl_touch::Event::Down{surface,id,x,y,..}=>{
+                if state.active_surface.as_ref()==Some(&surface){
+                    state.touch_contacts.insert(id,(x,y));
+                }
+            }
+            wl_touch::Event::Motion{id,x,y,..}=>{
+                if let Some(position)=state.touch_contacts.get_mut(&id){
+                    *position=(x,y);
+                }
+            }
+            wl_touch::Event::Up{id,serial,..}=>{
+                if let Some((x,y))=state.touch_contacts.remove(&id){
+                    state.clicks.push(PointerClick{x,y,button:0,serial});
+                }
+            }
+            wl_touch::Event::Cancel=>state.touch_contacts.clear(),
+            _=>{}
+        }
+    }
+}
 
 impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for ConfigureState {
     fn event(
@@ -322,8 +361,10 @@ impl LivePresenter {
         self.state.size = None;
         self.state.closed = false;
         self.state.pointer_inside = false;
+        self.state.touch_contacts.clear();
         self.state.clicks.clear();
         let surface = self.compositor.create_surface(&self.qh, ());
+        self.state.active_surface=Some(surface.clone());
         let layer = self.shell.get_layer_surface(
             &surface, None, Layer::Top, "posthorn-private-preview".into(), &self.qh, (),
         );
@@ -391,6 +432,8 @@ impl LivePresenter {
 
     pub fn clear(&mut self) {
         self.state.pointer_inside = false;
+        self.state.active_surface=None;
+        self.state.touch_contacts.clear();
         self.state.clicks.clear();
         if let Some(old) = self.active.take() {
             old.buffer.destroy();
@@ -422,6 +465,16 @@ fn validate_frame(frame: &PixelFrame) -> Result<(), &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn touch_contact_translates_into_the_same_event_envelope() {
+        let mut state=ConfigureState::default();
+        state.touch_contacts.insert(3,(20.0,15.0));
+        let (x,y)=state.touch_contacts.remove(&3).unwrap();
+        state.clicks.push(PointerClick{x,y,button:0,serial:11});
+        assert_eq!(state.clicks.remove(0).button,0);
+        assert!(state.touch_contacts.is_empty());
+    }
 
     #[test]
     fn pointer_click_is_a_explicitly_typed_event() {
