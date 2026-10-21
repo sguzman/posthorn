@@ -416,6 +416,25 @@ mod tests {
     }
 
     #[test]
+    fn inline_dbus_image_pixels_take_priority_over_app_icon_file() {
+        let mut note=fixture();
+        note.app_icon="/definitely/missing.png".into();
+        note.image_data=crate::icons::decode_raw_image(
+            8,8,32,true,8,4,&[255,0,0,255].repeat(64));
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","200"),("height","100"),("border-size","0"),
+            ("padding","4"),("icons","1"),("icon-location","left"),
+            ("background-color","#305747"),
+        ]{
+            style.insert(key.into(),value.into());
+        }
+        let frame=render_notification(&note,&style).unwrap();
+        let offset=(frame.height as usize/2)*frame.stride as usize+6*4;
+        assert_eq!(&frame.pixels[offset..offset+4],&[0,0,255,255]);
+    }
+
+    #[test]
     fn draws_a_real_icon_in_left_slot_and_respects_icons_disabled() {
         let dir=tempfile::tempdir().unwrap();
         let path=dir.path().join("synthetic.png");
