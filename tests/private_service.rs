@@ -120,3 +120,30 @@ async fn pointer_button_bindings_dispatch_through_private_desktop_bus()
     assert_eq!(runtime.store.lock().unwrap().active().len(),1);
     Ok(())
 }
+
+#[tokio::test]
+async fn control_reload_swaps_styles_and_preserves_last_good_file()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::open_private_service_from_path;
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("config");
+    std::fs::write(&path,"background-color=#305747\nmax-history=5\n")?;
+    let (conn,runtime)=open_private_service_from_path(&path).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let initial=runtime.config();
+    assert_eq!(initial.global["background-color"],"#305747");
+    std::fs::write(&path,"background-color=#nothex\n")?;
+    let failed:Result<(),_>=ctl.call("Reload",&()).await;
+    assert!(failed.is_err(),"invalid reload must be rejected");
+    assert_eq!(runtime.config().global["background-color"],"#305747");
+    assert_eq!(runtime.revision(),0);
+    std::fs::write(&path,"background-color=#684148\nmax-history=2\n")?;
+    let result:()=ctl.call("Reload",&()).await?;
+    assert_eq!(result,());
+    assert_eq!(runtime.config().global["background-color"],"#684148");
+    assert_eq!(runtime.revision(),1);
+    assert_eq!(initial.global["background-color"],"#305747",
+        "old snapshots remain immutable after reload");
+    Ok(())
+}
