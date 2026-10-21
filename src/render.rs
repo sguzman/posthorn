@@ -78,12 +78,18 @@ fn paint_icon(cr:&cairo::Context,icon:&IconPixels,x:f64,y:f64,scale:f64)
 pub fn measure_notification_height(
     note:&Notification,style:&Options,
 ) -> Result<u32,String> {
+    measure_notification_height_group(note,style,0)
+}
+
+pub fn measure_notification_height_group(
+    note:&Notification,style:&Options,group_count:usize,
+) -> Result<u32,String> {
     let icon=load_note_icon(note,style);
-    measure_height_with_icon(note,style,icon.as_ref())
+    measure_height_with_icon(note,style,icon.as_ref(),group_count)
 }
 
 fn measure_height_with_icon(
-    note:&Notification,style:&Options,icon:Option<&IconPixels>,
+    note:&Notification,style:&Options,icon:Option<&IconPixels>,group_count:usize,
 ) -> Result<u32,String> {
     let width=integer_option(style,"width",300);
     let cap=integer_option(style,"height",100);
@@ -119,7 +125,7 @@ fn measure_height_with_icon(
     let format=style.get("format").map(String::as_str).unwrap_or("<b>%s</b>\\n%b");
     let decoded=decode_format(format).map_err(|e|e.to_string())?;
     let text=render_notification_format(&decoded,&FormatNotification{
-        id:note.id,app_name:&note.app_name,summary:&note.summary,body:&note.body,group_count:0,
+        id:note.id,app_name:&note.app_name,summary:&note.summary,body:&note.body,group_count,
     },markup&&pango::parse_markup(&note.body,'\0').is_ok());
     let safe=if pango::parse_markup(&text,'\0').is_ok(){
         text
@@ -154,11 +160,17 @@ fn measure_height_with_icon(
 }
 
 pub fn render_notification(note: &Notification, style: &Options) -> Result<PixelFrame, String> {
+    render_notification_group(note,style,0)
+}
+
+pub fn render_notification_group(
+    note:&Notification,style:&Options,group_count:usize,
+) -> Result<PixelFrame,String> {
     let width = integer_option(style, "width", 300);
     // One decode per frame. Both text measurement and painting consume the
     // same icon, avoiding redundant filesystem reads and image decoding.
     let icon=load_note_icon(note,style);
-    let height = measure_height_with_icon(note,style,icon.as_ref())?;
+    let height = measure_height_with_icon(note,style,icon.as_ref(),group_count)?;
     if width == 0 || height == 0 || width > 4096 || height > 4096
         || u64::from(width) * u64::from(height) * 4 > 64 * 1024 * 1024
     {
@@ -202,7 +214,7 @@ pub fn render_notification(note: &Notification, style: &Options) -> Result<Pixel
     let decoded = decode_format(format).map_err(|e| e.to_string())?;
     let rendered = render_notification_format(&decoded, &FormatNotification {
         id: note.id, app_name: &note.app_name, summary: &note.summary,
-        body: &note.body, group_count: 0,
+        body: &note.body, group_count,
     }, body_is_valid_markup);
     // If the configured template is malformed, escape *everything* instead of
     // interpreting unintended markup from a remote notification sender.
@@ -430,6 +442,21 @@ mod tests {
         // The text moves into the freed icon slot; this point may contain a
         // text glyph rather than background after icons are disabled.
         assert_ne!(&without.pixels[at..at+4],&[0x00,0x00,0xFF,0xFF]);
+    }
+
+    #[test]
+    fn group_count_substitutions_affect_pango_measurement_and_rendering() {
+        let mut note=fixture();
+        note.summary="Task".into();
+        note.body="".into();
+        let mut style=Options::new();
+        style.insert("format".into(),"(%g) <b>%s</b>".into());
+        style.insert("width".into(),"160".into());
+        style.insert("height".into(),"80".into());
+        let frame=render_notification_group(&note,&style,3).unwrap();
+        let cap=measure_notification_height_group(&note,&style,3).unwrap();
+        assert_eq!(frame.height,cap);
+        assert!(frame.height>0);
     }
 
     #[test]
