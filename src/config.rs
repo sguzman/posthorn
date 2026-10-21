@@ -170,6 +170,11 @@ impl Config {
     /// selectors and cross-output layout are deliberately not claimed as ported.
     pub fn style_for(&self, n: &Traits<'_>) -> Options {
         let mut style = self.global.clone();
+        // Mako installs a hidden-notification formatting rule before user
+        // criteria. Later [hidden] rules may override this built-in format.
+        if n.hidden {
+            style.insert("format".into(),"(%h more)".into());
+        }
         for rule in &self.rules {
             if rule.matches(n) {
                 style.extend(rule.options.clone());
@@ -350,6 +355,18 @@ mod tests {
         Traits { app_name: "example", app_icon:"", category, desktop_entry:"", summary:"Saved",
             body:"All changes written", urgency:"normal", anchor:"top-right", output:"",
             modes, requested_timeout_ms:-1, actionable:false, group_index:-1, hidden:false }
+    }
+
+    #[test]
+    fn hidden_format_defaults_are_overridable_by_explicit_hidden_criteria() {
+        let ordinary=Config::parse("format=%s\n").unwrap();
+        let mut fields=note("system",&["default"]);
+        fields.hidden=true;
+        assert_eq!(ordinary.style_for(&fields).get("format").map(String::as_str),
+            Some("(%h more)"));
+        let custom=Config::parse("[hidden]\nformat=<b>%h of %t unseen</b>\n").unwrap();
+        assert_eq!(custom.style_for(&fields).get("format").map(String::as_str),
+            Some("<b>%h of %t unseen</b>"));
     }
 
     #[test]
