@@ -7,6 +7,7 @@
 pub mod config;
 pub mod dbus;
 pub mod control;
+pub mod ctl;
 pub mod format;
 pub mod notification;
 pub mod timers;

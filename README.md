@@ -66,6 +66,11 @@ single temporary, synthetic category-colored Wayland popup using the supplied
 Mako-format configuration. This is **opt-in developer QA**, not the running
 notification daemon. It doesn't claim the desktop D-Bus name or affect Mako.
 
+The experimental `posthornctl` binary exercises Mako-style commands only
+against `org.posthorn.Development`. It cannot control or replace your active
+Mako daemon. Its `menu` command, production routing, and exact non-JSON
+formatting are not yet implemented.
+
 ## License
 
 MIT. Mako's original authors are credited in [the source baseline](docs/SOURCE_BASELINE.md).
