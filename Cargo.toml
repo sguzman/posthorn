@@ -13,6 +13,7 @@ publish = false
 regex = "1.12"
 zbus = "5.19"
 serde = "1.0"
+tokio = { version = "1.48", features = ["macros", "rt", "time"] }
 wayland-client = "0.31.15"
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 
@@ -21,7 +22,7 @@ default = []
 dbus-integration = []
 
 [dev-dependencies]
-tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "time"] }
 
 [lints.rust]
 unsafe_code = "forbid"

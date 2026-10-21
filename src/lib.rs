@@ -11,6 +11,7 @@ pub mod format;
 pub mod notification;
 pub mod timers;
 pub mod runtime;
+pub mod service;
 pub mod wayland;
 pub mod raster;
 pub mod grouping;
