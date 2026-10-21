@@ -72,6 +72,13 @@ against `org.posthorn.Development`. It cannot control or replace your active
 Mako daemon. Its `menu` command, production routing, and exact non-JSON
 formatting are not yet implemented.
 
+The extra `posthorn --experimental-private-desktop PATH` command is a
+**development-only live preview**: it runs the private-name D-Bus daemon
+alongside a separate Wayland renderer thread and updates a persistent stacked
+popup surface whenever the notification store changes. It does not claim the
+real desktop notification D-Bus name, handle clicks or outputs correctly yet,
+or replace Mako. Do not autostart it.
+
 ## License
 
 MIT. Mako's original authors are credited in [the source baseline](docs/SOURCE_BASELINE.md).

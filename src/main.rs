@@ -16,6 +16,7 @@ async fn main() -> ExitCode {
                      Usage:\n\
                      \tposthorn --check-config PATH\n\
                      \tposthorn --experimental-private-service PATH\n\
+                     \tposthorn --experimental-private-desktop PATH\n\
                      \tposthorn --experimental-popup-preview PATH\n\
                      \tposthorn --version\n\
                      \tposthorn --help\n\
@@ -68,6 +69,16 @@ async fn main() -> ExitCode {
             match result {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => { eprintln!("Experimental Wayland preview: {e}"); ExitCode::FAILURE }
+            }
+        }
+        (Some("--experimental-private-desktop"), Some(path)) => {
+            let config = match Config::from_path(Path::new(&path)) {
+                Ok(config) => config,
+                Err(err) => { eprintln!("{err}"); return ExitCode::FAILURE; }
+            };
+            match posthorn::desktop::run_private_desktop(config).await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(err) => { eprintln!("Posthorn private desktop failed: {err}"); ExitCode::FAILURE }
             }
         }
         (Some("--experimental-private-service"), Some(path)) => {

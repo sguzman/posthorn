@@ -15,6 +15,7 @@ pub mod runtime;
 pub mod service;
 pub mod signals;
 pub mod wayland;
+pub mod desktop;
 pub mod raster;
 pub mod render;
 pub mod grouping;
