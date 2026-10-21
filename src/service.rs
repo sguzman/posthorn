@@ -40,6 +40,9 @@ pub async fn tick_expirations(conn: &Connection, runtime: &SharedRuntime)
             &(*id, CloseReason::Expired as u32),
         ).await?;
     }
+    if !expired.is_empty() {
+        crate::signals::invalidate(conn, "Notifications").await?;
+    }
     Ok(expired.len())
 }
 

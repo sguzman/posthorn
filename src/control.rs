@@ -149,9 +149,13 @@ impl MakoControl {
         #[zbus(connection)] conn: &Connection,
     ) -> zbus::fdo::Result<()> {
         let ids = self.dismiss_impl(&options)?;
-        for id in ids {
-            emit_notification_signal(conn, "NotificationClosed", id,
-                CloseReason::Dismissed as u32).await?;
+        if !ids.is_empty() {
+            for id in ids {
+                emit_notification_signal(conn, "NotificationClosed", id,
+                    CloseReason::Dismissed as u32).await?;
+            }
+            crate::signals::invalidate(conn, "Notifications").await
+                .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         }
         Ok(())
     }
@@ -170,8 +174,14 @@ impl MakoControl {
     }
 
     #[zbus(name = "RestoreNotification")]
-    fn restore_notification(&self) -> zbus::fdo::Result<()> {
-        self.store.lock().map_err(|_| internal_error())?.restore();
+    async fn restore_notification(
+        &self, #[zbus(connection)] conn: &Connection,
+    ) -> zbus::fdo::Result<()> {
+        let restored = self.store.lock().map_err(|_| internal_error())?.restore();
+        if restored.is_some() {
+            crate::signals::invalidate(conn, "Notifications").await
+                .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        }
         Ok(())
     }
 
@@ -186,13 +196,23 @@ impl MakoControl {
     }
 
     #[zbus(name = "SetMode")]
-    fn set_mode(&self, mode: &str) -> zbus::fdo::Result<()> {
-        self.set_modes_impl(vec![mode.into()])
+    async fn set_mode(
+        &self, mode: &str, #[zbus(connection)] conn: &Connection,
+    ) -> zbus::fdo::Result<()> {
+        self.set_modes_impl(vec![mode.into()])?;
+        crate::signals::invalidate(conn, "Modes").await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        Ok(())
     }
 
     #[zbus(name = "SetModes")]
-    fn set_modes(&self, modes: Vec<String>) -> zbus::fdo::Result<()> {
-        self.set_modes_impl(modes)
+    async fn set_modes(
+        &self, modes: Vec<String>, #[zbus(connection)] conn: &Connection,
+    ) -> zbus::fdo::Result<()> {
+        self.set_modes_impl(modes)?;
+        crate::signals::invalidate(conn, "Modes").await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        Ok(())
     }
 
     #[zbus(name = "ListModes")]

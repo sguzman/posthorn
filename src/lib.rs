@@ -12,6 +12,7 @@ pub mod notification;
 pub mod timers;
 pub mod runtime;
 pub mod service;
+pub mod signals;
 pub mod wayland;
 pub mod raster;
 pub mod render;

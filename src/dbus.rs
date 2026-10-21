@@ -125,7 +125,7 @@ impl FreedesktopNotifications {
     }
 
     #[zbus(name = "Notify")]
-    fn notify(
+    async fn notify(
         &self,
         app_name: &str,
         replaces_id: u32,
@@ -135,10 +135,14 @@ impl FreedesktopNotifications {
         actions: Vec<String>,
         hints: HashMap<String, OwnedValue>,
         expire_timeout: i32,
+        #[zbus(connection)] conn: &zbus::Connection,
     ) -> zbus::fdo::Result<u32> {
-        self.apply_notify(
+        let id = self.apply_notify(
             app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout,
-        )
+        )?;
+        crate::signals::invalidate(conn, "Notifications").await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        Ok(id)
     }
 
     #[zbus(name = "CloseNotification")]
@@ -160,6 +164,8 @@ impl FreedesktopNotifications {
             Self::notification_closed(&emitter, id, CloseReason::ClosedByCall as u32)
                 .await
                 .map_err(|err| zbus::fdo::Error::Failed(err.to_string()))?;
+            crate::signals::invalidate(emitter.connection(), "Notifications")
+                .await.map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         }
         Ok(())
     }
