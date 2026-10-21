@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn group_dismiss_keeps_unrelated_notifications_and_cancels_timers() {
         let runtime=SharedRuntime::new(crate::config::Config::parse(
-            "group-by=app-name\\ndefault-timeout=4000\\n"
+            "group-by=app-name\ndefault-timeout=4000\n"
         ).unwrap());
         let control=MakoControl::with_runtime(runtime.clone());
         let now=std::time::Instant::now();
@@ -338,7 +338,7 @@ mod tests {
     #[test]
     fn unsupported_group_criteria_fail_without_dismissing() {
         let runtime=SharedRuntime::new(crate::config::Config::parse(
-            "group-by=group-index\\n"
+            "group-by=group-index\n"
         ).unwrap());
         let control=MakoControl::with_runtime(runtime.clone());
         runtime.store.lock().unwrap().push(Request::default());
