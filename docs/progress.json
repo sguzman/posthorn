@@ -35,7 +35,7 @@
               "id": "T004",
               "emoji": "🧪",
               "name": "Validate Rust scaffold with CI and formatting",
-              "progress": 90
+              "progress": 95
             }
           ]
         },
@@ -122,13 +122,13 @@
               "id": "T301",
               "emoji": "📬",
               "name": "Implement org.freedesktop.Notifications methods and signals",
-              "progress": 42
+              "progress": 50
             },
             {
               "id": "T302",
               "emoji": "🧾",
               "name": "Implement full Mako D-Bus control interface, properties and JSON",
-              "progress": 42
+              "progress": 45
             },
             {
               "id": "T303",

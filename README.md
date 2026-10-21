@@ -42,6 +42,8 @@ unverified work as complete.
 ```sh
 cargo test --all-targets
 cargo run -- --check-config /path/to/mako/config
+# In a temporary D-Bus session (never claims the real Mako bus name):
+dbus-run-session -- cargo test --test dbus_wire --features dbus-integration
 ```
 
 `--check-config` is a **development-only** parser command. Success means the
