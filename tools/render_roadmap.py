@@ -15,7 +15,7 @@ def pct(tasks):
 
 
 def bar(n):
-    filled = round(n / 10)
+    filled = (n + 5) // 10
     return "█" * filled + "░" * (10 - filled) + f" {n}%"
 
 

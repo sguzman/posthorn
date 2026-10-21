@@ -1,8 +1,8 @@
 # Posthorn roadmap
 
 Source of truth: [`progress.json`](progress.json).
-Progress is the average of documented atomic task percentages. A task at 100%
-requires acceptance evidence; partial work stays below 100%. Future ideas
+Progress is the average of documented atomic task percentages. A task at██████████ 100%
+requires acceptance evidence; partial work stays below██████████ 100%. Future ideas
 do not count toward Mako MVP. No runtime parity is claimed yet.
 
 ## 📯 M0 — Mako parity and MVP inauguration — `████░░░░░░ 38%`
@@ -13,7 +13,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 📌 T001 — Pin Mako v1.11.0 and document newer delta — `██████████ 100%`
 - 🎨 T002 — Assign OKLab/OKLCH Posthorn color and embed README swatch — `██████████ 100%`
 - 🔐 T003 — Keep live Mako untouched, isolate public test fixtures — `██████████ 100%`
-- 🧪 T004 — Validate Rust scaffold with CI and formatting — `████████░░ 85%`
+- 🧪 T004 — Validate Rust scaffold with CI and formatting — `█████████░ 85%`
 
 ### 🧩 P1 — Config, criteria and types port — `█████░░░░░ 52%`
 
