@@ -155,7 +155,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("unexpected-hook");
         let cfg = format!(
-            "[category=success]\\non-notify=exec touch '{}'\\n[mode=quiet]\\non-notify=none\\n",
+            "[category=success]\non-notify=exec touch '{}'\n[mode=quiet]\non-notify=none\n",
             marker.display()
         );
         let runtime = SharedRuntime::new(Config::parse(&cfg).unwrap());
