@@ -12,5 +12,6 @@ pub mod notification;
 pub mod timers;
 pub mod wayland;
 pub mod raster;
+pub mod grouping;
 
 pub const MAKO_BASELINE: &str = "v1.11.0";
