@@ -175,9 +175,11 @@ impl Config {
         if n.hidden {
             style.insert("format".into(),"(%h more)".into());
         } else if n.group_index>=0 {
-            // Upstream grouped notifications have a built-in count format,
-            // which explicit [grouped] and [group-index] rules may override.
+            // Mako's ordered built-ins first hide all grouped members, then
+            // make index zero visible. Explicit user rules run afterwards.
             style.insert("format".into(),"(%g) <b>%s</b>\\n%b".into());
+            style.insert("invisible".into(),
+                if n.group_index==0{"0"}else{"1"}.into());
         }
         for rule in &self.rules {
             if rule.matches(n) {
@@ -370,6 +372,20 @@ mod tests {
         Traits { app_name: "example", app_icon:"", category, desktop_entry:"", summary:"Saved",
             body:"All changes written", urgency:"normal", anchor:"top-right", output:"",
             modes, requested_timeout_ms:-1, actionable:false, group_index:-1, hidden:false }
+    }
+
+    #[test]
+    fn grouped_secondary_members_are_hidden_by_default_but_can_be_unhidden(){
+        let conf=Config::default();
+        let mut fields=note("ordinary",&["default"]);
+        fields.group_index=1;
+        assert_eq!(conf.style_for(&fields).get("invisible").map(String::as_str),Some("1"));
+        fields.group_index=0;
+        assert_eq!(conf.style_for(&fields).get("invisible").map(String::as_str),Some("0"));
+        let explicit=Config::parse("[grouped]\ninvisible=0\n").unwrap();
+        fields.group_index=2;
+        assert_eq!(explicit.style_for(&fields).get("invisible").map(String::as_str),
+            Some("0"));
     }
 
     #[test]
