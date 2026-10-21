@@ -7,10 +7,12 @@
 use wayland_client::{
     delegate_noop,
     globals::{registry_queue_init, GlobalListContents},
-    protocol::{wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface},
+    protocol::{wl_buffer, wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface},
+    WEnum,
     Connection, Dispatch, QueueHandle,
 };
 use std::io::Write;
+use nix::poll::{poll, PollFd, PollFlags};
 use std::os::fd::AsFd;
 use std::time::Duration;
 use crate::render::PixelFrame;
@@ -58,10 +60,24 @@ impl PopupBounds {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointerClick {
+    pub x: f64,
+    pub y: f64,
+    /// Linux input-event button codes: left 272, right 273, middle 274.
+    pub button: u32,
+    pub serial: u32,
+}
+
 #[derive(Debug, Default)]
 struct ConfigureState {
     size: Option<(u32, u32)>,
     closed: bool,
+    pointer: Option<wl_pointer::WlPointer>,
+    pointer_inside: bool,
+    pointer_x: f64,
+    pointer_y: f64,
+    clicks: Vec<PointerClick>,
 }
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for ConfigureState {
@@ -77,6 +93,55 @@ delegate_noop!(ConfigureState: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
 delegate_noop!(ConfigureState: ignore wl_shm::WlShm);
 delegate_noop!(ConfigureState: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(ConfigureState: ignore wl_buffer::WlBuffer);
+
+impl Dispatch<wl_seat::WlSeat, ()> for ConfigureState {
+    fn event(
+        state: &mut Self, seat: &wl_seat::WlSeat, event: wl_seat::Event,
+        _: &(), _: &Connection, qh: &QueueHandle<Self>,
+    ) {
+        if let wl_seat::Event::Capabilities { capabilities } = event {
+            if let WEnum::Value(flags) = capabilities {
+                if flags.contains(wl_seat::Capability::Pointer) {
+                    if state.pointer.is_none() {
+                        state.pointer = Some(seat.get_pointer(qh, ()));
+                    }
+                } else {
+                    if let Some(pointer) = state.pointer.take() { pointer.release(); }
+                    state.pointer_inside = false;
+                }
+            }
+        }
+    }
+}
+
+impl Dispatch<wl_pointer::WlPointer, ()> for ConfigureState {
+    fn event(
+        state: &mut Self, _: &wl_pointer::WlPointer, event: wl_pointer::Event,
+        _: &(), _: &Connection, _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter { surface_x, surface_y, .. } => {
+                state.pointer_inside = true;
+                state.pointer_x = surface_x;
+                state.pointer_y = surface_y;
+            }
+            wl_pointer::Event::Leave { .. } => state.pointer_inside = false,
+            wl_pointer::Event::Motion { surface_x, surface_y, .. } => {
+                state.pointer_x = surface_x;
+                state.pointer_y = surface_y;
+            }
+            wl_pointer::Event::Button { serial, button, state: WEnum::Value(wl_pointer::ButtonState::Pressed), .. }
+                if state.pointer_inside =>
+            {
+                state.clicks.push(PointerClick {
+                    x: state.pointer_x, y: state.pointer_y, button, serial,
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
 
 impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for ConfigureState {
     fn event(
@@ -214,6 +279,7 @@ pub struct LivePresenter {
     shell: zwlr_layer_shell_v1::ZwlrLayerShellV1,
     shm: wl_shm::WlShm,
     state: ConfigureState,
+    _seat: Option<wl_seat::WlSeat>,
     active: Option<LiveSurface>,
 }
 
@@ -234,9 +300,11 @@ impl LivePresenter {
         let compositor = globals.bind(&qh, 4..=6, ())?;
         let shell = globals.bind(&qh, 1..=4, ())?;
         let shm = globals.bind(&qh, 1..=1, ())?;
+        // Headless preview still works without any pointer-capable seat.
+        let seat = globals.bind(&qh, 1..=9, ()).ok();
         Ok(Self {
             conn, queue, qh, compositor, shell, shm,
-            state: ConfigureState::default(), active: None,
+            state: ConfigureState::default(), _seat: seat, active: None,
         })
     }
 
@@ -250,7 +318,11 @@ impl LivePresenter {
             self.conn.flush()?;
             return Ok(());
         };
-        self.state = ConfigureState::default();
+        // Preserve registered seat and pointer objects across redraws.
+        self.state.size = None;
+        self.state.closed = false;
+        self.state.pointer_inside = false;
+        self.state.clicks.clear();
         let surface = self.compositor.create_surface(&self.qh, ());
         let layer = self.shell.get_layer_surface(
             &surface, None, Layer::Top, "posthorn-private-preview".into(), &self.qh, (),
@@ -292,8 +364,20 @@ impl LivePresenter {
     }
 
     pub fn poll_events(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // dispatch_pending() alone does NOT read compositor socket events.
+        // First dispatch existing events, then poll the Wayland fd without
+        // blocking the runtime's notification refresh loop.
         self.queue.dispatch_pending(&mut self.state)?;
         self.conn.flush()?;
+        if let Some(read) = self.conn.prepare_read() {
+            let ready = {
+                let mut fd = [PollFd::new(self.conn.as_fd(), PollFlags::POLLIN)];
+                poll(&mut fd, 0u8)? > 0
+                    && fd[0].revents().is_some_and(|events| events.contains(PollFlags::POLLIN))
+            };
+            if ready { read.read()?; }
+        }
+        self.queue.dispatch_pending(&mut self.state)?;
         if self.state.closed {
             self.clear();
             self.state.closed = false;
@@ -301,7 +385,13 @@ impl LivePresenter {
         Ok(())
     }
 
+    pub fn take_clicks(&mut self) -> Vec<PointerClick> {
+        std::mem::take(&mut self.state.clicks)
+    }
+
     pub fn clear(&mut self) {
+        self.state.pointer_inside = false;
+        self.state.clicks.clear();
         if let Some(old) = self.active.take() {
             old.buffer.destroy();
             old.pool.destroy();
@@ -332,6 +422,18 @@ fn validate_frame(frame: &PixelFrame) -> Result<(), &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointer_click_is_a_explicitly_typed_event() {
+        let mut state = ConfigureState::default();
+        state.pointer_inside = true;
+        state.pointer_x = 32.5;
+        state.pointer_y = 40.0;
+        state.clicks.push(PointerClick {
+            x: state.pointer_x, y: state.pointer_y, button: 272, serial: 5,
+        });
+        assert_eq!(state.clicks.remove(0).button, 272);
+    }
 
     #[test]
     fn refuses_invalid_shm_lengths_without_connecting_to_wayland() {
