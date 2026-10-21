@@ -122,6 +122,41 @@ pub fn render_notification(note: &Notification, style: &Options) -> Result<Pixel
     Ok(PixelFrame {width, height, stride, pixels})
 }
 
+
+/// Compose ordered Mako-style popup frames into a single layer-shell surface.
+/// Each frame is already rendered and has an independent background. The
+/// transparent gaps are intentionally *not* colored by the compositor.
+pub fn compose_stack(frames: &[PixelFrame], gap: u32) -> Result<Option<PixelFrame>, String> {
+    if frames.is_empty() {return Ok(None);}
+    let width=frames.iter().map(|f|f.width).max().unwrap_or(0);
+    let content_height: u64=frames.iter().map(|f|u64::from(f.height)).sum();
+    let spaces=u64::from(gap) * (frames.len().saturating_sub(1) as u64);
+    let height=content_height.checked_add(spaces)
+        .ok_or("popup stack overflow")?;
+    let stride=u64::from(width).checked_mul(4).ok_or("popup stack stride overflow")?;
+    let size=stride.checked_mul(height).ok_or("popup stack buffer overflow")?;
+    if width==0 || height==0 || height>4096 || width>4096 || size>64*1024*1024 {
+        return Err("popup stack exceeds safe Wayland bounds".into());
+    }
+    let mut pixels=vec![0;size as usize];
+    let mut offset_y:usize=0;
+    for frame in frames {
+        if frame.height==0 || frame.width==0 ||
+           frame.stride<i32::try_from(frame.width*4).map_err(|_|"invalid frame stride")? ||
+           frame.pixels.len() != (frame.stride as usize)*(frame.height as usize) {
+            return Err("invalid child frame".into());
+        }
+        let row_bytes=frame.width as usize * 4;
+        for y in 0..frame.height as usize {
+            let src=y*frame.stride as usize;
+            let dst=(offset_y+y)*stride as usize;
+            pixels[dst..dst+row_bytes].copy_from_slice(&frame.pixels[src..src+row_bytes]);
+        }
+        offset_y+=frame.height as usize + gap as usize;
+    }
+    Ok(Some(PixelFrame{width,height:height as u32,stride:stride as i32,pixels}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,6 +168,26 @@ mod tests {
             body: "Line 2".into(), category: "success".into(),
             ..Request::default() });
         store.active().iter().find(|n| n.id == id).unwrap().clone()
+    }
+
+    #[test]
+    fn stack_preserves_order_and_transparent_spacers() {
+        let first=PixelFrame{width:2,height:1,stride:8,pixels:vec![1;8]};
+        let second=PixelFrame{width:1,height:2,stride:4,pixels:vec![2;8]};
+        let combined=compose_stack(&[first,second],1).unwrap().unwrap();
+        assert_eq!((combined.width,combined.height,combined.stride),(2,4,8));
+        assert_eq!(&combined.pixels[0..8],&[1;8]);
+        assert_eq!(&combined.pixels[8..16],&[0;8]);
+        assert_eq!(&combined.pixels[16..20],&[2;4]);
+        assert_eq!(&combined.pixels[20..24],&[0;4]);
+        assert_eq!(&combined.pixels[24..28],&[2;4]);
+    }
+
+    #[test]
+    fn empty_and_oversized_stacks_are_rejected_safely() {
+        assert!(compose_stack(&[],10).unwrap().is_none());
+        let huge=PixelFrame{width:1,height:4096,stride:4,pixels:vec![0;16384]};
+        assert!(compose_stack(&[huge.clone(),huge],4).is_err());
     }
 
     #[test]
