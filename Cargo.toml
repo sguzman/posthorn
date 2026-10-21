@@ -18,7 +18,7 @@ tempfile = "3.25"
 nix = { version = "0.30", features = ["poll"] }
 zbus = "5.19"
 serde = "1.0"
-tokio = { version = "1.48", features = ["macros", "rt", "time"] }
+tokio = { version = "1.48", features = ["macros", "rt", "time", "sync"] }
 wayland-client = "0.31.15"
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 
