@@ -10,6 +10,7 @@ pub mod control;
 pub mod format;
 pub mod notification;
 pub mod timers;
+pub mod runtime;
 pub mod wayland;
 pub mod raster;
 pub mod grouping;

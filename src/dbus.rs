@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 use zbus::{interface, object_server::SignalEmitter, zvariant::OwnedValue};
 
 use crate::notification::{Action, CloseReason, NotificationStore, Request, Urgency};
+use crate::runtime::SharedRuntime;
+use std::time::Instant;
 
 pub const BUS_NAME: &str = "org.freedesktop.Notifications";
 pub const OBJECT_PATH: &str = "/org/freedesktop/Notifications";
@@ -17,11 +19,16 @@ pub const OBJECT_PATH: &str = "/org/freedesktop/Notifications";
 #[derive(Clone, Debug)]
 pub struct FreedesktopNotifications {
     store: Arc<Mutex<NotificationStore>>,
+    runtime: Option<SharedRuntime>,
 }
 
 impl FreedesktopNotifications {
     pub fn new(store: Arc<Mutex<NotificationStore>>) -> Self {
-        Self { store }
+        Self { store, runtime: None }
+    }
+
+    pub fn with_runtime(runtime: SharedRuntime) -> Self {
+        Self { store: Arc::clone(&runtime.store), runtime: Some(runtime) }
     }
 
     pub fn store(&self) -> &Arc<Mutex<NotificationStore>> {
@@ -87,7 +94,13 @@ impl FreedesktopNotifications {
             .store
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("notification state lock poisoned".into()))?;
-        Ok(state.push(request))
+        let id = state.push(request);
+        drop(state);
+        if let Some(runtime) = &self.runtime {
+            runtime.schedule(id, Instant::now())
+                .map_err(|e| zbus::fdo::Error::Failed(e.into()))?;
+        }
+        Ok(id)
     }
 }
 
@@ -134,11 +147,13 @@ impl FreedesktopNotifications {
         id: u32,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let closed = {
+        let closed = if let Some(runtime) = &self.runtime {
+            runtime.close(id, CloseReason::ClosedByCall, true)
+                .map_err(|e| zbus::fdo::Error::Failed(e.into()))?
+        } else {
             let mut state = self.store.lock().map_err(|_| {
                 zbus::fdo::Error::Failed("notification state lock poisoned".into())
             })?;
-            // Mako keeps an explicitly closed notification in history.
             state.close(id, CloseReason::ClosedByCall, true, true).is_some()
         };
         if closed {
