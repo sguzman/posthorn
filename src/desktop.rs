@@ -61,12 +61,18 @@ pub fn visible_notifications(runtime:&SharedRuntime) -> io::Result<Vec<Notificat
     let spec=runtime.config().global.get("group-by")
         .map(String::as_str).unwrap_or("none");
     let spec=GroupSpec::parse(spec).map_err(other)?;
+    let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let store=runtime.store.lock().map_err(|_|poisoned())?;
     let by_id=store.active();
     let mut selected=Vec::new();
-    for group in group_ordered(by_id,&spec).into_iter().take(max_visible) {
+    for group in group_ordered(by_id,&spec) {
         if let Some(id)=group.ids.first(){
             if let Some(n)=by_id.iter().find(|n|&n.id==id){
+                let style=style_for_note(runtime,n,&modes);
+                if style.get("invisible").is_some_and(|v|v=="1"||v=="true"){
+                    continue;
+                }
+                if selected.len()>=max_visible {break;}
                 selected.push(n.clone());
             }
         }
@@ -74,18 +80,35 @@ pub fn visible_notifications(runtime:&SharedRuntime) -> io::Result<Vec<Notificat
     Ok(selected)
 }
 
+/// Count real groups eligible for display, excluding explicitly invisible
+/// categories. This excludes them from synthetic hidden-count placeholders.
+pub fn displayable_groups(runtime:&SharedRuntime)->io::Result<usize>{
+    let group_spec=runtime.config().global.get("group-by")
+        .map(String::as_str).unwrap_or("none");
+    let spec=GroupSpec::parse(group_spec).map_err(other)?;
+    let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
+    let store=runtime.store.lock().map_err(|_|poisoned())?;
+    let mut count=0usize;
+    for group in group_ordered(store.active(),&spec){
+        if let Some(id)=group.ids.first(){
+            if let Some(n)=store.active().iter().find(|n|&n.id==id){
+                let style=style_for_note(runtime,n,&modes);
+                if !style.get("invisible").is_some_and(|v|v=="1"||v=="true"){
+                    count+=1;
+                }
+            }
+        }
+    }
+    Ok(count)
+}
+
 /// Render the active, ordered messages at the present instant, including
 /// configured category colors. Returns None for an empty notification list.
 pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> {
     let notes=visible_notifications(runtime)?;
-    let (hidden,total)={
-        let store=runtime.store.lock().map_err(|_|poisoned())?;
-        let name=runtime.config().global.get("group-by")
-            .map(String::as_str).unwrap_or("none");
-        let spec=GroupSpec::parse(name).map_err(other)?;
-        let all_groups=group_ordered(store.active(),&spec).len();
-        (all_groups.saturating_sub(notes.len()),store.active().len())
-    };
+    let displayable=displayable_groups(runtime)?;
+    let total=runtime.store.lock().map_err(|_|poisoned())?.active().len();
+    let hidden=displayable.saturating_sub(notes.len());
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let mut frames=Vec::with_capacity(notes.len());
     let mut margins=Vec::with_capacity(notes.len());
@@ -248,6 +271,28 @@ mod tests {
             runtime.store.lock().unwrap().push(Request::default());
         }
         assert_eq!(visible_notifications(&runtime).unwrap().len(),7);
+    }
+
+    #[test]
+    fn invisible_notifications_do_not_consume_visible_slots_or_hidden_count() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "max-visible=1\n[category=silent]\ninvisible=1\n"
+        ).unwrap());
+        let old=runtime.store.lock().unwrap().push(Request{
+            category:"ordinary".into(),..Request::default()
+        });
+        runtime.store.lock().unwrap().push(Request{
+            category:"silent".into(),..Request::default()
+        });
+        let newest=runtime.store.lock().unwrap().push(Request{
+            category:"ordinary".into(),..Request::default()
+        });
+        let shown=visible_notifications(&runtime).unwrap();
+        assert_eq!(shown.len(),1);
+        assert_eq!(shown[0].id,newest);
+        assert_eq!(displayable_groups(&runtime).unwrap(),2);
+        assert_ne!(shown[0].id,old);
+        assert_eq!(runtime.store.lock().unwrap().active().len(),3);
     }
 
     #[test]
