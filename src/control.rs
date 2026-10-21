@@ -13,6 +13,7 @@ use zbus::{interface, zvariant::{OwnedValue, Value}, Connection};
 use crate::dbus::{BUS_NAME, OBJECT_PATH};
 use crate::notification::{CloseReason, Notification, NotificationStore, Urgency};
 use crate::runtime::SharedRuntime;
+use crate::grouping::{GroupSpec, group_ordered};
 
 pub const CONTROL_INTERFACE: &str = "fr.emersion.Mako";
 pub const CONTROL_PATH: &str = "/fr/emersion/Mako";
@@ -55,16 +56,27 @@ impl MakoControl {
                 "invalid combination of all/group/id".into(),
             ));
         }
-        if group {
-            // Never silently dismiss only one notification instead of a group.
-            return Err(zbus::fdo::Error::NotSupported(
-                "group dismissal awaits the Mako group-by port".into(),
-            ));
-        }
         let ids = {
             let store = self.store.lock().map_err(|_| internal_error())?;
             if all {
                 store.active().iter().map(|n| n.id).collect::<Vec<_>>()
+            } else if group {
+                // Makoctl --group always chooses the group of the first
+                // currently displayed notification. If grouping is disabled,
+                // this reduces to exactly one notification.
+                let spec = if let Some(runtime) = &self.runtime {
+                    let raw = runtime.config().global.get("group-by")
+                        .map(String::as_str).unwrap_or("none");
+                    GroupSpec::parse(raw).map_err(|e|
+                        zbus::fdo::Error::NotSupported(e)
+                    )?
+                } else {
+                    GroupSpec::parse("none").map_err(|e|
+                        zbus::fdo::Error::NotSupported(e)
+                    )?
+                };
+                group_ordered(store.active(), &spec).first()
+                    .map(|g|g.ids.clone()).unwrap_or_default()
             } else if id == 0 {
                 store.active().front().map(|n| vec![n.id]).unwrap_or_default()
             } else if store.active().iter().any(|n| n.id == id) {
@@ -297,6 +309,42 @@ mod tests {
                     ("group".into(), OwnedValue::from(true))].into();
         assert!(control.dismiss_impl(&opts).is_err());
         assert_eq!(control.store.lock().unwrap().active().len(), 1);
+    }
+
+    #[test]
+    fn group_dismiss_keeps_unrelated_notifications_and_cancels_timers() {
+        let runtime=SharedRuntime::new(crate::config::Config::parse(
+            "group-by=app-name\\ndefault-timeout=4000\\n"
+        ).unwrap());
+        let control=MakoControl::with_runtime(runtime.clone());
+        let now=std::time::Instant::now();
+        let mut store=runtime.store.lock().unwrap();
+        let first=store.push(Request{app_name:"alpha".into(),..Request::default()});
+        let other=store.push(Request{app_name:"beta".into(),..Request::default()});
+        let latest=store.push(Request{app_name:"alpha".into(),..Request::default()});
+        drop(store);
+        for id in [first,other,latest] {
+            runtime.schedule_without_hook(id,now).unwrap();
+        }
+        let opts=[("group".into(),OwnedValue::from(true))].into();
+        assert_eq!(control.dismiss_impl(&opts).unwrap(),vec![latest,first]);
+        assert_eq!(runtime.store.lock().unwrap().active().len(),1);
+        assert_eq!(runtime.store.lock().unwrap().active()[0].id,other);
+        assert_eq!(runtime.store.lock().unwrap().history().len(),2);
+        assert_eq!(runtime.expire(now+std::time::Duration::from_millis(4000))
+            .unwrap(),vec![other]);
+    }
+
+    #[test]
+    fn unsupported_group_criteria_fail_without_dismissing() {
+        let runtime=SharedRuntime::new(crate::config::Config::parse(
+            "group-by=group-index\\n"
+        ).unwrap());
+        let control=MakoControl::with_runtime(runtime.clone());
+        runtime.store.lock().unwrap().push(Request::default());
+        let opts=[("group".into(),OwnedValue::from(true))].into();
+        assert!(control.dismiss_impl(&opts).is_err());
+        assert_eq!(runtime.store.lock().unwrap().active().len(),1);
     }
 
     #[test]
