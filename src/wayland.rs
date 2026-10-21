@@ -7,9 +7,13 @@
 use wayland_client::{
     delegate_noop,
     globals::{registry_queue_init, GlobalListContents},
-    protocol::{wl_compositor, wl_registry, wl_surface},
+    protocol::{wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface},
     Connection, Dispatch, QueueHandle,
 };
+use std::io::Write;
+use std::os::fd::AsFd;
+use std::time::Duration;
+use crate::render::PixelFrame;
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::{self, Layer},
     zwlr_layer_surface_v1::{self, Anchor, KeyboardInteractivity},
@@ -70,6 +74,9 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for ConfigureState {
 delegate_noop!(ConfigureState: ignore wl_compositor::WlCompositor);
 delegate_noop!(ConfigureState: ignore wl_surface::WlSurface);
 delegate_noop!(ConfigureState: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
+delegate_noop!(ConfigureState: ignore wl_shm::WlShm);
+delegate_noop!(ConfigureState: ignore wl_shm_pool::WlShmPool);
+delegate_noop!(ConfigureState: ignore wl_buffer::WlBuffer);
 
 impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for ConfigureState {
     fn event(
@@ -130,9 +137,91 @@ pub fn probe_configure(bounds: PopupBounds) -> Result<(u32, u32), Box<dyn std::e
     ))
 }
 
+
+/// Experimental Wayland wl_shm frame presentation. This displays one already
+/// rasterized notification for a bounded duration and then removes it.
+/// Not used by the installed desktop notification service, which is still Mako.
+///
+/// Mako parity still needs multiple surfaces, output selection, scaling,
+/// input, redraws and a continuously running Wayland dispatch loop.
+pub fn present_frame_once(
+    frame: &PixelFrame, corner: ScreenCorner, margin: i32, visible_for: Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
+    validate_frame(frame)?;
+    if margin < 0 { return Err("negative margin".into()); }
+    let conn = Connection::connect_to_env()?;
+    let (globals, mut queue) = registry_queue_init::<ConfigureState>(&conn)?;
+    let qh = queue.handle();
+    // damage_buffer is a wl_surface v4 request. Modern Hyprland supports it.
+    let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=6, ())?;
+    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = globals.bind(&qh, 1..=4, ())?;
+    let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ())?;
+    let surface = compositor.create_surface(&qh, ());
+    let layer = shell.get_layer_surface(&surface, None, Layer::Top, "posthorn-preview".into(), &qh, ());
+    layer.set_size(frame.width, frame.height);
+    layer.set_anchor(corner.anchors());
+    layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+    layer.set_margin(
+        if matches!(corner, ScreenCorner::TopLeft | ScreenCorner::TopRight) {margin} else {0},
+        if matches!(corner, ScreenCorner::TopRight | ScreenCorner::BottomRight) {margin} else {0},
+        if matches!(corner, ScreenCorner::BottomLeft | ScreenCorner::BottomRight) {margin} else {0},
+        if matches!(corner, ScreenCorner::TopLeft | ScreenCorner::BottomLeft) {margin} else {0},
+    );
+    surface.commit();
+    let mut state = ConfigureState::default();
+    while state.size.is_none() && !state.closed {
+        queue.blocking_dispatch(&mut state)?;
+    }
+    if state.closed { return Err("layer surface closed before drawing".into()); }
+    let (configured_width, configured_height) = state.size.ok_or("no initial configure")?;
+    if (configured_width != 0 && configured_width != frame.width)
+        || (configured_height != 0 && configured_height != frame.height) {
+        return Err("compositor configured a size different from the supplied frame".into());
+    }
+
+    // Use a regular anonymous temporary file as the SHM backing store. It is
+    // unlink-on-open, and its pixels are immutable for the lifetime of the
+    // compositor's use of this buffer. No unsafe memory mapping is needed.
+    let mut file = tempfile::tempfile()?;
+    file.write_all(&frame.pixels)?;
+    let pool = shm.create_pool(file.as_fd(), frame.pixels.len() as i32, &qh, ());
+    let buffer = pool.create_buffer(0, frame.width as i32, frame.height as i32,
+        frame.stride, wl_shm::Format::Argb8888, &qh, ());
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage_buffer(0, 0, frame.width as i32, frame.height as i32);
+    surface.commit();
+    conn.flush()?;
+    std::thread::sleep(visible_for);
+    buffer.destroy();
+    pool.destroy();
+    layer.destroy();
+    surface.destroy();
+    conn.flush()?;
+    Ok(())
+}
+
+fn validate_frame(frame: &PixelFrame) -> Result<(), &'static str> {
+    if frame.width == 0 || frame.height == 0 { return Err("empty frame"); }
+    let expected_stride = i64::from(frame.width) * 4;
+    let len = i64::from(frame.stride) * i64::from(frame.height);
+    if i64::from(frame.stride) < expected_stride || len <= 0 || len > i64::from(i32::MAX)
+        || usize::try_from(len).ok() != Some(frame.pixels.len()) {
+        return Err("invalid Wayland pixel buffer size or stride");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refuses_invalid_shm_lengths_without_connecting_to_wayland() {
+        let frame = PixelFrame { width: 4, height: 4, stride: 16, pixels: vec![0; 64] };
+        assert!(validate_frame(&frame).is_ok());
+        assert!(validate_frame(&PixelFrame { pixels: vec![0; 60], ..frame.clone() }).is_err());
+        assert!(validate_frame(&PixelFrame { stride: 4, ..frame }).is_err());
+    }
 
     #[test]
     fn corner_anchors_preserve_mako_default_top_right() {
