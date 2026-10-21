@@ -345,6 +345,72 @@ pub fn render_hidden_placeholder(
     render_notification(note,&prepared)
 }
 
+/// Exact rectangle coordinates for the positive-margin subset of Mako's
+/// notification stack. Mako's first top margin and each horizontal margin
+/// are part of the surface geometry, not an outer layer-shell margin.
+/// Negative overlapping margins still require compositor parity QA.
+pub fn mako_stack_geometry(
+    sizes:&[(u32,u32)],margins:&[crate::wayland::PopupMargins],
+    alignment:StackAlignment,
+)->Result<(u32,u32,Vec<(u32,u32)>),String>{
+    if sizes.len()!=margins.len(){return Err("popup margin count mismatch".into());}
+    if sizes.is_empty(){return Ok((0,0,Vec::new()));}
+    let width=sizes.iter().zip(margins).map(|((w,_),m)|{
+        w.checked_add(m.left.max(0) as u32)?
+            .checked_add(m.right.max(0) as u32)
+    }).collect::<Option<Vec<_>>>()
+        .ok_or("popup width overflow")?.into_iter().max().unwrap_or(0);
+    let mut end=0u32;
+    let mut positions=Vec::with_capacity(sizes.len());
+    for (index,((w,h),margin)) in sizes.iter().zip(margins).enumerate(){
+        let space=if index==0 {margin.top.max(0)}
+            else{margins[index-1].bottom.max(margin.top).max(0)} as u32;
+        end=end.checked_add(space).ok_or("popup height overflow")?;
+        let x=match alignment {
+            StackAlignment::Left=>margin.left.max(0) as u32,
+            StackAlignment::Right=>width.checked_sub(w.saturating_add(margin.right.max(0) as u32))
+                .ok_or("popup right margin overflow")?,
+            StackAlignment::Center=>width.saturating_sub(*w)/2,
+        };
+        positions.push((x,end));
+        end=end.checked_add(*h).ok_or("popup height overflow")?;
+    }
+    if width==0||end==0||width>4096||end>4096||
+        u64::from(width)*u64::from(end)*4>64*1024*1024{
+        return Err("popup stack exceeds safe Wayland bounds".into());
+    }
+    Ok((width,end,positions))
+}
+
+pub fn compose_mako_stack(
+    frames:&[PixelFrame],margins:&[crate::wayland::PopupMargins],
+    alignment:StackAlignment,
+)->Result<Option<PixelFrame>,String>{
+    if frames.is_empty(){
+        if margins.is_empty(){return Ok(None);}
+        return Err("popup margin count mismatch".into());
+    }
+    let sizes:Vec<_>=frames.iter().map(|f|(f.width,f.height)).collect();
+    let (width,height,positions)=mako_stack_geometry(&sizes,margins,alignment)?;
+    let stride=width.checked_mul(4).ok_or("popup stride overflow")?;
+    let size=u64::from(stride)*u64::from(height);
+    let mut pixels=vec![0u8;size as usize];
+    for (frame,(x,y)) in frames.iter().zip(positions){
+        if frame.stride < i32::try_from(frame.width.saturating_mul(4))
+            .map_err(|_|"invalid frame stride")?
+            || frame.pixels.len()!=frame.stride as usize*frame.height as usize {
+            return Err("invalid child frame".into());
+        }
+        let row_bytes=frame.width as usize*4;
+        for row in 0..frame.height as usize {
+            let src=row*frame.stride as usize;
+            let dst=(y as usize+row)*stride as usize+x as usize*4;
+            pixels[dst..dst+row_bytes].copy_from_slice(&frame.pixels[src..src+row_bytes]);
+        }
+    }
+    Ok(Some(PixelFrame{width,height,stride:stride as i32,pixels}))
+}
+
 pub fn compose_stack(frames: &[PixelFrame], gap: u32) -> Result<Option<PixelFrame>, String> {
     compose_stack_aligned(frames,gap,StackAlignment::Left)
 }
@@ -536,6 +602,29 @@ mod tests {
         assert_eq!(image.width,180);
         assert!(image.height<100);
         assert!(image.pixels.iter().any(|x|*x!=0));
+    }
+
+    #[test]
+    fn actual_mako_surface_geometry_includes_first_top_and_side_margins(){
+        let m=[
+            crate::wayland::PopupMargins{top:5,right:7,bottom:11,left:13},
+            crate::wayland::PopupMargins{top:4,right:3,bottom:2,left:6},
+        ];
+        let (w,h,left)=mako_stack_geometry(&[(100,20),(80,10)],&m,StackAlignment::Left).unwrap();
+        assert_eq!((w,h),(120,46));
+        assert_eq!(left,vec![(13,5),(6,36)]);
+        let (_,_,right)=mako_stack_geometry(&[(100,20),(80,10)],&m,StackAlignment::Right).unwrap();
+        assert_eq!(right,vec![(13,5),(37,36)]);
+        let frame=|width,height,value|PixelFrame{
+            width,height,stride:(width*4) as i32,
+            pixels:vec![value;(width*height*4) as usize],
+        };
+        let composed=compose_mako_stack(&[frame(100,20,9),frame(80,10,7)],&m,
+            StackAlignment::Left).unwrap().unwrap();
+        assert_eq!((composed.width,composed.height),(120,46));
+        assert!(composed.pixels[0..(5*120*4) as usize].iter().all(|v|*v==0));
+        assert_eq!(composed.pixels[(5*120+13)*4],9);
+        assert_eq!(composed.pixels[(36*120+6)*4],7);
     }
 
     #[test]

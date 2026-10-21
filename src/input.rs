@@ -10,9 +10,9 @@ use crate::hooks::NotifyBinding;
 use crate::notification::{CloseReason,Notification};
 use crate::runtime::SharedRuntime;
 use crate::wayland::PointerClick;
-use crate::desktop::{style_for_note,style_for_note_group,stack_alignment,vertical_spacing};
+use crate::desktop::{style_for_note,style_for_note_group,stack_alignment};
 use crate::wayland::PopupMargins;
-use crate::render::StackAlignment;
+use crate::render::mako_stack_geometry;
 use crate::dbus::{BUS_NAME,OBJECT_PATH};
 use zbus::Connection;
 
@@ -60,18 +60,17 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
         ).map_err(error)? as f64;
         Ok::<(f64,f64),io::Error>((w,h))
     }).collect::<io::Result<Vec<_>>>()?;
-    let gaps=vertical_spacing(&margins);
-    let max_width=dimensions.iter().map(|(w,_)|*w).fold(0.0f64,f64::max);
     let align=stack_alignment(config.global.get("anchor")
         .map(String::as_str).unwrap_or("top-right"));
-    let mut y=0.0f64;
-    for (index,((n,count),(w,h))) in notes.iter().zip(dimensions.iter().copied()).enumerate() {
+    if dimensions.is_empty(){return Ok(None);}
+    let sizes:Vec<_>=dimensions.iter().map(|(w,h)|(*w as u32,*h as u32)).collect();
+    let (_,_,positions)=mako_stack_geometry(&sizes,&margins,align).map_err(error)?;
+    for ((n,count),(w,h),(x,y)) in notes.iter().zip(dimensions.iter().copied())
+        .zip(positions.into_iter()).map(|((note,size),position)|
+            (&note.0,&note.1,size.0,size.1,position.0,position.1)
+        ).map(|(n,count,w,h,x,y)|((n,count),(w,h),(f64::from(x),f64::from(y))))
+    {
         let style=style_for_note_group(runtime,n,&modes,*count);
-        let x=match align {
-            StackAlignment::Left=>0.0,
-            StackAlignment::Center=>(max_width-w)/2.0,
-            StackAlignment::Right=>max_width-w,
-        };
         if click.y >= y && click.y < y+h {
             if click.x<x || click.x>=x+w {return Ok(None);}
             let fallback=match click.button {
@@ -83,7 +82,6 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
             return NotifyBinding::parse(raw).map(|binding|Some((n.id,binding)))
                 .map_err(error);
         }
-        y+=h+f64::from(gaps.get(index).copied().unwrap_or(0));
     }
     Ok(None)
 }

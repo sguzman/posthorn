@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::config::{Options, Traits};
 use crate::grouping::{GroupSpec,group_ordered};
 use crate::notification::{Notification, Urgency};
-use crate::render::{compose_stack_spaced, render_notification_group, render_hidden_placeholder, PixelFrame,StackAlignment};
+use crate::render::{compose_mako_stack, render_notification_group, render_hidden_placeholder, PixelFrame,StackAlignment};
 use crate::runtime::SharedRuntime;
 use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins,PointerClick};
 
@@ -174,7 +174,7 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
     }
     let align=stack_alignment(config.global.get("anchor")
         .map(String::as_str).unwrap_or("top-right"));
-    compose_stack_spaced(&frames,&vertical_spacing(&margins),align).map_err(other)
+    compose_mako_stack(&frames,&margins,align).map_err(other)
 }
 
 fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<PointerClick>) -> io::Result<()> {
