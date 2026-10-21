@@ -209,7 +209,9 @@ impl NotificationStore {
     pub fn restore(&mut self) -> Option<u32> {
         let notification = self.history.pop_front()?;
         let id = notification.id;
-        self.active.push_front(notification);
+        // Mako reinserts restored notifications using the active sort policy;
+        // pushing to the front would break urgency and ascending-time ordering.
+        self.insert_sorted(notification);
         Some(id)
     }
 
@@ -254,6 +256,24 @@ mod tests {
         assert_eq!(first,store.push(c));
         assert_eq!(store.active().len(),2);
     }
+    #[test]
+    fn restore_preserves_active_sort_policy() {
+        let mut store=NotificationStore::new(4);
+        store.set_sort_policy(SortPolicy {
+            by_priority:true,priority_ascending:false,time_ascending:false,
+        });
+        let critical=store.push(Request {
+            urgency:Urgency::Critical,..Request::default()
+        });
+        let low=store.push(Request {
+            urgency:Urgency::Low,..Request::default()
+        });
+        store.close(low,CloseReason::Dismissed,true,true).unwrap();
+        assert_eq!(store.restore(),Some(low));
+        assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![critical,low]);
+    }
+
     #[test]
     fn history_is_bounded_and_restore_uses_newest() {
         let mut store=NotificationStore::new(2);
