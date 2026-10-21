@@ -56,3 +56,20 @@ async fn accepts_notify_then_exposes_control_list_and_history() -> Result<(), Bo
 
     Ok(())
 }
+
+#[tokio::test]
+async fn standard_notification_name_is_claimed_only_inside_test_session()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // CI creates an isolated dbus-run-session; this never competes with the
+    // real workstation Mako notification daemon.
+    let (conn,runtime)=posthorn::service::open_standard_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let id:u32=desktop.call("Notify",&(
+        "standard-bus-test",0u32,"","Title","Body",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),1);
+    assert_eq!(runtime.store.lock().unwrap().active()[0].id,id);
+    Ok(())
+}

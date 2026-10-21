@@ -16,16 +16,31 @@ use crate::runtime::SharedRuntime;
 
 pub const PRIVATE_BUS_NAME: &str = "org.posthorn.Development";
 
-/// Construct a functional test service on its own D-Bus destination.
-pub async fn open_private_service(config: Config) -> zbus::Result<(Connection, SharedRuntime)> {
+/// Construct a functional service using an explicitly selected name.
+/// Production registration is NEVER attempted by the default Posthorn CLI.
+async fn open_named_service(config: Config, name: &str)
+    -> zbus::Result<(Connection, SharedRuntime)>
+{
     let runtime = SharedRuntime::new(config);
     let conn = connection::Builder::session()?
-        .name(PRIVATE_BUS_NAME)?
+        .name(name)?
         .serve_at(OBJECT_PATH, FreedesktopNotifications::with_runtime(runtime.clone()))?
         .serve_at(CONTROL_PATH, MakoControl::with_runtime(runtime.clone()))?
         .build()
         .await?;
     Ok((conn, runtime))
+}
+
+/// Construct the private test daemon. It never uses Mako's real bus name.
+pub async fn open_private_service(config: Config) -> zbus::Result<(Connection, SharedRuntime)> {
+    open_named_service(config, PRIVATE_BUS_NAME).await
+}
+
+/// Prepare the eventual desktop notification server. This method is *only*
+/// exercised under dbus-run-session in CI; no startup command invokes it yet.
+/// A full replacement is forbidden until the MVP parity gate is complete.
+pub async fn open_standard_service(config: Config) -> zbus::Result<(Connection, SharedRuntime)> {
+    open_named_service(config, BUS_NAME).await
 }
 
 /// Emit expiry signals only for notifications that actually transitioned from
