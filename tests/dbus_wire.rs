@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use posthorn::config::Config;
 use posthorn::control::{MakoControl, CONTROL_INTERFACE, CONTROL_PATH};
 use posthorn::dbus::{FreedesktopNotifications, BUS_NAME, OBJECT_PATH};
 use posthorn::notification::NotificationStore;
