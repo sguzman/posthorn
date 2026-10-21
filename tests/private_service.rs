@@ -194,9 +194,11 @@ async fn dbus_inline_image_and_progress_reach_rendered_pixels()
     assert!(note.image_data.is_some());
     drop(store);
     let frame=snapshot_frame(&runtime)?.unwrap();
-    // The Mako margin is part of the surface; sample *inside* the
-    // notification's icon, not the now-transparent left gutter.
-    let px=frame.height as usize/2*frame.stride as usize+10*4;
-    assert_eq!(&frame.pixels[px..px+4],&[0,0,255,255]);
+    // Search the rendered raster rather than assuming a particular Pango
+    // text height or icon offset after Mako's directional margins.
+    assert!(frame.pixels.chunks_exact(4).any(|p|p==[0,0,255,255]),
+        "inline red icon pixels must actually be visible");
+    assert!(frame.pixels.chunks_exact(4).any(|p|p==[0,255,0,255]),
+        "the D-Bus value hint must render a green progress fill");
     Ok(())
 }
