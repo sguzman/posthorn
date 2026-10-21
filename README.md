@@ -76,8 +76,10 @@ notification daemon. It doesn't claim the desktop D-Bus name or affect Mako.
 
 The experimental `posthornctl` binary exercises Mako-style commands only
 against `org.posthorn.Development`. It cannot control or replace your active
-Mako daemon. Its `menu` command is now implemented for private-bus action selection, but
-production routing and exact non-JSON formatting remain unfinished.
+Mako daemon. Its `menu` command is implemented for private-bus action selection.
+Mako's `mode -s mode...` and human-readable `list`/`history` formats have
+regression tests, including an isolated D-Bus round trip. Production routing,
+full output/action ordering, and other exact control behavior remain unfinished.
 
 The extra `posthorn --experimental-private-desktop PATH` command is a
 **development-only live preview**: it runs the private-name D-Bus daemon

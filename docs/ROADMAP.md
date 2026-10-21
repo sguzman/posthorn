@@ -5,7 +5,7 @@ Progress is the average of documented atomic task percentages. A task at 100%
 requires acceptance evidence; partial work stays below 100%. Future ideas
 do not count toward Mako MVP. No runtime parity is claimed yet.
 
-## 📯 M0 — Mako parity and MVP inauguration — `███████░░░ 71%`
+## 📯 M0 — Mako parity and MVP inauguration — `███████░░░ 72%`
 **Acceptance gate:** Full upstream parity + Hyprland end-to-end QA
 
 ### 🧭 P0 — Source baseline and safeguards — `██████████ 99%`
@@ -43,9 +43,9 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `█████████░ 90%`
 - 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `█████░░░░░ 51%`
 
-### 🎛️ P5 — CLI and exact workstation parity — `██░░░░░░░░ 22%`
+### 🎛️ P5 — CLI and exact workstation parity — `███░░░░░░░ 27%`
 
-- ⌨️ T501 — Port makoctl operations with compatibility tests — `█████░░░░░ 50%`
+- ⌨️ T501 — Port makoctl operations with compatibility tests — `███████░░░ 70%`
 - 🔔 T502 — Reproduce category colors, per-category sounds and quiet mode — `████░░░░░░ 39%`
 - 🧪 T503 — End-to-end on Hyprland, notify-send and Edge activation — `░░░░░░░░░░ 0%`
 - 🚀 T504 — MVP inauguration and opt-in reversible Mako switch — `░░░░░░░░░░ 0%`
@@ -54,7 +54,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 - 🔔 Desktop notification parity — `██████░░░░ 61%`
 - 🎨 Mako category coloring and sound parity — `████░░░░░░ 40%`
-- 📜 Mako history/control API parity — `███████░░░ 67%`
+- 📜 Mako history/control API parity — `███████░░░ 72%`
 
 ## 📑 M1 — Post-MVP TOML configuration — `░░░░░░░░░░ 0%`
 

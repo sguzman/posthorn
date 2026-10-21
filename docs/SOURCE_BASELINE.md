@@ -33,7 +33,7 @@ change how they call the Freedesktop Notification protocol. Until parity:
 | `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Private development bus with image-data, image-path, progress, reload and signal tests; full protocol parity pending |
 | `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Private desktop has stacked SHM layer-shell surfaces with same-size redraw reuse, named output routing, pointer/touch, anchors, layers and margins; hotplug/HiDPI QA pending |
 | `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango markup/colors/file and inline icons, progress fill, measured heights, group counts and aligned stacks; exact layout/HiDPI incomplete |
-| `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Private live/headless services, sound hooks, mode state, partial posthornctl and transactional file reload; exact controls/activation incomplete |
+| `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Private live/headless services, sound hooks, mode state, Mako-style `mode -s` and text history/list tested, transactional file reload; exact controls/activation incomplete |
 
 ## Explicit nonclaims
 
