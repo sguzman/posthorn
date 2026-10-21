@@ -412,7 +412,17 @@ pub struct LivePresenter {
     active: Option<LiveSurface>,
 }
 
+#[derive(Clone,Debug,Eq,PartialEq)]
+struct PopupSurfaceSpec {
+    width:u32,height:u32,
+    corner:ScreenCorner,
+    margins:PopupMargins,
+    layer:PopupLayer,
+    output_name:String,
+}
+
 struct LiveSurface {
+    spec:PopupSurfaceSpec,
     layer: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
     surface: wl_surface::WlSurface,
     buffer: wl_buffer::WlBuffer,
@@ -482,11 +492,19 @@ impl LivePresenter {
                 .ok_or_else(||format!("Wayland output not found: {output_name}"))?
                 .0.clone())
         };
-        self.clear();
         let Some(frame) = frame else {
+            self.clear();
             self.conn.flush()?;
             return Ok(());
         };
+        let spec=PopupSurfaceSpec {
+            width:frame.width,height:frame.height,corner,margins,
+            layer:selected_layer,output_name:output_name.into(),
+        };
+        if self.active.as_ref().is_some_and(|live|live.spec==spec){
+            return self.redraw_active(frame);
+        }
+        self.clear();
         // Preserve registered seat and pointer objects across redraws.
         self.state.size = None;
         self.state.closed = false;
@@ -532,7 +550,39 @@ impl LivePresenter {
         surface.damage_buffer(0, 0, frame.width as i32, frame.height as i32);
         surface.commit();
         self.conn.flush()?;
-        self.active = Some(LiveSurface { layer, surface, pool, buffer, _backing: backing });
+        self.active = Some(LiveSurface {
+            spec,layer,surface,pool,buffer,_backing:backing
+        });
+        Ok(())
+    }
+
+    /// Update content on a previously configured layer surface without
+    /// re-entering the layer-shell handshake. In particular, this preserves
+    /// compositor focus and avoids a visible surface teardown/flicker on
+    /// ordinary message replacement.
+    fn redraw_active(&mut self,frame:&PixelFrame)
+        -> Result<(),Box<dyn std::error::Error>>
+    {
+        let Some(live)=self.active.as_mut() else {
+            return Err("cannot redraw an unmapped Wayland notification".into());
+        };
+        let mut backing=tempfile::tempfile()?;
+        backing.write_all(&frame.pixels)?;
+        let pool=self.shm.create_pool(backing.as_fd(),
+            frame.pixels.len() as i32,&self.qh,());
+        let buffer=pool.create_buffer(0,frame.width as i32,frame.height as i32,
+            frame.stride,wl_shm::Format::Argb8888,&self.qh,());
+        live.surface.attach(Some(&buffer),0,0);
+        live.surface.damage_buffer(0,0,frame.width as i32,frame.height as i32);
+        live.surface.commit();
+        // The compositor retains the committed shm storage independently;
+        // destroy the old client handles only after submitting the new frame.
+        let old_buffer=std::mem::replace(&mut live.buffer,buffer);
+        let old_pool=std::mem::replace(&mut live.pool,pool);
+        live._backing=backing;
+        old_buffer.destroy();
+        old_pool.destroy();
+        self.conn.flush()?;
         Ok(())
     }
 
@@ -626,6 +676,19 @@ mod tests {
         assert!(validate_frame(&frame).is_ok());
         assert!(validate_frame(&PixelFrame { pixels: vec![0; 60], ..frame.clone() }).is_err());
         assert!(validate_frame(&PixelFrame { stride: 4, ..frame }).is_err());
+    }
+
+    #[test]
+    fn only_geometry_or_output_changes_require_surface_recreation() {
+        let spec=PopupSurfaceSpec{
+            width:440,height:120,corner:ScreenCorner::TopRight,
+            margins:PopupMargins::uniform(10),layer:PopupLayer::Top,
+            output_name:"DP-1".into(),
+        };
+        assert_eq!(spec,spec.clone());
+        assert_ne!(spec,PopupSurfaceSpec{width:500,..spec.clone()});
+        assert_ne!(spec,PopupSurfaceSpec{output_name:"HDMI-A-1".into(),..spec.clone()});
+        assert_ne!(spec,PopupSurfaceSpec{layer:PopupLayer::Overlay,..spec});
     }
 
     #[test]
