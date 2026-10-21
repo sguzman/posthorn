@@ -228,6 +228,47 @@ mod tests {
     }
 
     #[test]
+    fn hint_image_path_overrides_notify_app_icon_and_preserves_replacement() {
+        let service=service();
+        let hints=[(
+            "image-path".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from("/tmp/posthorn-fixture.png")).unwrap(),
+        )].into();
+        let id=service.apply_notify(
+            "app",0,"ignored-icon-name","First","",
+            Vec::new(),hints,-1
+        ).unwrap();
+        assert_eq!(service.store.lock().unwrap().active()[0].app_icon,
+            "/tmp/posthorn-fixture.png");
+        let second=service.apply_notify(
+            "app",id,"another-icon","Replacement","",
+            Vec::new(),HashMap::new(),-1
+        ).unwrap();
+        assert_eq!(second,id);
+        assert_eq!(service.store.lock().unwrap().active()[0].app_icon,
+            "another-icon");
+    }
+
+    #[test]
+    fn image_data_hint_is_stored_with_correct_color_and_replaces_atomically() {
+        let service=service();
+        let tuple=(1i32,1i32,4i32,true,8i32,4i32,
+            vec![255u8,128u8,0u8,128u8]);
+        let value=OwnedValue::try_from(zbus::zvariant::Value::from(tuple)).unwrap();
+        let hints=[("image-data".to_string(),value)].into();
+        let id=service.apply_notify(
+            "sender",0,"ignored","Inline Image","",
+            Vec::new(),hints,-1
+        ).unwrap();
+        let image=service.store.lock().unwrap().active()[0]
+            .image_data.clone().expect("image data decoded");
+        assert_eq!(&image.bgra,[0,64,128,128]);
+        service.apply_notify("sender",id,"new-icon","Changed","",
+            Vec::new(),HashMap::new(),-1).unwrap();
+        assert!(service.store.lock().unwrap().active()[0].image_data.is_none());
+    }
+
+    #[test]
     fn rejects_odd_action_arrays_without_touching_state() {
         let s = service();
         let result = s.apply_notify("a", 0, "", "oops", "", vec!["orphan".into()],
