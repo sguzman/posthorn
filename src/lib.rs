@@ -16,6 +16,7 @@ pub mod service;
 pub mod signals;
 pub mod wayland;
 pub mod desktop;
+pub mod input;
 pub mod raster;
 pub mod render;
 pub mod grouping;

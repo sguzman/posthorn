@@ -9,7 +9,7 @@ use crate::config::{Options, Traits};
 use crate::notification::{Notification, Urgency};
 use crate::render::{compose_stack, render_notification, PixelFrame};
 use crate::runtime::SharedRuntime;
-use crate::wayland::{LivePresenter, ScreenCorner};
+use crate::wayland::{LivePresenter, ScreenCorner,PointerClick};
 
 fn poisoned() -> io::Error { io::Error::other("notification state lock poisoned") }
 fn other(e: impl std::fmt::Display) -> io::Error { io::Error::other(e.to_string()) }
@@ -52,7 +52,7 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
     compose_stack(&frames,gap).map_err(other)
 }
 
-fn render_loop(runtime:SharedRuntime) -> io::Result<()> {
+fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<PointerClick>) -> io::Result<()> {
     let mut viewer=LivePresenter::connect().map_err(other)?;
     let (mut previous, mut previous_modes)=(Vec::new(),Vec::new());
     loop {
@@ -67,6 +67,10 @@ fn render_loop(runtime:SharedRuntime) -> io::Result<()> {
             previous_modes=modes;
         }
         viewer.poll_events().map_err(other)?;
+        for click in viewer.take_clicks() {
+            // No GUI thread can directly mutate D-Bus state or emit signals.
+            if sender.send(click).is_err() { return Ok(()); }
+        }
         std::thread::sleep(Duration::from_millis(45));
     }
 }
@@ -78,7 +82,8 @@ pub async fn run_private_desktop(config: crate::config::Config)
 {
     let (conn,runtime)=crate::service::open_private_service(config).await?;
     let visual_runtime=runtime.clone();
-    let mut visual=tokio::task::spawn_blocking(move || render_loop(visual_runtime));
+    let (sender,mut clicks)=tokio::sync::mpsc::unbounded_channel();
+    let mut visual=tokio::task::spawn_blocking(move || render_loop(visual_runtime,sender));
     let mut timer=tokio::time::interval(Duration::from_millis(25));
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     eprintln!(
@@ -86,6 +91,11 @@ pub async fn run_private_desktop(config: crate::config::Config)
     );
     loop {
         tokio::select! {
+            click=clicks.recv() => {
+                if let Some(click)=click {
+                    crate::input::dispatch_click(&conn,&runtime,click).await?;
+                }
+            }
             result = &mut visual => {
                 return match result {
                     Ok(Ok(()))=>Ok(()),
