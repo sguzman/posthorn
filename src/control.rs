@@ -110,10 +110,16 @@ impl MakoControl {
             store.active().front()
         } else {
             store.active().iter().find(|n| n.id == id)
-        };
-        Ok(note
-            .filter(|n| n.actions.iter().any(|a| a.key == key))
-            .map(|n| n.id))
+        }.cloned();
+        drop(store);
+        let Some(note)=note else {return Ok(None)};
+        if let Some(runtime)=&self.runtime {
+            // The selected notification is the one tested by makoctl.
+            return crate::input::can_invoke_action(runtime,note.id,key)
+                .map_err(|e|zbus::fdo::Error::Failed(e.to_string()))
+                .map(|allow|allow.then_some(note.id));
+        }
+        Ok(note.actions.iter().any(|a|a.key==key).then_some(note.id))
     }
 }
 
@@ -316,6 +322,22 @@ mod tests {
                     ("group".into(), OwnedValue::from(true))].into();
         assert!(control.dismiss_impl(&opts).is_err());
         assert_eq!(control.store.lock().unwrap().active().len(), 1);
+    }
+
+    #[test]
+    fn control_invoke_honors_mako_actions_disabled_criteria() {
+        let runtime=SharedRuntime::new(crate::config::Config::parse(
+            "[category=warning]\nactions=0\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request{
+            category:"warning".into(),
+            actions:vec![crate::notification::Action{
+                key:"default".into(),label:"Open".into(),
+            }],..Request::default()
+        });
+        let control=MakoControl::with_runtime(runtime);
+        assert_eq!(control.find_action(id,"default").unwrap(),None);
+        assert_eq!(control.find_action(0,"default").unwrap(),None);
     }
 
     #[test]

@@ -132,13 +132,23 @@ pub async fn dispatch_click(
     Ok(())
 }
 
+/// The Mako actions=0 option suppresses ActionInvoked, while the matching
+/// click binding may still dismiss the notification.
+pub fn can_invoke_action(runtime:&SharedRuntime,id:u32,key:&str)->io::Result<bool>{
+    let note=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?
+        .active().iter().find(|n|n.id==id).cloned();
+    let Some(note)=note else {return Ok(false)};
+    let modes=runtime.modes().lock().map_err(|_|error("mode lock poisoned"))?
+        .clone();
+    let style=style_for_note(runtime,&note,&modes);
+    Ok(style.get("actions").is_none_or(|v|v=="1"||v=="true")
+        && note.actions.iter().any(|a|a.key==key))
+}
+
 async fn invoke(conn:&Connection,runtime:&SharedRuntime,id:u32,key:&str)
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
-    let has_action=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?
-        .active().iter().find(|n|n.id==id)
-        .is_some_and(|n|n.actions.iter().any(|a|a.key==key));
-    if has_action {
+    if can_invoke_action(runtime,id,key)? {
         conn.emit_signal(None::<&str>,OBJECT_PATH,BUS_NAME,
             "ActionInvoked",&(id,key)).await?;
     }
@@ -184,6 +194,27 @@ mod tests {
             Some((old,NotifyBinding::InvokeDefaultAction)));
         assert_eq!(hit_test(&runtime,click(100.0,10.0,272)).unwrap(),None);
         assert_eq!(hit_test(&runtime,click(0.0,10.0,999)).unwrap(),None);
+    }
+
+    #[test]
+    fn actions_disabled_by_category_do_not_emit_invocation() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "[category=warning]\nactions=0\n"
+        ).unwrap());
+        let disabled=runtime.store.lock().unwrap().push(Request{
+            category:"warning".into(),
+            actions:vec![crate::notification::Action{
+                key:"default".into(),label:"Open".into(),
+            }],..Request::default()
+        });
+        let allowed=runtime.store.lock().unwrap().push(Request{
+            actions:vec![crate::notification::Action{
+                key:"default".into(),label:"Open".into(),
+            }],..Request::default()
+        });
+        assert!(!can_invoke_action(&runtime,disabled,"default").unwrap());
+        assert!(can_invoke_action(&runtime,allowed,"default").unwrap());
+        assert!(!can_invoke_action(&runtime,allowed,"unknown").unwrap());
     }
 
     #[test]
