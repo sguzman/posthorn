@@ -78,6 +78,13 @@ fn paint_icon(cr:&cairo::Context,icon:&IconPixels,x:f64,y:f64,scale:f64)
 pub fn measure_notification_height(
     note:&Notification,style:&Options,
 ) -> Result<u32,String> {
+    let icon=load_note_icon(note,style);
+    measure_height_with_icon(note,style,icon.as_ref())
+}
+
+fn measure_height_with_icon(
+    note:&Notification,style:&Options,icon:Option<&IconPixels>,
+) -> Result<u32,String> {
     let width=integer_option(style,"width",300);
     let cap=integer_option(style,"height",100);
     if width==0||cap==0||width>4096||cap>4096{
@@ -88,7 +95,6 @@ pub fn measure_notification_height(
         .and_then(|s|s.split(',').next()).and_then(|s|s.parse::<u32>().ok())
         .unwrap_or(5);
     let frame_padding=border.saturating_add(padding);
-    let icon=load_note_icon(note,style);
     let icon_location=style.get("icon-location").map(String::as_str).unwrap_or("left");
     let vertical=icon_location=="top"||icon_location=="bottom";
     let max_size=integer_option(style,"max-icon-size",64);
@@ -149,7 +155,10 @@ pub fn measure_notification_height(
 
 pub fn render_notification(note: &Notification, style: &Options) -> Result<PixelFrame, String> {
     let width = integer_option(style, "width", 300);
-    let height = measure_notification_height(note,style)?;
+    // One decode per frame. Both text measurement and painting consume the
+    // same icon, avoiding redundant filesystem reads and image decoding.
+    let icon=load_note_icon(note,style);
+    let height = measure_height_with_icon(note,style,icon.as_ref())?;
     if width == 0 || height == 0 || width > 4096 || height > 4096
         || u64::from(width) * u64::from(height) * 4 > 64 * 1024 * 1024
     {
@@ -210,7 +219,7 @@ pub fn render_notification(note: &Notification, style: &Options) -> Result<Pixel
     let mut available_w=interior_w;
     let mut available_h=interior_h;
 
-    if let Some(icon)=load_note_icon(note,style) {
+    if let Some(icon)=icon.as_ref() {
         let location=style.get("icon-location").map(String::as_str).unwrap_or("left");
         let max_size=f64::from(integer_option(style,"max-icon-size",64));
         let w=f64::from(icon.width);
