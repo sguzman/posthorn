@@ -65,11 +65,9 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
     if dimensions.is_empty(){return Ok(None);}
     let sizes:Vec<_>=dimensions.iter().map(|(w,h)|(*w as u32,*h as u32)).collect();
     let (_,_,positions)=mako_stack_geometry(&sizes,&margins,align).map_err(error)?;
-    for ((n,count),(w,h),(x,y)) in notes.iter().zip(dimensions.iter().copied())
-        .zip(positions.into_iter()).map(|((note,size),position)|
-            (&note.0,&note.1,size.0,size.1,position.0,position.1)
-        ).map(|(n,count,w,h,x,y)|((n,count),(w,h),(f64::from(x),f64::from(y))))
-    {
+    for (((n,count),(w,h)),(x,y)) in notes.iter()
+        .zip(dimensions.iter().copied()).zip(positions) {
+        let (x,y)=(f64::from(x),f64::from(y));
         let style=style_for_note_group(runtime,n,&modes,*count);
         if click.y >= y && click.y < y+h {
             if click.x<x || click.x>=x+w {return Ok(None);}
