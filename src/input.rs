@@ -56,8 +56,8 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
         // the renderer, not the configured maximum.
         let h=crate::render::measure_notification_height(n,&style)
             .map_err(error)? as f64;
-        (w,h)
-    }).collect();
+        Ok::<(f64,f64),io::Error>((w,h))
+    }).collect::<io::Result<Vec<_>>>()?;
     let gaps=vertical_spacing(&margins);
     let max_width=dimensions.iter().map(|(w,_)|*w).fold(0.0f64,f64::max);
     let align=stack_alignment(runtime.config().global.get("anchor")
