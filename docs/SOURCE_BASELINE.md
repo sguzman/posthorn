@@ -31,7 +31,7 @@ change how they call the Freedesktop Notification protocol. Until parity:
 | `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; format/group validation, progress-color operator syntax, source-backed transactional reload and sorting settings |
 | `notification.c` | IDs, replace, close, timeout, history, groups, format | Timers, dismiss/restore and per-notification history policy; grouped visibility, invisible selectors, count formatting and hidden placeholders tested; advanced grouping partial |
 | `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Private development bus with image-data, image-path, progress, reload and signal tests; full protocol parity pending |
-| `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Private desktop has stacked SHM layer-shell surface, pointer/touch, nine anchors, four layers and directional margins; output/scale QA pending |
+| `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Private desktop has stacked SHM layer-shell surfaces with same-size redraw reuse, named output routing, pointer/touch, anchors, layers and margins; hotplug/HiDPI QA pending |
 | `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango markup/colors/file and inline icons, progress fill, measured heights, group counts and aligned stacks; exact layout/HiDPI incomplete |
 | `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Private live/headless services, sound hooks, mode state, partial posthornctl and transactional file reload; exact controls/activation incomplete |
 
@@ -41,7 +41,7 @@ Normal development commands register only the **private development D-Bus name**
 It is not the workstation's default desktop notification service. The private desktop path
 renders and updates stacked Wayland popups, with basic mouse/touch bindings,
 but has not been visually exercised under Hyprland. Exact Mako Pango metrics, negative-margin overlaps,
-advanced grouping, per-output scaling, XDG activation, touch QA,
+advanced grouping, output hotplug and HiDPI scaling, XDG activation, touch QA,
 exact reload semantics for existing active timeouts, and control formatting remain.
 Current parsing is a subset; POSIX vs Rust regex and many style options
 still need parity tests. The

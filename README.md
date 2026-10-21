@@ -15,13 +15,14 @@ and Clear All, channels, SQLite persistence, and a general local message broker.
 > **Not yet a working daemon.** Rust now includes configuration/criteria,
 > notification lifecycle, timers, sorting/grouping projections, D-Bus
 > adapters on an isolated development bus, a continuously refreshed
-> Wayland layer-shell stack, shrink-wrapped Cairo/Pango text and icons, configured
+> Wayland layer-shell stack with same-size surface reuse and named output
+> selection, shrink-wrapped Cairo/Pango text and icons, configured
 > on-notify shell hooks, basic mouse/touch bindings, category-aware history,
 > grouped count formatting, hidden placeholders, and partial posthornctl.
 > **It does not claim the desktop notifications D-Bus name.** Inline
 > Freedesktop image-data hints, progress fills and transactional config reload
 > are implemented in the private development daemon. Exact Pango layout,
-> XDG activation, output/scaling behavior, full control parity and live
+> XDG activation, hot-plug/HiDPI scaling, full control parity and live
 > Hyprland QA remain.
 > **Keep using Mako.** Do not replace, disable or uninstall it for this build.
 

@@ -147,7 +147,7 @@
               "id": "T401",
               "emoji": "🧱",
               "name": "Layer-shell surfaces, anchors, output routing and scaling",
-              "progress": 72
+              "progress": 81
             },
             {
               "id": "T402",
@@ -199,7 +199,7 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 58
+          "progress": 61
         },
         {
           "emoji": "🎨",
