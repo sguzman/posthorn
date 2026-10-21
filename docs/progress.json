@@ -54,7 +54,7 @@
               "id": "T102",
               "emoji": "🔎",
               "name": "Match categories, modes, exact fields, quoted and regex selectors",
-              "progress": 80
+              "progress": 84
             },
             {
               "id": "T103",
@@ -72,7 +72,7 @@
               "id": "T105",
               "emoji": "📐",
               "name": "Type/layout/style parity for all Mako config settings",
-              "progress": 20
+              "progress": 38
             }
           ]
         },
@@ -103,7 +103,7 @@
               "id": "T204",
               "emoji": "🔗",
               "name": "Grouping, sorting, hidden placeholder and visibility",
-              "progress": 55
+              "progress": 65
             },
             {
               "id": "T205",
@@ -153,13 +153,13 @@
               "id": "T402",
               "emoji": "🖌️",
               "name": "Text, icons, colors, borders, progress and layout",
-              "progress": 72
+              "progress": 82
             },
             {
               "id": "T403",
               "emoji": "🖱️",
               "name": "Pointer, touch, button bindings and XDG activation",
-              "progress": 46
+              "progress": 51
             }
           ]
         },
@@ -199,7 +199,7 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 44
+          "progress": 50
         },
         {
           "emoji": "🎨",
@@ -209,7 +209,7 @@
         {
           "emoji": "📜",
           "name": "Mako history/control API parity",
-          "progress": 55
+          "progress": 59
         }
       ]
     },

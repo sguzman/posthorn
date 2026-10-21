@@ -29,10 +29,10 @@ change how they call the Freedesktop Notification protocol. Until parity:
 | Upstream source | Posthorn scope | State |
 | --- | --- | --- |
 | `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; format/group spec validation and sort handling strengthened |
-| `notification.c` | IDs, replace, close, timeout, history, groups, format | Timers, dismiss/restore and per-notification history-policy decisions tested; sorting and grouped visibility partial |
+| `notification.c` | IDs, replace, close, timeout, history, groups, format | Timers, dismiss/restore and per-notification history-policy decisions tested; grouped visibility and hidden-count placeholder partial |
 | `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Active on private development bus; standard name registration exercised only in isolated CI; signals and control API partial |
 | `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Private desktop has stacked SHM layer-shell surface, pointer/touch, nine anchors, four layers and directional margins; output/scale QA pending |
-| `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango markup/colors/icons; aligned variable-width stacks and per-notification vertical spacing; auto-height, image-data hints and HiDPI incomplete |
+| `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango markup/colors/icons with measured popup heights, variable-width aligned stacks, configurable hidden placeholder and vertical spacing; precise layout, image-data hints and HiDPI incomplete |
 | `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Private live/headless services, configured hooks, mode state, partial posthornctl including menu; exact text output and reload incomplete |
 
 ## Explicit nonclaims
@@ -40,7 +40,7 @@ change how they call the Freedesktop Notification protocol. Until parity:
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
 It is not the workstation's default desktop notification service. The private desktop path
 renders and updates stacked Wayland popups, with basic mouse/touch bindings,
-but has not been visually exercised under Hyprland. Exact Mako auto-height, negative-margin overlaps,
+but has not been visually exercised under Hyprland. Exact Mako Pango metrics, negative-margin overlaps,
 icons from D-Bus image-data, grouping placeholders, per-output scaling,
 XDG activation, touch QA, configuration reload, and control formatting remain.
 Current parsing is a subset; POSIX vs Rust regex and many style options
