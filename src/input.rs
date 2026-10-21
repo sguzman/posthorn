@@ -10,7 +10,7 @@ use crate::hooks::NotifyBinding;
 use crate::notification::{CloseReason,Notification};
 use crate::runtime::SharedRuntime;
 use crate::wayland::PointerClick;
-use crate::desktop::{style_for_note,stack_alignment,vertical_spacing};
+use crate::desktop::{style_for_note,style_for_note_group,stack_alignment,vertical_spacing};
 use crate::wayland::PopupMargins;
 use crate::render::StackAlignment;
 use crate::dbus::{BUS_NAME,OBJECT_PATH};
@@ -20,8 +20,8 @@ fn error(msg: impl std::fmt::Display) -> io::Error {
     io::Error::other(msg.to_string())
 }
 
-fn ordered_visible(runtime:&SharedRuntime) -> io::Result<(Vec<Notification>,Vec<String>)> {
-    let notes=crate::desktop::visible_notifications(runtime)?;
+fn ordered_visible(runtime:&SharedRuntime) -> io::Result<(Vec<(Notification,usize)>,Vec<String>)> {
+    let notes=crate::desktop::visible_members(runtime)?;
     let modes=runtime.modes().lock().map_err(|_|error("mode lock poisoned"))?
         .clone();
     Ok((notes,modes))
@@ -46,16 +46,17 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
     // Layer-shell's surface width is the largest notification width.
     // Narrow notifications may be left, centered, or right aligned.
     let mut margins=Vec::with_capacity(notes.len());
-    let dimensions:Vec<_>=notes.iter().map(|n|{
-        let style=style_for_note(runtime,n,&modes);
+    let dimensions:Vec<_>=notes.iter().map(|(n,count)|{
+        let style=style_for_note_group(runtime,n,&modes,*count);
         margins.push(style.get("margin")
             .and_then(|s|PopupMargins::parse_mako(s))
             .unwrap_or(PopupMargins::uniform(10)));
         let w=style.get("width").and_then(|v|v.parse::<u32>().ok()).unwrap_or(300) as f64;
         // Hit-testing must use the same Pango shrink-wrapped height as
         // the renderer, not the configured maximum.
-        let h=crate::render::measure_notification_height(n,&style)
-            .map_err(error)? as f64;
+        let h=crate::render::measure_notification_height_group(
+            n,&style,if *count>=2{*count}else{0}
+        ).map_err(error)? as f64;
         Ok::<(f64,f64),io::Error>((w,h))
     }).collect::<io::Result<Vec<_>>>()?;
     let gaps=vertical_spacing(&margins);
@@ -63,8 +64,8 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
     let align=stack_alignment(runtime.config().global.get("anchor")
         .map(String::as_str).unwrap_or("top-right"));
     let mut y=0.0f64;
-    for (index,(n,(w,h))) in notes.iter().zip(dimensions.iter().copied()).enumerate() {
-        let style=style_for_note(runtime,n,&modes);
+    for (index,((n,count),(w,h))) in notes.iter().zip(dimensions.iter().copied()).enumerate() {
+        let style=style_for_note_group(runtime,n,&modes,*count);
         let x=match align {
             StackAlignment::Left=>0.0,
             StackAlignment::Center=>(max_width-w)/2.0,

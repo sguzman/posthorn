@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::config::{Options, Traits};
 use crate::grouping::{GroupSpec,group_ordered};
 use crate::notification::{Notification, Urgency};
-use crate::render::{compose_stack_spaced, render_notification, render_hidden_placeholder, PixelFrame,StackAlignment};
+use crate::render::{compose_stack_spaced, render_notification_group, render_hidden_placeholder, PixelFrame,StackAlignment};
 use crate::runtime::SharedRuntime;
 use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins,PointerClick};
 
@@ -32,8 +32,14 @@ fn other(e: impl std::fmt::Display) -> io::Error { io::Error::other(e.to_string(
 /// Resolve style for the same notification fields in the ordinary runtime.
 /// All four Mako category colors are evaluated independently.
 pub fn style_for_note(
-    runtime: &SharedRuntime, n: &Notification, modes: &[String],
-) -> Options {
+    runtime:&SharedRuntime,n:&Notification,modes:&[String],
+)->Options {
+    style_for_note_group(runtime,n,modes,1)
+}
+
+pub fn style_for_note_group(
+    runtime:&SharedRuntime,n:&Notification,modes:&[String],group_count:usize,
+)->Options {
     let mode_views: Vec<&str>=modes.iter().map(String::as_str).collect();
     let traits=Traits {
         app_name:&n.app_name, app_icon:&n.app_icon, category:&n.category,
@@ -45,7 +51,8 @@ pub fn style_for_note(
             .map(String::as_str).unwrap_or("top-right"),
         output:"",modes:&mode_views,
         requested_timeout_ms:n.requested_timeout_ms,
-        actionable:!n.actions.is_empty(),group_index:-1,hidden:false,
+        actionable:!n.actions.is_empty(),
+        group_index:if group_count>=2{0}else{-1},hidden:false,
     };
     runtime.config().style_for(&traits)
 }
@@ -53,7 +60,15 @@ pub fn style_for_note(
 /// Select only the first visible member from each Mako grouping pass.
 /// The hidden-count placeholder is separate TODO work; this prevents
 /// duplicate group popups and applies max-visible to groups rather than IDs.
-pub fn visible_notifications(runtime:&SharedRuntime) -> io::Result<Vec<Notification>> {
+pub fn visible_notifications(runtime:&SharedRuntime)->io::Result<Vec<Notification>>{
+    Ok(visible_members(runtime)?.into_iter().map(|(note,_)|note).collect())
+}
+
+/// Return the count of each displayed notification's group as well as its ID.
+/// Keeping this together prevents formatting and mouse geometry from diverging.
+pub fn visible_members(runtime:&SharedRuntime)
+    -> io::Result<Vec<(Notification,usize)>>
+{
     let limit=runtime.config().global.get("max-visible")
         .and_then(|v|v.parse::<i32>().ok()).unwrap_or(5);
     // Upstream Mako treats negative max-visible as unlimited.
@@ -68,12 +83,13 @@ pub fn visible_notifications(runtime:&SharedRuntime) -> io::Result<Vec<Notificat
     for group in group_ordered(by_id,&spec) {
         if let Some(id)=group.ids.first(){
             if let Some(n)=by_id.iter().find(|n|&n.id==id){
-                let style=style_for_note(runtime,n,&modes);
+                let count=group.ids.len();
+                let style=style_for_note_group(runtime,n,&modes,count);
                 if style.get("invisible").is_some_and(|v|v=="1"||v=="true"){
                     continue;
                 }
                 if selected.len()>=max_visible {break;}
-                selected.push(n.clone());
+                selected.push((n.clone(),count));
             }
         }
     }
@@ -92,7 +108,7 @@ pub fn displayable_groups(runtime:&SharedRuntime)->io::Result<usize>{
     for group in group_ordered(store.active(),&spec){
         if let Some(id)=group.ids.first(){
             if let Some(n)=store.active().iter().find(|n|&n.id==id){
-                let style=style_for_note(runtime,n,&modes);
+                let style=style_for_note_group(runtime,n,&modes,group.ids.len());
                 if !style.get("invisible").is_some_and(|v|v=="1"||v=="true"){
                     count+=1;
                 }
@@ -105,19 +121,21 @@ pub fn displayable_groups(runtime:&SharedRuntime)->io::Result<usize>{
 /// Render the active, ordered messages at the present instant, including
 /// configured category colors. Returns None for an empty notification list.
 pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> {
-    let notes=visible_notifications(runtime)?;
+    let notes=visible_members(runtime)?;
     let displayable=displayable_groups(runtime)?;
     let total=runtime.store.lock().map_err(|_|poisoned())?.active().len();
     let hidden=displayable.saturating_sub(notes.len());
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let mut frames=Vec::with_capacity(notes.len());
     let mut margins=Vec::with_capacity(notes.len());
-    for note in &notes {
-        let style=style_for_note(runtime,note,&modes);
+    for (note,group_count) in &notes {
+        let style=style_for_note_group(runtime,note,&modes,*group_count);
         margins.push(style.get("margin")
             .and_then(|s|PopupMargins::parse_mako(s))
             .unwrap_or(PopupMargins::uniform(10)));
-        frames.push(render_notification(note,&style).map_err(other)?);
+        frames.push(render_notification_group(
+            note,&style,if *group_count>=2{*group_count}else{0}
+        ).map_err(other)?);
     }
     if hidden>0 {
         let mode_views:Vec<&str>=modes.iter().map(String::as_str).collect();
@@ -271,6 +289,24 @@ mod tests {
             runtime.store.lock().unwrap().push(Request::default());
         }
         assert_eq!(visible_notifications(&runtime).unwrap().len(),7);
+    }
+
+    #[test]
+    fn grouped_first_notification_has_correct_count_format_and_metadata() {
+        let runtime=SharedRuntime::new(Config::parse("group-by=app-name\n").unwrap());
+        for _ in 0..3 {
+            runtime.store.lock().unwrap().push(Request{
+                app_name:"one".into(),summary:"Task".into(),..Request::default()
+            });
+        }
+        let members=visible_members(&runtime).unwrap();
+        assert_eq!(members.len(),1);
+        assert_eq!(members[0].1,3);
+        let style=style_for_note_group(&runtime,&members[0].0,&["default".into()],3);
+        assert_eq!(style.get("format").map(String::as_str),
+            Some("(%g) <b>%s</b>\\n%b"));
+        let frame=snapshot_frame(&runtime).unwrap().unwrap();
+        assert!(frame.height>0);
     }
 
     #[test]
