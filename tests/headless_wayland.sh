@@ -195,4 +195,43 @@ if [[ "$dismiss_repainted" != 1 ]]; then
   cat "$root/posthorn.log"
   exit 1
 fi
-echo "Headless Sway ${test_scale}x + private D-Bus + layer-shell screenshot colors/order + close/repaint: OK"
+# Exercise timer-driven expiry through the full private D-Bus / Wayland path.
+# Use a distinct warning color so visual removal can be distinguished from
+# ordinary notification closure in the compositor capture.
+expiry_result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
+  /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
+  'susssasa{sv}i' 'Posthorn expiry smoke' 0 '' 'Temporary warning' '' 0 1 'category' 's' 'warning' 1400)"
+[[ "$expiry_result" == u\ * ]] || { echo "Invalid expiring Notify result: $expiry_result"; exit 1; }
+appeared=0
+for _ in {1..8}; do
+  sleep 0.1
+  grim "$root/before-expiry.png"
+  if /usr/bin/python3 - "$root/before-expiry.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+counts = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if counts[(113, 85, 54)] >= 300 else 1)
+PY
+  then appeared=1; break; fi
+done
+if [[ "$appeared" != 1 ]]; then
+  echo 'Timed notification never appeared before expiry'
+  exit 1
+fi
+sleep 1.4
+expired=0
+for _ in {1..20}; do
+  sleep 0.2
+  grim "$root/after-expiry.png"
+  if /usr/bin/python3 "$root/check-dismissed.py" "$root/after-expiry.png" >/dev/null 2>&1; then
+    expired=1
+    break
+  fi
+done
+if [[ "$expired" != 1 ]]; then
+  echo 'Timed notification did not disappear from compositor screenshot'
+  /usr/bin/python3 "$root/check-dismissed.py" "$root/after-expiry.png"
+  exit 1
+fi
+echo "Headless Sway ${test_scale}x + D-Bus popups, close/repaint, and timer expiry: OK"

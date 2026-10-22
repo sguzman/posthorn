@@ -251,6 +251,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
     let (mut previous, mut previous_modes)=(Vec::new(),Vec::new());
     let mut previous_revision=u64::MAX;
     let mut previous_scale=0u32;
+    let mut expected_surface=false;
     loop {
         let notes: Vec<_>=runtime.store.lock().map_err(|_|poisoned())?
             .active().iter().cloned().collect();
@@ -264,7 +265,8 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
         let scale=viewer.output_scale(selected_output);
         let revision=runtime.revision();
         if notes!=previous || modes!=previous_modes ||
-            revision!=previous_revision || scale!=previous_scale {
+            revision!=previous_revision || scale!=previous_scale ||
+            (expected_surface && !viewer.has_active_surface()) {
 
             let frame=snapshot_frame_scaled(&runtime,scale)?;
             let corner=config.global.get("anchor")
@@ -282,6 +284,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
                 previous_modes=modes;
                 previous_revision=revision;
                 previous_scale=scale;
+                expected_surface=frame.is_some();
             }
             // Otherwise leave the previous snapshots unchanged: the next
             // compositor buffer release retries the newest frame, without

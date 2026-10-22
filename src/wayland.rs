@@ -559,6 +559,12 @@ impl LivePresenter {
         self.retired.len()+usize::from(self.active.is_some())>=32
     }
 
+    /// A compositor may close our layer surface without any change in the
+    /// notification store. The desktop loop must notice this and repaint.
+    pub fn has_active_surface(&self)->bool {
+        self.active.is_some()
+    }
+
     pub fn output_scale(&self,output_name:&str)->u32{
         let output=if output_name.is_empty(){
             self.state.entered_output.as_ref()
