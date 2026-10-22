@@ -32,8 +32,15 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
         "restore" if rest.is_empty() => Ok(Command::Restore),
         "reload" if rest.is_empty() => Ok(Command::Reload),
         "list" | "history" => {
-            if rest.is_empty() || rest == ["-j"] {
-                Ok(Command::List { history: command == "history", json: !rest.is_empty() })
+            // Upstream makoctl uses getopt("j"), accepting repeated -j
+            // switches and clustered -jj as equivalent to one -j.
+            let json=rest.iter().filter(|token|token.as_str()!="--")
+                .all(|token|token.len()>=2
+                    && token.starts_with('-')
+                    && token[1..].bytes().all(|b|b==b'j'));
+            if json {
+                Ok(Command::List { history: command == "history",
+                    json: rest.iter().any(|token|token.contains('j')) })
             } else { Err("usage: posthornctl list|history [-j]".into()) }
         }
         "menu" => {
@@ -523,6 +530,11 @@ mod tests {
     fn accepts_mako_list_and_default_invoke() {
         assert_eq!(parse_command(&v(&["history","-j"])).unwrap(),
             Command::List{history:true,json:true});
+        assert_eq!(parse_command(&v(&["history","-jj","-j"])).unwrap(),
+            Command::List{history:true,json:true});
+        assert_eq!(parse_command(&v(&["list","--","-j"])).unwrap(),
+            Command::List{history:false,json:true});
+        assert!(parse_command(&v(&["list","-q"])).is_err());
         assert_eq!(parse_command(&v(&["invoke"])).unwrap(),
             Command::Invoke{id:0,action:"default".into()});
         assert_eq!(parse_command(&v(&["invoke","-n34","default"])).unwrap(),
