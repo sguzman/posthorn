@@ -109,6 +109,34 @@ pub fn group_ordered<'a>(
     groups
 }
 
+/// Select the Mako dismissal group using the TARGET notification's
+/// resolved group-by setting, not the global setting. This matters for
+/// configurations such as [category=warning] group-by=app-name.
+pub fn active_group_ids(
+    runtime:&crate::runtime::SharedRuntime,target_id:u32
+)->Result<Vec<u32>,String>{
+    // Clone snapshots before resolving style; callers may subsequently
+    // close multiple IDs without retaining notification-store locks.
+    let (notifications,modes)={
+        let store=runtime.store.lock()
+            .map_err(|_|"notification store lock poisoned")?;
+        let modes=runtime.modes().lock()
+            .map_err(|_|"mode state lock poisoned")?;
+        (store.active().iter().cloned().collect::<Vec<_>>(),modes.clone())
+    };
+    let Some(target)=notifications.iter().find(|n|n.id==target_id) else {
+        return Ok(Vec::new());
+    };
+    // Mako forbids group-by under grouped/group-index criteria, so the
+    // pre-group style resolves the relevant group-by rule without cycling.
+    let style=crate::desktop::style_for_note_index(runtime,target,&modes,-1);
+    let spec=GroupSpec::parse(style.get("group-by")
+        .map(String::as_str).unwrap_or("none"))?;
+    Ok(group_ordered(notifications.iter(),&spec).into_iter()
+        .find(|g|g.ids.contains(&target_id))
+        .map(|g|g.ids).unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +187,31 @@ mod tests {
         let disabled = group_ordered(state.active(), &GroupSpec::parse("none,app-name").unwrap());
         assert_eq!(disabled.len(), 2);
         assert_eq!(GroupSpec::parse("app-name,,category").unwrap().fields.len(), 2);
+    }
+
+    #[test]
+    fn scoped_group_rule_applies_only_to_the_selected_target() {
+        let runtime=crate::runtime::SharedRuntime::new(
+            crate::config::Config::parse(
+                "group-by=none\n[category=warning]\ngroup-by=app-name\n"
+            ).unwrap()
+        );
+        let warning=runtime.store.lock().unwrap().push(Request{
+            app_name:"sender".into(),category:"warning".into(),
+            ..Request::default()
+        });
+        let regular=runtime.store.lock().unwrap().push(Request{
+            app_name:"sender".into(),category:"success".into(),
+            ..Request::default()
+        });
+        let unrelated=runtime.store.lock().unwrap().push(Request{
+            app_name:"other".into(),category:"success".into(),
+            ..Request::default()
+        });
+        assert_eq!(active_group_ids(&runtime,warning).unwrap(),
+            vec![regular,warning]);
+        assert_eq!(active_group_ids(&runtime,regular).unwrap(),vec![regular]);
+        assert_eq!(active_group_ids(&runtime,unrelated).unwrap(),vec![unrelated]);
     }
 
     #[test]

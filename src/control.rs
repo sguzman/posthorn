@@ -13,7 +13,6 @@ use zbus::{interface, zvariant::{OwnedValue, Value}, Connection};
 use crate::dbus::{BUS_NAME, OBJECT_PATH};
 use crate::notification::{CloseReason, Notification, NotificationStore, Urgency};
 use crate::runtime::SharedRuntime;
-use crate::grouping::{GroupSpec, group_ordered};
 
 pub const CONTROL_INTERFACE: &str = "fr.emersion.Mako";
 pub const CONTROL_PATH: &str = "/fr/emersion/Mako";
@@ -78,35 +77,22 @@ impl MakoControl {
                 "invalid combination of all/group/id".into(),
             ));
         }
-        let ids = {
-            let store = self.store.lock().map_err(|_| internal_error())?;
-            if all {
-                store.active().iter().map(|n| n.id).collect::<Vec<_>>()
-            } else if group {
-                // Makoctl --group always chooses the group of the first
-                // currently displayed notification. If grouping is disabled,
-                // this reduces to exactly one notification.
-                let spec = if let Some(runtime) = &self.runtime {
-                    let config=runtime.config();
-                    let raw = config.global.get("group-by")
-                        .map(String::as_str).unwrap_or("none");
-                    GroupSpec::parse(raw).map_err(|e|
-                        zbus::fdo::Error::NotSupported(e)
-                    )?
-                } else {
-                    GroupSpec::parse("none").map_err(|e|
-                        zbus::fdo::Error::NotSupported(e)
-                    )?
-                };
-                group_ordered(store.active(), &spec).first()
-                    .map(|g|g.ids.clone()).unwrap_or_default()
-            } else if id == 0 {
-                store.active().front().map(|n| vec![n.id]).unwrap_or_default()
-            } else if store.active().iter().any(|n| n.id == id) {
-                vec![id]
-            } else {
-                Vec::new()
+        let ids=if group {
+            let first=self.store.lock().map_err(|_|internal_error())?
+                .active().front().map(|n|n.id);
+            match (first,self.runtime.as_ref()) {
+                (None,_)=>Vec::new(),
+                (Some(id),Some(runtime))=>
+                    crate::grouping::active_group_ids(runtime,id)
+                        .map_err(zbus::fdo::Error::NotSupported)?,
+                (Some(id),None)=>vec![id],
             }
+        }else{
+            let store=self.store.lock().map_err(|_|internal_error())?;
+            if all {store.active().iter().map(|n|n.id).collect::<Vec<_>>()}
+            else if id==0 {store.active().front().map(|n|vec![n.id]).unwrap_or_default()}
+            else if store.active().iter().any(|n|n.id==id){vec![id]}
+            else{Vec::new()}
         };
         for notification_id in &ids {
             if let Some(runtime) = &self.runtime {

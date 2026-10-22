@@ -6,7 +6,7 @@
 //! bindings; actual Hyprland activation behavior remains unverified.
 
 use std::io;
-use crate::grouping::{group_ordered,GroupSpec};
+use crate::grouping::active_group_ids;
 use crate::hooks::NotifyBinding;
 use crate::notification::{CloseReason,Notification};
 use crate::runtime::SharedRuntime;
@@ -126,7 +126,6 @@ pub async fn dispatch_binding(
     conn:&Connection,runtime:&SharedRuntime,id:u32,binding:NotifyBinding,
     activation_token:Option<&str>,
 )->Result<(),Box<dyn std::error::Error+Send+Sync>>{
-    let config=runtime.config();
     match binding {
         NotifyBinding::None=>{}
         NotifyBinding::Exec(cmd)=>NotifyBinding::Exec(cmd).run_exec(id)?,
@@ -137,14 +136,7 @@ pub async fn dispatch_binding(
             for id in ids {closed(conn,runtime,id,true).await?;}
         }
         NotifyBinding::DismissGroup=>{
-            let raw=config.global.get("group-by")
-                .map(String::as_str).unwrap_or("none");
-            let spec=GroupSpec::parse(raw).map_err(error)?;
-            let ids={
-                let store=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?;
-                group_ordered(store.active(),&spec).into_iter()
-                    .find(|g|g.ids.contains(&id)).map(|g|g.ids).unwrap_or_default()
-            };
+            let ids=active_group_ids(runtime,id).map_err(error)?;
             for id in ids {closed(conn,runtime,id,true).await?;}
         }
         NotifyBinding::InvokeDefaultAction=>
