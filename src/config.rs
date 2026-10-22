@@ -278,7 +278,10 @@ impl Config {
             // Mako doesn't treat `#` after '=' as a comment: it is often a color.
             // Mako strips outer line whitespace, but NOT whitespace before
             // '='. "width =400" is therefore an unknown option.
-            let value = val.trim_end();
+            // The whole line was already stripped of Mako's ASCII
+            // surrounding space/tab characters; a second Unicode trim
+            // would incorrectly eat CR and NBSP after '='.
+            let value = val;
             if key == "include" && current.is_none() {
                 let path = resolve_include(value).map_err(|e|err(&location,e))?;
                 self.load(&path, depth+1, seen)?;
