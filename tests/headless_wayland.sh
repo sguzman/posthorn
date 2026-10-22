@@ -51,6 +51,10 @@ margin=8
 default-timeout=7000
 [category=success]
 background-color=#305747
+[category=failure]
+background-color=#684148
+[category=warning]
+background-color=#715536
 EOF
 
 WAYLAND_DEBUG=client ./target/debug/posthorn --experimental-private-desktop "$root/mako.conf" >"$root/posthorn.log" 2>&1 &
@@ -110,6 +114,11 @@ busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s introspect org.posthor
 busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
   /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
   'susssasa{sv}i' 'Posthorn screenshot' 0 '' 'Success' '' 0 1 'category' 's' 'success' 7000 >/dev/null
+for category in failure warning; do
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
+    /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
+    'susssasa{sv}i' 'Posthorn screenshot' 0 '' "$category" '' 0 1 'category' 's' "$category" 7000 >/dev/null
+done
 sleep 0.5
 grim "$root/popup.png"
 /usr/bin/python3 - "$root/popup.png" <<'PY'
@@ -118,11 +127,16 @@ from PIL import Image
 import sys
 
 pixels = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
-expected = (48, 87, 71)  # Sanitized Mako fixture category=success / #305747.
-assert pixels[expected] >= 300, (
-    "No success-category popup color visible in headless Sway screenshot; "
-    f"found {pixels[expected]} expected-color pixels"
-)
-print(f"Visual color smoke: {pixels[expected]} successful category pixels")
+expected = {
+    "success": (48, 87, 71),
+    "failure": (104, 65, 72),
+    "warning": (113, 85, 54),
+}
+for category, rgb in expected.items():
+    assert pixels[rgb] >= 300, (
+        f"No {category} category popup color visible on headless Sway; "
+        f"found {pixels[rgb]} pixels of {rgb}"
+    )
+    print(f"Visual color smoke: {category} = {pixels[rgb]} expected-color pixels")
 PY
 echo 'Headless Sway + private D-Bus + layer-shell popup + screenshot color: OK'
