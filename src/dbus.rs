@@ -138,9 +138,10 @@ impl FreedesktopNotifications {
             desktop_entry: text_hint("desktop-entry"),
             tag,
             urgency,
+            // Mako stores the signed D-Bus value directly and defaults to
+            // -1 when omitted; only Cairo clamps the visible fill width.
             progress: hints.get("value")
-                .and_then(|v|i32::try_from(v).ok())
-                .unwrap_or(0).clamp(0,100) as u8,
+                .and_then(|v|i32::try_from(v).ok()).unwrap_or(-1),
             requested_timeout_ms: expire_timeout,
             actions,
         };
@@ -294,13 +295,16 @@ mod tests {
     }
 
     #[test]
-    fn progress_hint_is_clamped_and_replacement_resets_when_absent() {
+    fn progress_hint_preserves_signed_value_and_replacement_resets_unknown() {
         let svc=service();
         let hints=[("value".into(),OwnedValue::from(170i32))].into();
         let id=svc.apply_notify("app",0,"","Working","",Vec::new(),hints,-1).unwrap();
-        assert_eq!(svc.store.lock().unwrap().active()[0].progress,100);
+        assert_eq!(svc.store.lock().unwrap().active()[0].progress,170);
+        let hints=[("value".into(),OwnedValue::from(-9i32))].into();
+        svc.apply_notify("app",id,"","Replaced","",Vec::new(),hints,-1).unwrap();
+        assert_eq!(svc.store.lock().unwrap().active()[0].progress,-9);
         svc.apply_notify("app",id,"","Finished","",Vec::new(),HashMap::new(),-1).unwrap();
-        assert_eq!(svc.store.lock().unwrap().active()[0].progress,0);
+        assert_eq!(svc.store.lock().unwrap().active()[0].progress,-1);
     }
 
     #[test]

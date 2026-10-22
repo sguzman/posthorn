@@ -33,7 +33,7 @@ pub struct Notification {
     pub desktop_entry: String,
     pub tag: String,
     pub urgency: Urgency,
-    pub progress: u8,
+    pub progress: i32,
     pub requested_timeout_ms: i32,
     pub actions: Vec<Action>,
     /// Group membership assigned by Mako's insertion/close passes.
@@ -56,7 +56,7 @@ pub struct Request {
     pub desktop_entry: String,
     pub tag: String,
     pub urgency: Urgency,
-    pub progress: u8,
+    pub progress: i32,
     pub requested_timeout_ms: i32,
     pub actions: Vec<Action>,
 }
@@ -66,7 +66,7 @@ impl Default for Request {
         Self { replaces_id: 0, app_name: String::new(), app_icon: String::new(), image_data: None,
             summary: String::new(), body: String::new(), category: String::new(),
             desktop_entry: String::new(), tag: String::new(), urgency: Urgency::Unknown,
-            progress: 0, requested_timeout_ms: -1, actions: Vec::new() }
+            progress: -1, requested_timeout_ms: -1, actions: Vec::new() }
     }
 }
 
@@ -386,6 +386,16 @@ mod tests {
         assert_eq!(store.active()[0].id,b);
         assert_ne!(store.active()[0].id,0);
     }
+    #[test]
+    fn progress_defaults_to_mako_unknown_and_stores_raw_sender_value() {
+        let mut store=NotificationStore::new(5);
+        let id=store.push(Request::default());
+        assert_eq!(store.active()[0].progress,-1);
+        let newer=Request{replaces_id:id,progress:175,..Request::default()};
+        assert_eq!(store.push(newer),id);
+        assert_eq!(store.active()[0].progress,175);
+    }
+
     #[test]
     fn replacement_by_id_preserves_id_and_slot() {
         let mut store=NotificationStore::new(5);
