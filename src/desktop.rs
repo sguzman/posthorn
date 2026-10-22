@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::config::{Options, Traits};
 use crate::grouping::group_ordered_scoped;
 use crate::notification::{Notification, Urgency};
-use crate::render::{compose_mako_stack,render_notification_group_scaled,render_hidden_placeholder_scaled,PixelFrame,StackAlignment};
+use crate::render::{compose_mako_stack,render_notification_group_with_icon_scale,render_hidden_placeholder_scaled,PixelFrame,StackAlignment};
 use crate::runtime::SharedRuntime;
 use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins,PointerClick};
 
@@ -192,6 +192,14 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
 pub fn snapshot_frame_scaled(runtime:&SharedRuntime,pixel_scale:u32)
     -> io::Result<Option<PixelFrame>>
 {
+    snapshot_frame_with_icon_scale(runtime,pixel_scale,pixel_scale)
+}
+
+/// Render at the chosen output scale while choosing the same themed icon
+/// size as Mako, which considers the maximum scale of all attached monitors.
+fn snapshot_frame_with_icon_scale(
+    runtime:&SharedRuntime,pixel_scale:u32,icon_lookup_scale:u32,
+)->io::Result<Option<PixelFrame>>{
     if !(1..=8).contains(&pixel_scale) {
         return Err(other("unsupported compositor pixel scale"));
     }
@@ -216,8 +224,9 @@ pub fn snapshot_frame_scaled(runtime:&SharedRuntime,pixel_scale:u32)
         margins.push(style.get("margin")
             .and_then(scale_margin)
             .unwrap_or(PopupMargins::uniform(10*scale)));
-        frames.push(render_notification_group_scaled(
-            note,&style,if entry.group_count>=2{entry.group_count}else{0},pixel_scale
+        frames.push(render_notification_group_with_icon_scale(
+            note,&style,if entry.group_count>=2{entry.group_count}else{0},
+            pixel_scale,icon_lookup_scale
         ).map_err(other)?);
     }
     if hidden>0 {
@@ -255,6 +264,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
     let (mut previous, mut previous_modes)=(Vec::new(),Vec::new());
     let mut previous_revision=u64::MAX;
     let mut previous_scale=0u32;
+    let mut previous_icon_scale=0u32;
     let mut expected_surface=false;
     loop {
         let notes: Vec<_>=runtime.store.lock().map_err(|_|poisoned())?
@@ -274,12 +284,14 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
             continue;
         }
         let scale=viewer.output_scale(selected_output);
+        let icon_scale=viewer.maximum_output_scale();
         let revision=runtime.revision();
         if notes!=previous || modes!=previous_modes ||
             revision!=previous_revision || scale!=previous_scale ||
+            icon_scale!=previous_icon_scale ||
             (expected_surface && !viewer.has_active_surface()) {
 
-            let frame=snapshot_frame_scaled(&runtime,scale)?;
+            let frame=snapshot_frame_with_icon_scale(&runtime,scale,icon_scale)?;
             let corner=config.global.get("anchor")
                 .and_then(|s|ScreenCorner::from_mako(s))
                 .unwrap_or(ScreenCorner::TopRight);
@@ -295,6 +307,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
                 previous_modes=modes;
                 previous_revision=revision;
                 previous_scale=scale;
+                previous_icon_scale=icon_scale;
                 expected_surface=frame.is_some();
             }
             // Otherwise leave the previous snapshots unchanged: the next

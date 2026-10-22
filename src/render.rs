@@ -250,13 +250,25 @@ pub fn render_notification_group(
 pub fn render_notification_group_scaled(
     note:&Notification,style:&Options,group_count:usize,pixel_scale:u32,
 ) -> Result<PixelFrame,String> {
+    render_notification_group_with_icon_scale(
+        note,style,group_count,pixel_scale,pixel_scale
+    )
+}
+
+/// Mako selects themed icons using the largest scale on *any* attached output,
+/// not necessarily the output presenting the popup. Painting and text still
+/// rasterize at the actual popup output's pixel scale.
+pub fn render_notification_group_with_icon_scale(
+    note:&Notification,style:&Options,group_count:usize,
+    pixel_scale:u32,icon_lookup_scale:u32,
+)->Result<PixelFrame,String>{
     if !(1..=8).contains(&pixel_scale) {
         return Err("unsupported notification pixel scale".into());
     }
     let width = integer_option(style, "width", 300);
     // One decode per frame. Both text measurement and painting consume the
     // same icon, avoiding redundant filesystem reads and image decoding.
-    let icon=load_note_icon_scaled(note,style,pixel_scale);
+    let icon=load_note_icon_scaled(note,style,icon_lookup_scale.max(1));
     let height = measure_height_with_icon(note,style,icon.as_ref(),group_count)?;
     if width == 0 || height == 0 || width > 4096 || height > 4096
         || u64::from(width) * u64::from(height) * 4 > 64 * 1024 * 1024

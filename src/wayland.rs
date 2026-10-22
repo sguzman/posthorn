@@ -604,6 +604,13 @@ impl LivePresenter {
             .any(|(_,name)|name==output_name)
     }
 
+    /// Mako icon.c uses the maximum integer scale of every attached output
+    /// when selecting a theme asset, independently of popup placement.
+    pub fn maximum_output_scale(&self)->u32{
+        self.state.output_scales.iter().map(|(_,scale)|*scale)
+            .max().unwrap_or(1).max(1)
+    }
+
     pub fn output_scale(&self,output_name:&str)->u32{
         let output=if output_name.is_empty(){
             self.state.entered_output.as_ref()
