@@ -131,8 +131,8 @@ impl MakoControl {
         }.cloned();
         drop(store);
         let Some(note)=note else {return Ok(None)};
-        // The Mako control method searches the sender-supplied actions
-        // directly. Its style's actions=0 never removes those action keys.
+        // Mako searches the internal action list (newest action pair
+        // first), regardless of the style's actions=0 visibility setting.
         Ok(note.actions.iter().any(|a|a.key==key).then_some(note.id))
     }
 }

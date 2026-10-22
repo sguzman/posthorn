@@ -52,8 +52,10 @@ impl FreedesktopNotifications {
                 "notification actions must be key/label pairs".into(),
             ));
         }
+        // Upstream appends each action using wl_list_insert at the head:
+        // the internal action list is reversed relative to sender order.
         let actions = actions
-            .chunks_exact(2)
+            .chunks_exact(2).rev()
             .map(|pair| Action {
                 key: pair[0].clone(),
                 label: pair[1].clone(),
@@ -292,6 +294,22 @@ mod tests {
 
     fn service() -> FreedesktopNotifications {
         FreedesktopNotifications::new(Arc::new(Mutex::new(NotificationStore::new(5))))
+    }
+
+    #[test]
+    fn sender_action_pairs_are_stored_in_upstream_reverse_order() {
+        let svc=service();
+        let actions=vec![
+            "default".into(),"First".into(),
+            "other".into(),"Middle".into(),
+            "default".into(),"Last".into(),
+        ];
+        let id=svc.apply_notify("sender",0,"","Action order","",
+            actions,HashMap::new(),-1).unwrap();
+        let store=svc.store.lock().unwrap();
+        let note=store.active().iter().find(|n|n.id==id).unwrap();
+        assert_eq!(note.actions.iter().map(|a|a.label.as_str())
+            .collect::<Vec<_>>(),vec!["Last","Middle","First"]);
     }
 
     #[test]
