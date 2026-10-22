@@ -5,7 +5,7 @@ Progress is the average of documented atomic task percentages. A task at 100%
 requires acceptance evidence; partial work stays below 100%. Future ideas
 do not count toward Mako MVP. No runtime parity is claimed yet.
 
-## 📯 M0 — Mako parity and MVP inauguration — `████████░░ 75%`
+## 📯 M0 — Mako parity and MVP inauguration — `████████░░ 76%`
 **Acceptance gate:** Full upstream parity + Hyprland end-to-end QA
 
 ### 🧭 P0 — Source baseline and safeguards — `██████████ 99%`
@@ -15,10 +15,10 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🔐 T003 — Keep live Mako untouched, isolate public test fixtures — `██████████ 100%`
 - 🧪 T004 — Validate Rust scaffold with CI and formatting — `██████████ 97%`
 
-### 🧩 P1 — Config, criteria and types port — `███████░░░ 73%`
+### 🧩 P1 — Config, criteria and types port — `███████░░░ 74%`
 
 - 📄 T101 — Parse Mako configuration sections and ordered overrides — `██████████ 100%`
-- 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `████████░░ 84%`
+- 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `█████████░ 86%`
 - 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `██████░░░░ 59%`
 - 📂 T104 — Include files with Mako-compatible path behavior — `████████░░ 75%`
 - 📐 T105 — Type/layout/style parity for all Mako config settings — `█████░░░░░ 49%`
@@ -27,7 +27,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 - 🆔 T201 — Allocate nonzero IDs, replacement by ID and app-scoped tag — `██████████ 100%`
 - 🗃️ T202 — Bounded in-memory history, close and restore — `██████████ 100%`
-- ⏳ T203 — Timeout selection and timer/event scheduling — `█████████░ 89%`
+- ⏳ T203 — Timeout selection and timer/event scheduling — `█████████░ 90%`
 - 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `█████████░ 88%`
 - 🔤 T205 — Pango markup/escaping, format specifiers and actions — `███████░░░ 72%`
 
@@ -52,7 +52,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 **Feature inventory** (separate from task-based milestone percentage):
 
-- 🔔 Desktop notification parity — `███████░░░ 73%`
+- 🔔 Desktop notification parity — `███████░░░ 74%`
 - 🎨 Mako category coloring and sound parity — `█████░░░░░ 52%`
 - 📜 Mako history/control API parity — `████████░░ 77%`
 

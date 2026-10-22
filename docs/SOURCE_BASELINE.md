@@ -28,7 +28,7 @@ change how they call the Freedesktop Notification protocol. Until parity:
 
 | Upstream source | Posthorn scope | State |
 | --- | --- | --- |
-| `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; format/group validation, progress-color operator syntax, source-backed transactional reload and sorting settings |
+| `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; format/group validation, progress-color operator syntax, output-matched timer/history criteria, source-backed transactional reload and sorting settings |
 | `notification.c` | IDs, replace, close, timeout, history, groups, format | Timers, dismiss/restore and per-notification history policy; indexed grouped visibility (including explicit secondary-member overrides), per-criteria limits, count formatting and per-notification overflow placeholders tested; dynamic grouping remains partial |
 | `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Private development bus with image-data, image-path, progress, reload, ActivationToken ordering and on-notify action/dismiss signal tests; full protocol parity pending |
 | `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Private desktop has stacked SHM layer-shell surfaces with redraw reuse and release-aware SHM buffers, named outputs and integer buffer-scale changes, XDG activation token requests, pointer/touch, anchors, and outer-margin placement; live compositor QA pending |

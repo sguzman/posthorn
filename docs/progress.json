@@ -54,7 +54,7 @@
               "id": "T102",
               "emoji": "🔎",
               "name": "Match categories, modes, exact fields, quoted and regex selectors",
-              "progress": 84
+              "progress": 86
             },
             {
               "id": "T103",
@@ -97,7 +97,7 @@
               "id": "T203",
               "emoji": "⏳",
               "name": "Timeout selection and timer/event scheduling",
-              "progress": 89
+              "progress": 90
             },
             {
               "id": "T204",
@@ -199,7 +199,7 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 73
+          "progress": 74
         },
         {
           "emoji": "🎨",
