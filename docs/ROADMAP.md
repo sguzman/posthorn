@@ -52,7 +52,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 **Feature inventory** (separate from task-based milestone percentage):
 
-- 🔔 Desktop notification parity — `█████████░ 94%`
+- 🔔 Desktop notification parity — `██████████ 95%`
 - 🎨 Mako category coloring and sound parity — `███████░░░ 72%`
 - 📜 Mako history/control API parity — `█████████░ 92%`
 
