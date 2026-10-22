@@ -48,7 +48,11 @@ impl Selector {
             return Err(format!("unknown criteria field '{key}'"));
         }
         let regex = if key == "summary~" || key == "body~" {
-            Some(Regex::new(value).map_err(|e| format!("invalid regex: {e}"))?)
+            // Mako uses POSIX REG_EXTENDED|REG_NOSUB without REG_NEWLINE.
+            // Unlike Rust regex's default, POSIX '.' matches a newline in
+            // that mode. Dot-all must NOT also enable multiline anchors.
+            Some(Regex::new(&format!("(?s:{value})"))
+                .map_err(|e| format!("invalid regex: {e}"))?)
         } else { None };
         if ["actionable", "expiring", "grouped", "hidden"].contains(&key)
             && parse_bool(value).is_none() {
@@ -696,6 +700,31 @@ mod tests {
         n.urgency = "critical";
         assert_eq!(c.style_for(&n)["width"], "440");
     }
+    #[test]
+    fn posix_ere_dot_matches_newline_but_anchors_remain_whole_string(){
+        let config=Config::parse(
+            "[summary~=^Line.One$]\nwidth=441\n[body~=^Top.Bottom$]\nheight=111\n"
+        ).unwrap();
+        let mut fields=note("general",&["default"]);
+        fields.summary="Line\nOne";
+        fields.body="Top\nBottom";
+        let style=config.style_for(&fields);
+        assert_eq!(style["width"],"441");
+        assert_eq!(style["height"],"111");
+        fields.summary="prefix\nLine\nOne";
+        fields.body="prefix\nTop\nBottom";
+        let style=config.style_for(&fields);
+        assert_eq!(style["width"],"300",
+            "REG_NEWLINE was not set: ^ cannot match after a newline");
+        assert_eq!(style["height"],"100",
+            "REG_NEWLINE was not set: ^ cannot match after a newline");
+
+        let literal=Config::parse("[summary~=^Line\\.One$]\nwidth=442\n").unwrap();
+        fields.summary="Line\nOne";
+        assert_eq!(literal.style_for(&fields)["width"],"300",
+            "escaped dot remains literal under POSIX ERE");
+    }
+
     #[test]
     fn signed_max_history_matches_mako_nonpositive_disable_semantics() {
         for setting in ["max-history=-1","max-history=-100","max-history=0"] {
