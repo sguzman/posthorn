@@ -83,11 +83,17 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                 if options && arg=="--" {
                     options=false;
                 }else if options && arg.starts_with("--"){
-                    match arg{
-                        "--all"=>all=true,
-                        "--group"=>group=true,
-                        "--no-history"=>history=false,
-                        _=>return Err(format!("unknown dismiss option {arg}")),
+                    // GNU getopt_long accepts unique abbreviations of
+                    // --all, --group and --no-history (e.g. --gr, --no).
+                    let name=&arg[2..];
+                    if !name.is_empty() && "all".starts_with(name) {
+                        all=true;
+                    } else if !name.is_empty() && "group".starts_with(name) {
+                        group=true;
+                    } else if !name.is_empty() && "no-history".starts_with(name) {
+                        history=false;
+                    } else {
+                        return Err(format!("unknown dismiss option {arg}"));
                     }
                 }else if options && arg.starts_with('-') && arg.len()>1{
                     let mut chars=arg[1..].chars().peekable();
@@ -580,6 +586,12 @@ mod tests {
             Command::Dismiss{id:42,all:false,group:false,history:false});
         assert_eq!(parse_command(&v(&["dismiss","--all","-h"])).unwrap(),
             Command::Dismiss{id:0,all:true,group:false,history:false});
+        assert_eq!(parse_command(&v(&["dismiss","--al","--no-h"])).unwrap(),
+            Command::Dismiss{id:0,all:true,group:false,history:false});
+        assert_eq!(parse_command(&v(&["dismiss","--gr","--no"])).unwrap(),
+            Command::Dismiss{id:0,all:false,group:true,history:false});
+        assert!(parse_command(&v(&["dismiss","--a","--g"])).is_err());
+        assert!(parse_command(&v(&["dismiss","--history"])).is_err());
         assert_eq!(parse_command(&v(&["dismiss","-a","ignored"])).unwrap(),
             Command::Dismiss{id:0,all:true,group:false,history:true});
         assert_eq!(parse_command(&v(&["dismiss","--","-a"])).unwrap(),
