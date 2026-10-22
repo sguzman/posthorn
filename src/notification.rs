@@ -36,6 +36,12 @@ pub struct Notification {
     pub progress: u8,
     pub requested_timeout_ms: i32,
     pub actions: Vec<Action>,
+    /// Group membership assigned by Mako's insertion/close passes.
+    pub group_index:i32,
+    pub group_count:usize,
+    /// Direct NotificationStore fixtures may be unscheduled; render those
+    /// with the compatibility replay rather than claiming stored grouping.
+    pub grouping_applied:bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -70,7 +76,8 @@ impl Notification {
             image_data: request.image_data, summary: request.summary, body: request.body, category: request.category,
             desktop_entry: request.desktop_entry, tag: request.tag, urgency: request.urgency,
             progress: request.progress, requested_timeout_ms: request.requested_timeout_ms,
-            actions: request.actions }
+            actions: request.actions,
+            group_index:-1,group_count:1,grouping_applied:false }
     }
 
     /// Returns None for a persistent notification, otherwise its timeout.
@@ -180,7 +187,13 @@ impl NotificationStore {
         });
         if let Some(index) = existing {
             let id = self.active[index].id;
+            // Upstream reset_notification preserves grouping metadata until
+            // its new notification grouping pass is applied.
+            let (group_index,group_count)=(self.active[index].group_index,
+                self.active[index].group_count);
             self.active[index] = Notification::from_request(id, request);
+            self.active[index].group_index=group_index;
+            self.active[index].group_count=group_count;
             return id;
         }
         let id = self.allocate_id();
@@ -195,6 +208,9 @@ impl NotificationStore {
     pub fn regroup_new_notification(
         &mut self,target_id:u32,spec:&crate::grouping::GroupSpec
     ){
+        if let Some(target)=self.active.iter_mut().find(|n|n.id==target_id){
+            target.grouping_applied=true;
+        }
         if let Some(target)=self.active.iter().find(|n|n.id==target_id).cloned(){
             self.regroup_matching(&target,spec);
         }
@@ -215,7 +231,16 @@ impl NotificationStore {
         let selected:HashSet<u32>=self.active.iter()
             .filter(|note|crate::grouping::same_group(note,target,spec))
             .map(|note|note.id).collect();
-        if selected.len()<2{return;}
+        if selected.is_empty(){return;}
+        let count=selected.len();
+        if count==1 {
+            if let Some(note)=self.active.iter_mut()
+                .find(|note|selected.contains(&note.id)){
+                note.group_index=-1;
+                note.group_count=1;
+            }
+            return;
+        }
         let mut matched=VecDeque::new();
         let mut others=VecDeque::new();
         let mut before_first=0usize;
@@ -227,7 +252,9 @@ impl NotificationStore {
                 others.push_back(notification);
             }
         }
-        for (offset,notification) in matched.into_iter().enumerate(){
+        for (offset,mut notification) in matched.into_iter().enumerate(){
+            notification.group_index=offset as i32;
+            notification.group_count=count;
             others.insert(before_first+offset,notification);
         }
         self.active=others;
@@ -310,6 +337,13 @@ mod tests {
             &crate::grouping::GroupSpec::parse("app-name").unwrap());
         assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
             vec![third,first,middle]);
+        assert_eq!(store.active().iter().map(|n|(n.group_index,n.group_count))
+            .collect::<Vec<_>>(),vec![(0,2),(1,2),(-1,1)]);
+        store.close(third,CloseReason::Dismissed,false,true);
+        let last=store.active().iter().find(|n|n.id==first).unwrap().clone();
+        store.regroup_after_close(&last,
+            &crate::grouping::GroupSpec::parse("app-name").unwrap());
+        assert_eq!(store.active().iter().find(|n|n.id==first).unwrap().group_index,-1);
     }
 
     #[test]

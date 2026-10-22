@@ -129,6 +129,26 @@ pub fn group_ordered_scoped<'a>(
 )->Result<Vec<Group>,String>{
     let notes:Vec<&Notification>=notifications.into_iter().collect();
     let by_id:HashMap<u32,&Notification>=notes.iter().map(|n|(n.id,*n)).collect();
+    // When notifications have gone through their actual Notify lifecycle,
+    // consume the group indices retained by the store. On close, Mako can
+    // regroup surviving members even if no survivor's group-by would
+    // independently create that group. Replay would discard this state.
+    if notes.iter().all(|n|n.grouping_applied) {
+        let mut recorded:Vec<Group>=Vec::new();
+        for note in &notes {
+            let index=note.group_index;
+            let continuing=index>0 && recorded.last().is_some_and(|group|
+                group.ids.len()==index as usize
+                && group.ids.first().is_some_and(|first|
+                    by_id.get(first).is_some_and(|n|n.group_index==0)));
+            if continuing {
+                if let Some(last)=recorded.last_mut(){last.ids.push(note.id);}
+            }else{
+                recorded.push(Group{ids:vec![note.id]});
+            }
+        }
+        return Ok(recorded);
+    }
     let mut order:Vec<u32>=notes.iter().map(|n|n.id).collect();
     let mut group_index:HashMap<u32,i32>=order.iter().map(|id|(*id,-1)).collect();
     // Fresh Mako notification IDs increase monotonically. Replay the
