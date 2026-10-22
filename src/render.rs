@@ -206,9 +206,13 @@ fn measure_height_with_icon(
         if vertical{text.saturating_add(icon_h).saturating_add(vertical_extra)}
         else{text.max(icon_h)}
     }else{text};
-    let mut actual=content.saturating_add(height_padding);
-    actual=actual.max(CornerRadii::parse(style).required_height(border));
-    Ok(actual.min(cap).max(1))
+    // Mako caps Pango text layout height, not the final notification
+    // rectangle: very large corner radii may push the popup above height.
+    let actual=content.saturating_add(height_padding)
+        .max(CornerRadii::parse(style).required_height(border))
+        .max(1);
+    if actual>4096{return Err("notification exceeds safe height".into());}
+    Ok(actual)
 }
 
 pub fn render_notification(note: &Notification, style: &Options) -> Result<PixelFrame, String> {
@@ -575,6 +579,23 @@ mod tests {
             body: "Line 2".into(), category: "success".into(),
             ..Request::default() });
         store.active().iter().find(|n| n.id == id).unwrap().clone()
+    }
+
+    #[test]
+    fn large_corner_radius_can_extend_beyond_mako_text_height_cap() {
+        let note=fixture();
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","160"),("height","35"),("border-size","2"),
+            ("border-radius","30,5,30,5"),
+        ]{style.insert(key.into(),value.into());}
+        // The top-left/bottom-right corners are each 30, so neither
+        // side needs 60px. The opposite same-side sum is 35px.
+        let height=measure_notification_height(&note,&style).unwrap();
+        assert!(height>=39);
+        style.insert("border-radius".into(),"40,5,5,40".into());
+        assert!(measure_notification_height(&note,&style).unwrap()>=84);
+        assert!(render_notification(&note,&style).unwrap().height>=84);
     }
 
     #[test]
