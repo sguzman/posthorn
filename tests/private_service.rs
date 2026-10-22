@@ -422,6 +422,38 @@ async fn mode_dbus_reapplies_history_of_existing_notifications()
 }
 
 #[tokio::test]
+async fn reload_rebuilds_live_grouping_and_preserves_timer_deadline()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::desktop::visible_members_indexed;
+    use posthorn::service::open_private_service_from_path;
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("config");
+    std::fs::write(&path,"group-by=none\ndefault-timeout=15000\n")?;
+    let (conn,runtime)=open_private_service_from_path(&path).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let send=|app:&str|(app.to_owned(),0u32,"","Notice","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32);
+    let first:u32=desktop.call("Notify",&send("same")).await?;
+    let other:u32=desktop.call("Notify",&send("other")).await?;
+    let last:u32=desktop.call("Notify",&send("same")).await?;
+    let before=runtime.next_deadline()?;
+    assert!(before.is_some());
+    std::fs::write(&path,"group-by=app-name\ndefault-timeout=300\n")?;
+    let _:()=ctl.call("Reload",&()).await?;
+    assert_eq!(runtime.next_deadline()?,before,
+        "Mako reapply_config must not restart existing notification timers");
+    let listed:Vec<HashMap<String,OwnedValue>>=ctl.call("ListNotifications",&()).await?;
+    assert_eq!(listed.iter().map(|n|u32::try_from(n.get("id").unwrap()).unwrap())
+        .collect::<Vec<_>>(),vec![last,first,other]);
+    assert_eq!(visible_members_indexed(&runtime)?.iter()
+        .map(|member|(member.notification.id,member.group_count))
+        .collect::<Vec<_>>(),vec![(last,2),(other,1)]);
+    Ok(())
+}
+
+#[tokio::test]
 async fn reload_dbus_updates_active_history_without_rearming_expiry()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
