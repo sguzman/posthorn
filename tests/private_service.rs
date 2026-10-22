@@ -268,6 +268,35 @@ async fn control_reload_swaps_styles_and_preserves_last_good_file()
 }
 
 #[tokio::test]
+async fn invalid_known_hint_variant_does_not_replace_notification()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let id:u32=desktop.call("Notify",&(
+        "malformed-hint-test",0u32,"","Original","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let bad:HashMap<String,OwnedValue>=[
+        ("category".into(),OwnedValue::from(41i32))
+    ].into();
+    let result:zbus::Result<u32>=desktop.call("Notify",&(
+        "malformed-hint-test",id,"","Must not replace","",
+        Vec::<String>::new(),bad,-1i32
+    )).await;
+    match result {
+        Err(zbus::Error::MethodError(name,_,_))=>
+            assert_eq!(name.as_str(),"org.freedesktop.DBus.Error.InvalidArgs"),
+        other=>panic!("unexpected wrong-hint result: {other:?}"),
+    }
+    let store=runtime.store.lock().unwrap();
+    assert_eq!(store.active().len(),1);
+    assert_eq!(store.active()[0].id,id);
+    assert_eq!(store.active()[0].summary,"Original");
+    Ok(())
+}
+
+#[tokio::test]
 async fn chromium_urgency_variants_are_preserved_over_real_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
