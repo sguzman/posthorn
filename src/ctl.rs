@@ -196,7 +196,7 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                     id=parse_mako_id(rest.get(i).ok_or("missing notification ID")?)?;
                 } else if options && arg.starts_with("-n") {
                     id=parse_mako_id(&arg[2..])?;
-                } else if options && arg.starts_with('-') {
+                } else if options && arg.starts_with('-') && arg.len()>1 {
                     return Err(format!("unknown invoke option {arg}"));
                 } else if action.is_none() {
                     action=Some(arg.to_owned());
@@ -249,7 +249,7 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                         edits.push((op,other[2..].to_owned()));
                         i+=1;
                     }
-                    other if other.starts_with('-')=>
+                    other if other.starts_with('-') && other.len()>1=>
                         return Err(format!("unknown mode option {other}")),
                     value=>{positional.push(value.to_owned());i+=1;}
                 }
@@ -597,6 +597,18 @@ mod tests {
             let words=args.into_iter().map(str::to_owned).collect::<Vec<_>>();
             assert_eq!(parse_command(&words).unwrap(),Command::Help);
         }
+    }
+
+    #[test]
+    fn lone_dash_is_positional_under_mako_gnu_getopt(){
+        assert_eq!(parse_command(&v(&["invoke","-"])).unwrap(),
+            Command::Invoke{id:0,action:"-".into()});
+        assert_eq!(parse_command(&v(&["invoke","--","-n"])).unwrap(),
+            Command::Invoke{id:0,action:"-n".into()});
+        assert_eq!(parse_command(&v(&["mode","-s","-"])).unwrap(),
+            Command::Modes{edit:vec![('s',"".into()),('S',"-".into())]});
+        assert!(parse_command(&v(&["mode","-"])).is_err(),
+            "bare positional mode still requires -s");
     }
 
     #[test]
