@@ -422,7 +422,9 @@ fn parse_selectors(text: &str) -> Result<Vec<Selector>, String> {
 /// Upstream parse_int uses strtol: leading whitespace is accepted, but
 /// trailing nonnumeric characters are rejected. Keep i32 bounds safe.
 pub fn parse_signed_mako(text:&str)->Option<i32>{
-    let trimmed=text.trim_start_matches(|c:char|c.is_ascii_whitespace());
+    // C strtol(10) skips isspace(), including vertical tab (0x0B),
+    // unlike Rust's is_ascii_whitespace() predicate.
+    let trimmed=text.trim_start_matches([' ','\t','\n','\r','\x0b','\x0c']);
     trimmed.parse::<i32>().ok()
 }
 
@@ -605,6 +607,7 @@ mod tests {
     fn numeric_runtime_conversion_keeps_mako_valid_leading_whitespace(){
         assert_eq!(parse_signed_mako("  -42"),Some(-42));
         assert_eq!(parse_signed_mako("\t+42"),Some(42));
+        assert_eq!(parse_signed_mako("\u{b}-7"),Some(-7));
         assert_eq!(parse_signed_mako("42 "),None);
         assert_eq!(parse_signed_mako("2147483648"),None);
         assert_eq!(parse_nonnegative_mako(" \t+440"),Some(440));
