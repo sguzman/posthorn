@@ -107,9 +107,10 @@ fn render(template: &str, mut subst: impl FnMut(char) -> String) -> String {
             None => output.push('%'),
         }
     }
-    // Mako's trim_space uses C isspace on UTF-8 bytes. It strips ASCII
-    // whitespace, not Unicode NBSP/EM SPACE text supplied by applications.
-    output.trim_matches(|ch:char|ch.is_ascii_whitespace()).to_owned()
+    // Mako's trim_space uses C isspace on UTF-8 bytes, including vertical
+    // tab (0x0B). Rust's is_ascii_whitespace() excludes that character.
+    // Keep Unicode NBSP/EM SPACE intact, as Mako does in the C locale.
+    output.trim_matches([' ','\t','\n','\r','\x0b','\x0c']).to_owned()
 }
 
 #[cfg(test)]
@@ -145,6 +146,17 @@ mod tests {
             "\u{a0}Hello\u{a0}");
         assert_eq!(render_hidden_format(" \t(%h of %t)\n",2,5),
             "(2 of 5)");
+    }
+
+    #[test]
+    fn c_isspace_trims_vertical_tab_and_form_feed_but_not_nbsp(){
+        let n=FormatNotification{
+            summary:"Visible",..FormatNotification::default()
+        };
+        assert_eq!(render_notification_format("\x0b\x0c%s\x0b",&n,false),"Visible");
+        assert_eq!(render_hidden_format("\x0b(%h of %t)\x0c",2,3),"(2 of 3)");
+        assert_eq!(render_notification_format("\u{a0}%s\u{a0}",&n,false),
+            "\u{a0}Visible\u{a0}");
     }
 
     #[test]
