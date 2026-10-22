@@ -28,12 +28,12 @@ change how they call the Freedesktop Notification protocol. Until parity:
 
 | Upstream source | Posthorn scope | State |
 | --- | --- | --- |
-| `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; format/group validation, progress-color operator syntax, output-matched timer/history criteria, source-backed transactional reload and sorting settings |
+| `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; stricter Mako selector validation (bare booleans only, anchor names), signed max-history disabling, format/group validation, progress-color operators, and transactional reload |
 | `notification.c` | IDs, replace, close, timeout, history, groups, format | Timers, dismiss/restore and per-notification history policy; indexed grouped visibility (including explicit secondary-member overrides), per-criteria limits, count formatting and per-notification overflow placeholders tested; dynamic grouping remains partial |
 | `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Private development bus with image-data, image-path, progress, reload, conditional root-style GetCapabilities, ActivationToken ordering and on-notify action/dismiss signal tests; full protocol parity pending |
 | `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Private desktop has stacked SHM layer-shell surfaces with redraw reuse and release-aware SHM buffers, named outputs and integer buffer-scale changes, XDG activation token requests, pointer/touch, anchors, and outer-margin placement; live compositor QA pending |
-| `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango markup/colors/file and inline icons, progress fill, measured heights, group counts, signed-margin clipping, trailing bottom-margin fix and ARGB overlap composition; integer-scaled buffers implemented, native-resolution Pango incomplete |
-| `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Private live/headless services, post-grouping on-notify hooks and quiet-mode sound tests, Mako-style `mode -s` with ordered duplicate suppression, text history/list, transactional reload, actions=0 suppression; XDG token protocol covered headlessly, exact control parity incomplete |
+| `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango markup/colors/file and inline icons, progress fill, measured heights, group counts, directional text/icon padding, per-corner border radius, icon clipping, signed-margin overlap and ARGB composition; native-resolution HiDPI Pango incomplete |
+| `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Private live/headless services, post-grouping on-notify hooks and quiet-mode sound tests, Mako-style `mode -s` with duplicate suppression and mutually exclusive -a/-r/-t validation, text history/list, transactional reload, actions=0 suppression; XDG token protocol covered headlessly, exact control parity incomplete |
 
 ## Explicit nonclaims
 

@@ -17,7 +17,7 @@ and Clear All, channels, SQLite persistence, and a general local message broker.
 > adapters on an isolated development bus, a continuously refreshed
 > Wayland layer-shell stack with release-aware SHM buffers and surface reuse,
 > named output routing with integer-scaled buffers, distinct outer/window and
-> internal popup margins, shrink-wrapped Cairo/Pango text and icons, configured
+> internal popup margins, directional padding and corner radii, icon border-radius clipping, shrink-wrapped Cairo/Pango text and icons, configured
 > post-grouping on-notify hooks, basic mouse/touch bindings, XDG activation
 > tokens, actions=0 suppression, and category-aware history,
 > grouped count formatting, overrideable secondary-member visibility, accurate overflow placeholders, and partial posthornctl.
