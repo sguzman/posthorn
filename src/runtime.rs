@@ -111,7 +111,8 @@ impl SharedRuntime {
                 crate::notification::Urgency::Critical => "critical",
             },
             anchor: config.global.get("anchor").map(String::as_str).unwrap_or("top-right"),
-            output: "", modes: &mode_views,
+            output: config.global.get("output").map(String::as_str).unwrap_or(""),
+            modes: &mode_views,
             requested_timeout_ms: note.requested_timeout_ms,
             actionable: !note.actions.is_empty(), group_index: -1, hidden: false,
         };
@@ -360,6 +361,20 @@ mod tests {
         assert_eq!(runtime.expire(now+Duration::from_millis(500)).unwrap(),vec![id]);
         assert_eq!(runtime.expire(now+Duration::from_millis(800)).unwrap(),vec![other]);
         assert_eq!(runtime.store.lock().unwrap().history().len(),1);
+    }
+
+    #[test]
+    fn configured_output_criteria_control_timeout_and_history() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "output=DP-2\ndefault-timeout=900\n             [output=DP-2]\ndefault-timeout=210\nhistory=0\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        let now=Instant::now();
+        runtime.schedule_without_hook(id,now).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+std::time::Duration::from_millis(210)));
+        assert!(runtime.close(id,CloseReason::Dismissed,true).unwrap());
+        assert!(runtime.store.lock().unwrap().history().is_empty());
     }
 
     #[test]
