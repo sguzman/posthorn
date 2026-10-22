@@ -45,6 +45,10 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                     id=rest.get(i).ok_or("missing notification ID")?
                         .parse().map_err(|_|"invalid notification ID")?;
                     i+=1;
+                } else if let Some(value)=rest[i].strip_prefix("-n") {
+                    if value.is_empty() { break; }
+                    id=value.parse().map_err(|_|"invalid notification ID")?;
+                    i+=1;
                 } else if rest[i]=="--" {
                     i+=1;
                     break;
@@ -70,6 +74,9 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                         id = rest.get(i).ok_or("missing notification ID")?
                             .parse().map_err(|_| "invalid notification ID")?;
                     }
+                    other if other.starts_with("-n") => {
+                        id = other[2..].parse().map_err(|_| "invalid notification ID")?;
+                    }
                     other => return Err(format!("unknown dismiss option {other}")),
                 }
                 i += 1;
@@ -88,6 +95,8 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                     i += 1;
                     id = rest.get(i).ok_or("missing notification ID")?
                         .parse().map_err(|_| "invalid notification ID")?;
+                } else if let Some(value)=rest[i].strip_prefix("-n") {
+                    id = value.parse().map_err(|_| "invalid notification ID")?;
                 } else if i == rest.len()-1 && action=="default" {
                     action=rest[i].clone();
                 } else {
@@ -107,6 +116,10 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
             let mut i=0;
             while i<rest.len() {
                 match rest[i].as_str() {
+                    "--"=>{
+                        positional.extend(rest[i+1..].iter().cloned());
+                        break;
+                    }
                     "-s"=>{set=true;i+=1;}
                     "-a"|"-r"|"-t"=>{
                         let flag=rest[i].as_str();
@@ -362,6 +375,9 @@ mod tests {
             Command::Dismiss{id:42,all:false,group:false,history:false});
         assert!(parse_command(&v(&["dismiss","-a","-g"])).is_err());
         assert!(parse_command(&v(&["dismiss","-n","not-numeric"])).is_err());
+        assert_eq!(parse_command(&v(&["dismiss","-n42","-h"])).unwrap(),
+            Command::Dismiss{id:42,all:false,group:false,history:false});
+        assert!(parse_command(&v(&["dismiss","-nINVALID"])).is_err());
     }
     #[test]
     fn modes_match_makoctl_getopt_and_replacement_semantics() {
@@ -384,6 +400,8 @@ mod tests {
         assert!(parse_command(&v(&["mode","-s","-a","quiet"])).is_err());
         assert!(parse_command(&v(&["mode","-r","default","-s","quiet"])).is_err());
         assert!(parse_command(&v(&["mode","-t","quiet","-s"])).is_err());
+        assert_eq!(parse_command(&v(&["mode","-s","--","-quiet"])).unwrap(),
+            Command::Modes{edit:vec![('s',"".into()),('S',"-quiet".into())]});
         assert_eq!(parse_command(&v(&["mode","-a","quiet","-t","default"])).unwrap(),
             Command::Modes{edit:vec![('a',"quiet".into()),('t',"default".into())]});
         assert_eq!(update_modes(vec![],&[('a',"quiet".into()),('a',"quiet".into())]),
@@ -395,6 +413,8 @@ mod tests {
             Command::Menu{id:34,program:vec!["cat".into()]});
         assert!(parse_command(&v(&["menu","-n","34"])).is_err());
         assert!(parse_command(&v(&["menu"])).is_err());
+        assert_eq!(parse_command(&v(&["menu","-n34","cat"])).unwrap(),
+            Command::Menu{id:34,program:vec!["cat".into()]});
     }
 
     #[test]
@@ -415,5 +435,7 @@ mod tests {
             Command::List{history:true,json:true});
         assert_eq!(parse_command(&v(&["invoke"])).unwrap(),
             Command::Invoke{id:0,action:"default".into()});
+        assert_eq!(parse_command(&v(&["invoke","-n34","default"])).unwrap(),
+            Command::Invoke{id:34,action:"default".into()});
     }
 }
