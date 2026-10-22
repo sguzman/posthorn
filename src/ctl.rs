@@ -35,7 +35,8 @@ fn parse_mako_id(raw:&str)->Result<u32,&'static str>{
 
 pub fn parse_command(args: &[String]) -> Result<Command, String> {
     let Some((command, rest)) = args.split_first() else {
-        return Ok(Command::Help);
+        // makoctl with no command prints usage on stderr and exits nonzero.
+        return Err("Usage: posthornctl <command> [options...] (try 'help')".into());
     };
     match command.as_str() {
         "help" | "-h" | "--help" => Ok(Command::Help),
@@ -398,7 +399,8 @@ pub fn notification_text(map:&HashMap<String,OwnedValue>)->String{
 
 pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if command == Command::Help {
-        println!("posthornctl (development, private D-Bus only)\n          dismiss [-n id] [-a|-g] [-h] | restore | invoke [-n id] [action]\n          list [-j] | history [-j] | menu [-n id] -- program [args...] | mode [-s|-a|-r|-t mode] | reload");
+        // Upstream makoctl prints its usage to stderr, not stdout.
+        eprintln!("posthornctl (development, private D-Bus only)\n          dismiss [-n id] [-a|-g] [-h] | restore | invoke [-n id] [action]\n          list [-j] | history [-j] | menu [-n id] -- program [args...] | mode [-s|-a|-r|-t mode] | reload");
         return Ok(());
     }
     let conn=Connection::session().await?;
@@ -461,6 +463,16 @@ pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error +
 mod tests {
     use super::*;
     fn v(args:&[&str])->Vec<String> {args.iter().map(|s|s.to_string()).collect()}
+    #[test]
+    fn bare_makoctl_usage_is_failure_but_explicit_help_succeeds(){
+        assert!(parse_command(&[]).is_err(),
+            "makoctl with no command prints usage and returns exit code 1");
+        for args in [vec!["help"],vec!["-h"],vec!["--help"]]{
+            let words=args.into_iter().map(str::to_owned).collect::<Vec<_>>();
+            assert_eq!(parse_command(&words).unwrap(),Command::Help);
+        }
+    }
+
     #[test]
     fn mako_json_listing_preserves_field_order_nulls_and_inline_actions(){
         use zbus::zvariant::Value;
