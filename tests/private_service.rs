@@ -268,6 +268,35 @@ async fn mode_dbus_reapplies_history_of_existing_notifications()
 }
 
 #[tokio::test]
+async fn reload_dbus_updates_active_history_without_rearming_expiry()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::open_private_service_from_path;
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("config");
+    std::fs::write(&path,"history=0\ndefault-timeout=3000\n")?;
+    let (conn,runtime)=open_private_service_from_path(&path).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let id:u32=desktop.call("Notify",&(
+        "reload-history-fixture",0u32,"","Active notification","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let before=runtime.next_deadline()?;
+    assert!(before.is_some());
+    std::fs::write(&path,"history=1\ndefault-timeout=500\n")?;
+    let _:()=ctl.call("Reload",&()).await?;
+    assert_eq!(runtime.next_deadline()?,before,
+        "Mako does not reschedule existing timeouts on reload");
+    let opts:HashMap<String,OwnedValue>=[("id".into(),OwnedValue::from(id))].into();
+    let _:()=ctl.call("DismissNotifications",&(opts,)).await?;
+    let history:Vec<HashMap<String,OwnedValue>>=ctl.call("ListHistory",&()).await?;
+    assert_eq!(history.len(),1);
+    assert_eq!(u32::try_from(history[0].get("id").unwrap())?,id);
+    Ok(())
+}
+
+#[tokio::test]
 async fn control_reload_swaps_styles_and_preserves_last_good_file()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
