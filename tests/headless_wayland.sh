@@ -235,3 +235,67 @@ if [[ "$expired" != 1 ]]; then
   exit 1
 fi
 echo "Headless Sway ${test_scale}x + D-Bus popups, close/repaint, and timer expiry: OK"
+
+if [[ "$test_scale" == 1 ]]; then
+  # Live registry hotplug: the target named output does not exist at daemon
+  # startup. Posthorn must keep its private D-Bus name and queued notification,
+  # then paint on the new output when the compositor announces it.
+  ipc_socket="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'sway-ipc.*.sock' -print -quit)"
+  [[ -S "$ipc_socket" ]] || { echo "Could not find isolated Sway IPC socket"; exit 1; }
+  kill "$posthorn_pid"
+  wait "$posthorn_pid" 2>/dev/null || true
+  posthorn_pid=""
+  sed -i '1i output=HEADLESS-2' "$root/mako.conf"
+  ./target/debug/posthorn --experimental-private-desktop "$root/mako.conf" \
+    >"$root/hotplug-posthorn.log" 2>&1 &
+  posthorn_pid=$!
+  ready=0
+  for _ in {1..40}; do
+    if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=2s introspect \
+      org.posthorn.Development /org/freedesktop/Notifications >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    sleep 0.1
+  done
+  [[ "$ready" == 1 ]] || { echo "Private service did not restart for hotplug"; exit 1; }
+
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
+    /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
+    'susssasa{sv}i' 'Posthorn hotplug' 0 '' 'Hotplug success' '' 0 1 \
+    'category' 's' 'success' 7000 >/dev/null
+  sleep 0.25
+  kill -0 "$posthorn_pid" || { echo "Posthorn crashed while output missing"; exit 1; }
+
+  swaymsg -s "$ipc_socket" create_output >/dev/null
+  hotplug_painted=0
+  for _ in {1..40}; do
+    sleep 0.2
+    if grim -o HEADLESS-2 "$root/hotplug-popup.png" 2>/dev/null && \
+      /usr/bin/python3 - "$root/hotplug-popup.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+counts = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if counts[(48, 87, 71)] >= 300 else 1)
+PY
+    then
+      hotplug_painted=1
+      break
+    fi
+    if ! kill -0 "$posthorn_pid" 2>/dev/null; then
+      echo 'Posthorn exited after headless output was added'
+      cat "$root/hotplug-posthorn.log"
+      exit 1
+    fi
+  done
+  if [[ "$hotplug_painted" != 1 ]]; then
+    echo 'Posthorn did not render on the newly hotplugged named output'
+    cat "$root/hotplug-posthorn.log"
+    exit 1
+  fi
+  swaymsg -s "$ipc_socket" 'output HEADLESS-2 unplug' >/dev/null
+  sleep 0.25
+  kill -0 "$posthorn_pid" || { echo "Posthorn exited on output unplug"; exit 1; }
+  echo 'Named output hotplug: missing -> added -> popup drawn -> removed, daemon alive: OK'
+fi
