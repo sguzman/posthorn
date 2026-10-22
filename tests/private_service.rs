@@ -270,6 +270,12 @@ async fn ascending_sort_groups_after_later_scoped_warning_over_private_bus()
     assert_eq!(visible.iter().map(|v|(v.notification.id,v.group_count))
         .collect::<Vec<_>>(),vec![(old,2),(other,1)],
         "later scoped warning must regroup earlier plain notification at +time");
+    let listed:Vec<HashMap<String,OwnedValue>>=
+        ctl.call("ListNotifications",&()).await?;
+    assert_eq!(listed.iter().map(|m|
+        u32::try_from(m.get("id").unwrap()).unwrap()).collect::<Vec<_>>(),
+        vec![old,newest,other],
+        "Mako moves grouped notifications in the actual active D-Bus list");
     dispatch_binding(&conn,&runtime,newest,NotifyBinding::DismissGroup,None).await?;
     let active:Vec<HashMap<String,OwnedValue>>=ctl.call("ListNotifications",&()).await?;
     assert_eq!(active.len(),1);
