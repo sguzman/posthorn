@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn closing_notification_regroups_matching_remaining_members() {
         let mut store=NotificationStore::new(8);
-        let req=|app|Request{app_name:app.into(),..Request::default()};
+        let req=|app:&str|Request{app_name:app.into(),..Request::default()};
         let first=store.push(req("same"));
         let middle=store.push(req("other"));
         let third=store.push(req("same"));
