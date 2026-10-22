@@ -380,6 +380,14 @@ fn selected_action_key(
         .map(|(key,_)|key.clone())
 }
 
+/// makoctl getline() discards only a terminal LF from the first line.
+/// Rust str::lines() also removes a preceding CR, which can spuriously
+/// select an action that upstream Mako would reject.
+fn mako_menu_selected_line(output:&str)->Option<&str>{
+    if output.is_empty(){return None;}
+    Some(output.split_once('\n').map_or(output,|(first,_)|first))
+}
+
 /// Pass labels via stdin and read a selection from a user-configured menu
 /// application, without evaluating the labels in a shell.
 fn choose_from_menu(
@@ -400,7 +408,7 @@ fn choose_from_menu(
         "menu command exited with {}",output.status
     ).into());}
     let result=String::from_utf8(output.stdout)?;
-    let selected=result.lines().next().ok_or("no action selected")?;
+    let selected=mako_menu_selected_line(&result).ok_or("no action selected")?;
     selected_action_key(actions,selected)
         .ok_or_else(||"menu returned a title not present in notification actions".into())
 }
@@ -589,6 +597,19 @@ mod tests {
             let words=args.into_iter().map(str::to_owned).collect::<Vec<_>>();
             assert_eq!(parse_command(&words).unwrap(),Command::Help);
         }
+    }
+
+    #[test]
+    fn menu_getline_preserves_cr_and_reads_only_first_line(){
+        assert_eq!(mako_menu_selected_line("Open\nIgnore\n"),Some("Open"));
+        assert_eq!(mako_menu_selected_line("Open\r\nIgnore"),Some("Open\r"));
+        assert_eq!(mako_menu_selected_line("Open"),Some("Open"));
+        assert_eq!(mako_menu_selected_line(""),None);
+        let actions=vec![("chosen".into(),"Open".into())];
+        assert!(selected_action_key(&actions,
+            mako_menu_selected_line("Open\r\n").unwrap()).is_none());
+        assert_eq!(selected_action_key(&actions,
+            mako_menu_selected_line("Open\n").unwrap()),Some("chosen".into()));
     }
 
     #[test]
