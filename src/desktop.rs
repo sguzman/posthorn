@@ -307,8 +307,9 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
             let invokes_action=crate::input::hit_test(&runtime,click)
                 .map_err(other)?
                 .as_ref()
-                .is_some_and(|(_,binding)|
-                    crate::input::needs_activation_token(binding));
+                .map(|(id,binding)|
+                    crate::input::should_request_activation_token(&runtime,*id,binding))
+                .transpose()?.unwrap_or(false);
             let activation_token=if invokes_action {
                 viewer.request_activation_token(click.serial).map_err(other)?
             }else{None};

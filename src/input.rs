@@ -153,6 +153,19 @@ pub fn needs_activation_token(binding:&NotifyBinding)->bool{
     matches!(binding,NotifyBinding::InvokeDefaultAction|NotifyBinding::InvokeAction(_))
 }
 
+/// Request an XDG activation token only if the matching action can emit it.
+/// Disabled actions or missing action keys still dismiss the notification on
+/// click, but Mako's notify_action_invoked() cannot use a token for them.
+pub fn should_request_activation_token(
+    runtime:&SharedRuntime,id:u32,binding:&NotifyBinding,
+)->io::Result<bool>{
+    match binding {
+        NotifyBinding::InvokeDefaultAction=>can_invoke_action(runtime,id,"default"),
+        NotifyBinding::InvokeAction(key)=>can_invoke_action(runtime,id,key),
+        _=>Ok(false),
+    }
+}
+
 /// Mako's notify_action_invoked() suppresses BOTH action and activation-token
 /// signals when the notification's resolved style has actions=0. It still
 /// retains the sender action list, and a click still dismisses the popup.
@@ -346,6 +359,33 @@ mod tests {
         runtime.schedule_without_hook(second,now).unwrap();
         assert!(!can_invoke_action(&runtime,first,"default").unwrap());
         assert!(!can_invoke_action(&runtime,second,"default").unwrap());
+    }
+
+    #[test]
+    fn activation_token_requests_follow_live_action_style() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "[category=warning]\\nactions=FALSE\\n"
+        ).unwrap());
+        let disabled=runtime.store.lock().unwrap().push(Request{
+            category:"warning".into(),
+            actions:vec![crate::notification::Action{
+                key:"default".into(),label:"Open".into(),
+            }],..Request::default()
+        });
+        let allowed=runtime.store.lock().unwrap().push(Request{
+            actions:vec![crate::notification::Action{
+                key:"default".into(),label:"Open".into(),
+            }],..Request::default()
+        });
+        let invoke=NotifyBinding::InvokeDefaultAction;
+        assert!(needs_activation_token(&invoke),
+            "binding kind may need activation when style permits");
+        assert!(!should_request_activation_token(&runtime,disabled,&invoke).unwrap());
+        assert!(should_request_activation_token(&runtime,allowed,&invoke).unwrap());
+        assert!(!should_request_activation_token(&runtime,allowed,
+            &NotifyBinding::InvokeAction("missing".into())).unwrap());
+        assert!(!should_request_activation_token(&runtime,allowed,
+            &NotifyBinding::Dismiss{save_history:true}).unwrap());
     }
 
     #[test]
