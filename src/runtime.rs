@@ -144,6 +144,7 @@ impl SharedRuntime {
             category: &note.category, desktop_entry: &note.desktop_entry,
             summary: &note.summary, body: &note.body,
             urgency: match note.urgency {
+                crate::notification::Urgency::Unknown => "unknown",
                 crate::notification::Urgency::Low => "low",
                 crate::notification::Urgency::Normal => "normal",
                 crate::notification::Urgency::Critical => "critical",

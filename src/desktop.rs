@@ -60,6 +60,7 @@ pub fn style_for_note_index(
         app_name:&n.app_name, app_icon:&n.app_icon, category:&n.category,
         desktop_entry:&n.desktop_entry, summary:&n.summary, body:&n.body,
         urgency:match n.urgency {
+            Urgency::Unknown=>"unknown",
             Urgency::Low=>"low",Urgency::Normal=>"normal",Urgency::Critical=>"critical"
         },
         anchor:config.global.get("anchor")

@@ -5,7 +5,7 @@
 use std::collections::VecDeque;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub enum Urgency { Low, Normal, Critical }
+pub enum Urgency { Unknown, Low, Normal, Critical }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CloseReason {
@@ -59,7 +59,7 @@ impl Default for Request {
     fn default() -> Self {
         Self { replaces_id: 0, app_name: String::new(), app_icon: String::new(), image_data: None,
             summary: String::new(), body: String::new(), category: String::new(),
-            desktop_entry: String::new(), tag: String::new(), urgency: Urgency::Normal,
+            desktop_entry: String::new(), tag: String::new(), urgency: Urgency::Unknown,
             progress: 0, requested_timeout_ms: -1, actions: Vec::new() }
     }
 }
@@ -147,9 +147,10 @@ impl NotificationStore {
             return;
         }
         let rank = |urgency: Urgency| match urgency {
-            Urgency::Low => 0u8,
-            Urgency::Normal => 1,
-            Urgency::Critical => 2,
+            Urgency::Unknown => 0u8,
+            Urgency::Low => 1,
+            Urgency::Normal => 2,
+            Urgency::Critical => 3,
         };
         let rank_new = rank(notification.urgency);
         let policy = self.sort_policy;
@@ -232,6 +233,21 @@ mod tests {
     fn req(app: &str, text: &str) -> Request {
         Request { app_name: app.into(), summary: text.into(), ..Request::default() }
     }
+    #[test]
+    fn missing_urgency_is_distinct_from_explicit_normal() {
+        let mut store=NotificationStore::new(4);
+        store.set_sort_policy(SortPolicy{
+            by_priority:true,priority_ascending:true,time_ascending:false,
+        });
+        let normal=store.push(Request{
+            urgency:Urgency::Normal,..Request::default()
+        });
+        let unknown=store.push(Request::default());
+        assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![unknown,normal]);
+        assert_eq!(store.active()[0].urgency,Urgency::Unknown);
+    }
+
     #[test]
     fn ids_are_nonzero_and_active_newest_first() {
         let mut store=NotificationStore::new(5);

@@ -160,7 +160,8 @@ fn wire_notification(note: &Notification) -> zbus::fdo::Result<HashMap<String, O
     }
     obj.insert("id".into(), OwnedValue::from(note.id));
     obj.insert("urgency".into(), OwnedValue::from(match note.urgency {
-        Urgency::Low => 0u8,
+        Urgency::Unknown => 255u8,
+        Urgency::Low => 0,
         Urgency::Normal => 1,
         Urgency::Critical => 2,
     }));
@@ -315,7 +316,7 @@ mod tests {
         });
         let list = control.snapshot(false).unwrap();
         assert_eq!(list.len(), 1);
-        assert_eq!(u8::try_from(list[0].get("urgency").unwrap()).unwrap(), 1);
+        assert_eq!(u8::try_from(list[0].get("urgency").unwrap()).unwrap(), 255);
         assert_eq!(u32::try_from(list[0].get("id").unwrap()).unwrap(), 1);
         assert!(list[0].contains_key("actions"));
     }

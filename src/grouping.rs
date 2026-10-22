@@ -76,7 +76,8 @@ fn key(note: &Notification, spec: &GroupSpec) -> Vec<String> {
         GroupField::Summary => note.summary.clone(),
         GroupField::Body => note.body.clone(),
         GroupField::Urgency => match note.urgency {
-            Urgency::Low => "low", Urgency::Normal => "normal", Urgency::Critical => "critical"
+            Urgency::Unknown => "unknown",Urgency::Low => "low",
+            Urgency::Normal => "normal", Urgency::Critical => "critical"
         }.to_owned(),
         GroupField::Actionable => (!note.actions.is_empty()).to_string(),
         GroupField::Expiring => (note.requested_timeout_ms != 0).to_string(),

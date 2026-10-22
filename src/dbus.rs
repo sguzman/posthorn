@@ -108,6 +108,7 @@ impl FreedesktopNotifications {
                 .or_else(||i32::try_from(v).ok().map(i64::from))
         });
         let urgency = match urgency_number {
+            None => Urgency::Unknown,
             Some(0) => Urgency::Low,
             Some(2) => Urgency::Critical,
             _ => Urgency::Normal,
@@ -325,6 +326,19 @@ mod tests {
         assert_eq!(default.get_capabilities(),
             ["body","body-markup","actions","icon-static",
              "x-canonical-private-synchronous","x-dunst-stack-tag"]);
+    }
+
+    #[test]
+    fn absence_of_urgency_preserves_upstream_unknown_state() {
+        let svc=service();
+        let id=svc.apply_notify("sender",0,"","No urgency","",Vec::new(),
+            HashMap::new(),-1).unwrap();
+        assert_eq!(svc.store.lock().unwrap().active().iter()
+            .find(|n|n.id==id).unwrap().urgency,Urgency::Unknown);
+        let other=svc.apply_notify("sender",0,"","Explicit normal","",Vec::new(),
+            [("urgency".into(),OwnedValue::from(1u8))].into(),-1).unwrap();
+        assert_eq!(svc.store.lock().unwrap().active().iter()
+            .find(|n|n.id==other).unwrap().urgency,Urgency::Normal);
     }
 
     #[test]

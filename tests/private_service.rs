@@ -324,6 +324,7 @@ async fn chromium_urgency_variants_are_preserved_over_real_dbus()
         ).ok_or("missing wire notification")?;
         let urgency=u8::try_from(record.get("urgency").unwrap())?;
         assert_eq!(urgency,match expected{
+            Urgency::Unknown=>255,
             Urgency::Low=>0,Urgency::Normal=>1,Urgency::Critical=>2,
         });
     }
