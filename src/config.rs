@@ -302,7 +302,11 @@ fn parse_selectors(text: &str) -> Result<Vec<Selector>, String> {
         if let Some((key, value)) = token.split_once('=') {
             Selector::new(key, value)
         } else if let Some(key) = token.strip_prefix('!') {
-            Selector::new(key, "false")
+            if ["actionable","expiring","grouped","hidden"].contains(&key) {
+                Selector::new(key,"false")
+            } else {
+                Err(format!("invalid boolean criteria field '{token}'"))
+            }
         } else if ["actionable","expiring","grouped","hidden"].contains(&token.as_str()) {
             Selector::new(&token, "true")
         } else {
