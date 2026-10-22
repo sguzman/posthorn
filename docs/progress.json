@@ -109,7 +109,7 @@
               "id": "T205",
               "emoji": "🔤",
               "name": "Pango markup/escaping, format specifiers and actions",
-              "progress": 79
+              "progress": 80
             }
           ]
         },
@@ -128,7 +128,7 @@
               "id": "T302",
               "emoji": "🧾",
               "name": "Implement full Mako D-Bus control interface, properties and JSON",
-              "progress": 88
+              "progress": 91
             },
             {
               "id": "T303",
@@ -172,7 +172,7 @@
               "id": "T501",
               "emoji": "⌨️",
               "name": "Port makoctl operations with compatibility tests",
-              "progress": 86
+              "progress": 90
             },
             {
               "id": "T502",
@@ -209,7 +209,7 @@
         {
           "emoji": "📜",
           "name": "Mako history/control API parity",
-          "progress": 90
+          "progress": 91
         }
       ]
     },

@@ -19,7 +19,7 @@ and Clear All, channels, SQLite persistence, and a general local message broker.
 > dynamic named output routing with native-resolution integer-scaled buffers, distinct outer/window and
 > internal popup margins, directional padding and corner radii, HiDPI theme-aware icon selection and icon border-radius clipping, shrink-wrapped Cairo/Pango text and icons, configured
 > post-grouping on-notify hooks, basic mouse/touch bindings, XDG activation
-> tokens, Mako-style suppression of action signals under actions=0, and category-aware history,
+> tokens, ordered control list/history action dictionaries and CLI selection, Mako-style suppression of action signals under actions=0, and category-aware history,
 > scoped group-by and reapplication on close/mode/reload, grouped count formatting, overrideable secondary-member visibility, accurate overflow placeholders, Mako's unknown urgency state, and partial posthornctl.
 > **It does not claim the desktop notifications D-Bus name.** Inline
 > Freedesktop image-data hints, Chromium numeric urgency variants, typed known-hint validation, progress fills and transactional config reload

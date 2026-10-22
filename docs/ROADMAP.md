@@ -29,12 +29,12 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🗃️ T202 — Bounded in-memory history, close and restore — `██████████ 100%`
 - ⏳ T203 — Timeout selection and timer/event scheduling — `██████████ 95%`
 - 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `██████████ 96%`
-- 🔤 T205 — Pango markup/escaping, format specifiers and actions — `████████░░ 79%`
+- 🔤 T205 — Pango markup/escaping, format specifiers and actions — `████████░░ 80%`
 
-### 🚌 P3 — D-Bus protocol and control surface — `████████░░ 84%`
+### 🚌 P3 — D-Bus protocol and control surface — `█████████░ 85%`
 
 - 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `██████████ 95%`
-- 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `█████████░ 88%`
+- 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `█████████░ 91%`
 - 🔄 T303 — Correct startup, bus ownership and config reload behavior — `███████░░░ 69%`
 
 ### 🪟 P4 — Wayland protocol and rendering — `█████████░ 90%`
@@ -43,9 +43,9 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `██████████ 99%`
 - 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `████████░░ 77%`
 
-### 🎛️ P5 — CLI and exact workstation parity — `█████░░░░░ 51%`
+### 🎛️ P5 — CLI and exact workstation parity — `█████░░░░░ 52%`
 
-- ⌨️ T501 — Port makoctl operations with compatibility tests — `█████████░ 86%`
+- ⌨️ T501 — Port makoctl operations with compatibility tests — `█████████░ 90%`
 - 🔔 T502 — Reproduce category colors, per-category sounds and quiet mode — `███████░░░ 68%`
 - 🧪 T503 — End-to-end on Hyprland, notify-send and Edge activation — `█████░░░░░ 49%`
 - 🚀 T504 — MVP inauguration and opt-in reversible Mako switch — `░░░░░░░░░░ 0%`
@@ -54,7 +54,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 - 🔔 Desktop notification parity — `█████████░ 94%`
 - 🎨 Mako category coloring and sound parity — `███████░░░ 72%`
-- 📜 Mako history/control API parity — `█████████░ 90%`
+- 📜 Mako history/control API parity — `█████████░ 91%`
 
 ## 📑 M1 — Post-MVP TOML configuration — `░░░░░░░░░░ 0%`
 
