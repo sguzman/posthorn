@@ -59,6 +59,40 @@ async fn private_service_expires_and_archives_a_notification() -> Result<(), Box
 }
 
 #[tokio::test]
+async fn malformed_dismiss_options_are_rejected_over_real_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,_runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let id:u32=desktop.call("Notify",&(
+        "typed-options-smoke",0u32,"","Keep me","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    for key in ["id","all","group","history"] {
+        let malformed:HashMap<String,OwnedValue>=[
+            (key.into(),OwnedValue::from(-1i32))
+        ].into();
+        let result:zbus::Result<()> =
+            control.call("DismissNotifications",&(malformed,)).await;
+        assert!(result.is_err(),"malformed {key} option unexpectedly succeeded");
+        let current:Vec<HashMap<String,OwnedValue>>=
+            control.call("ListNotifications",&()).await?;
+        assert_eq!(current.len(),1,
+            "bad {key} option dismissed an unrelated notification");
+        assert_eq!(u32::try_from(current[0].get("id").unwrap())?,id);
+    }
+    let valid:HashMap<String,OwnedValue>=[
+        ("id".into(),OwnedValue::from(id))
+    ].into();
+    let _:()=control.call("DismissNotifications",&(valid,)).await?;
+    let current:Vec<HashMap<String,OwnedValue>>=
+        control.call("ListNotifications",&()).await?;
+    assert!(current.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
 async fn private_control_menu_invokes_existing_action_without_shell()
     -> Result<(),Box<dyn std::error::Error + Send + Sync>>
 {
