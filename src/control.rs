@@ -48,8 +48,11 @@ impl Serialize for OrderedNotificationWire {
         // The ordered actions variant is an additional a{sv} entry. Fields
         // deliberately exclude it so no lossy temporary Dict is constructed.
         let mut map=serializer.serialize_map(Some(self.fields.len()+1))?;
-        for (key,value) in &self.fields {
-            if key!="actions" {
+        // Mako 1.11 dbus/mako.c emits these entries in this exact order.
+        // Iterating HashMap would randomize the on-wire a{sv} field sequence.
+        for key in ["app-name","app-icon","category","desktop-entry",
+                    "summary","body","id","urgency"] {
+            if let Some(value)=self.fields.get(key){
                 map.serialize_entry(key,value)?;
             }
         }
@@ -397,6 +400,34 @@ mod tests {
         assert!(list[0].contains_key("actions"));
     }
 
+
+    #[test]
+    fn notification_record_fields_follow_mako_fixed_dbus_entry_sequence(){
+        use zbus::zvariant::{serialized::Context,LE};
+        let control=fixture();
+        control.store.lock().unwrap().push(Request{
+            app_name:"name-fixture".into(),
+            app_icon:"icon-fixture".into(),
+            category:"category-fixture".into(),
+            desktop_entry:"desktop-fixture".into(),
+            summary:"summary-fixture".into(),
+            body:"body-fixture".into(),
+            ..Request::default()
+        });
+        let notes=control.ordered_snapshot(false).unwrap();
+        let wire=zbus::zvariant::to_bytes(Context::new_dbus(LE,0),&notes).unwrap();
+        let bytes=wire.bytes();
+        let mut previous=0;
+        for (index,key) in ["app-name","app-icon","category","desktop-entry",
+                          "summary","body","id","urgency","actions"]
+            .iter().enumerate(){
+            let needle=format!("{key}\\0");
+            let at=bytes.windows(needle.len())
+                .position(|part|part==needle.as_bytes()).unwrap();
+            if index>0{assert!(at>previous,"field {key} was out of Mako order");}
+            previous=at;
+        }
+    }
 
     #[test]
     fn ordered_wire_retains_duplicate_keys_without_changing_dbus_signature(){
