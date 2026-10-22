@@ -234,7 +234,70 @@ if [[ "$expired" != 1 ]]; then
   /usr/bin/python3 "$root/check-dismissed.py" "$root/after-expiry.png"
   exit 1
 fi
-echo "Headless Sway ${test_scale}x + D-Bus popups, close/repaint, and timer expiry: OK"
+# Reload must repaint active Wayland popups without replacing the D-Bus
+# service, and a rejected reload must preserve the last good style.
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
+  /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
+  'susssasa{sv}i' 'Posthorn reload smoke' 0 '' 'Repaint me' '' 0 1 \
+  'category' 's' 'warning' 7000 >/dev/null
+old_visible=0
+for _ in {1..15}; do
+  sleep 0.15
+  grim "$root/before-reload.png"
+  if /usr/bin/python3 - "$root/before-reload.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+pixels = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if pixels[(113, 85, 54)] >= 300 else 1)
+PY
+  then old_visible=1; break; fi
+done
+[[ "$old_visible" == 1 ]] || { echo 'Reload test did not paint original color'; exit 1; }
+
+sed -i 's/background-color=#715536/background-color=#234C8F/' "$root/mako.conf"
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
+  /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+new_visible=0
+for _ in {1..20}; do
+  sleep 0.15
+  grim "$root/after-reload.png"
+  if /usr/bin/python3 - "$root/after-reload.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+pixels = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if pixels[(35,76,143)] >= 300
+    and pixels[(113,85,54)] < 100 else 1)
+PY
+  then new_visible=1; break; fi
+done
+[[ "$new_visible" == 1 ]] || {
+  echo 'Reload did not repaint the active notification in the new category color'
+  cat "$root/posthorn.log"
+  exit 1
+}
+
+sed -i 's/background-color=#234C8F/background-color=not-a-color/' "$root/mako.conf"
+if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload \
+  >"$root/invalid-reload.log" 2>&1; then
+  echo 'Invalid reload was unexpectedly accepted'
+  exit 1
+fi
+sleep 0.25
+grim "$root/after-invalid-reload.png"
+/usr/bin/python3 - "$root/after-invalid-reload.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+pixels = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+assert pixels[(35,76,143)] >= 300, (
+    "Invalid reload erased the last successfully committed notification style"
+)
+PY
+sed -i 's/background-color=not-a-color/background-color=#234C8F/' "$root/mako.conf"
+echo "Headless Sway ${test_scale}x + D-Bus popups, timer, and live reload/rejection: OK"
 
 if [[ "$test_scale" == 1 ]]; then
   # Live registry hotplug: the target named output does not exist at daemon
