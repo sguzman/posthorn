@@ -352,34 +352,56 @@ pub fn render_hidden_placeholder(
 pub fn mako_stack_geometry(
     sizes:&[(u32,u32)],margins:&[crate::wayland::PopupMargins],
     alignment:StackAlignment,
-)->Result<(u32,u32,Vec<(u32,u32)>),String>{
+)->Result<(u32,u32,Vec<(i32,i32)>),String>{
     if sizes.len()!=margins.len(){return Err("popup margin count mismatch".into());}
     if sizes.is_empty(){return Ok((0,0,Vec::new()));}
-    let width=sizes.iter().zip(margins).map(|((w,_),m)|{
-        w.checked_add(m.left.max(0) as u32)?
-            .checked_add(m.right.max(0) as u32)
-    }).collect::<Option<Vec<_>>>()
-        .ok_or("popup width overflow")?.into_iter().max().unwrap_or(0);
-    let mut end=0u32;
+    // Mako v1.11 computes canvas width with signed side margins, even
+    // when this clips some part of the notification at the surface edge.
+    let width=sizes.iter().zip(margins).map(|((w,_),m)|
+        i64::from(*w)+i64::from(m.left)+i64::from(m.right)
+    ).max().unwrap_or(0);
+    if !(1..=4096).contains(&width){return Err("invalid Mako popup width".into());}
+    let mut end=0i64;
     let mut positions=Vec::with_capacity(sizes.len());
     for (index,((w,h),margin)) in sizes.iter().zip(margins).enumerate(){
-        let space=if index==0 {margin.top.max(0)}
-            else{margins[index-1].bottom.max(margin.top).max(0)} as u32;
-        end=end.checked_add(space).ok_or("popup height overflow")?;
+        let space=if index==0{margin.top}
+            else{margins[index-1].bottom.max(margin.top)};
+        end=end.checked_add(i64::from(space)).ok_or("popup height overflow")?;
         let x=match alignment {
-            StackAlignment::Left=>margin.left.max(0) as u32,
-            StackAlignment::Right=>width.checked_sub(w.saturating_add(margin.right.max(0) as u32))
-                .ok_or("popup right margin overflow")?,
-            StackAlignment::Center=>width.saturating_sub(*w)/2,
+            StackAlignment::Left=>i64::from(margin.left),
+            StackAlignment::Right=>width-i64::from(*w)-i64::from(margin.right),
+            StackAlignment::Center=>(width-i64::from(*w))/2,
         };
-        positions.push((x,end));
-        end=end.checked_add(*h).ok_or("popup height overflow")?;
+        positions.push((
+            i32::try_from(x).map_err(|_|"popup horizontal offset overflow")?,
+            i32::try_from(end).map_err(|_|"popup vertical offset overflow")?,
+        ));
+        end=end.checked_add(i64::from(*h)).ok_or("popup height overflow")?;
     }
-    if width==0||end==0||width>4096||end>4096||
-        u64::from(width)*u64::from(end)*4>64*1024*1024{
+    if !(1..=4096).contains(&end) || width*end*4>64*1024*1024 {
         return Err("popup stack exceeds safe Wayland bounds".into());
     }
-    Ok((width,end,positions))
+    Ok((width as u32,end as u32,positions))
+}
+
+/// Composite one pre-multiplied Cairo ARGB32 pixel over its destination.
+fn composite_bgra_over(destination:&mut [u8],source:&[u8]) {
+    let alpha=u32::from(source[3]);
+    if alpha==0{return;}
+    if alpha==255{
+        destination.copy_from_slice(source);
+        return;
+    }
+    let inverse=255-alpha;
+    for channel in 0..3 {
+        destination[channel]=u8::try_from(
+            (u32::from(source[channel])+
+                (u32::from(destination[channel])*inverse+127)/255).min(255)
+        ).unwrap();
+    }
+    destination[3]=u8::try_from(
+        (alpha+(u32::from(destination[3])*inverse+127)/255).min(255)
+    ).unwrap();
 }
 
 pub fn compose_mako_stack(
@@ -396,16 +418,31 @@ pub fn compose_mako_stack(
     let size=u64::from(stride)*u64::from(height);
     let mut pixels=vec![0u8;size as usize];
     for (frame,(x,y)) in frames.iter().zip(positions){
-        if frame.stride < i32::try_from(frame.width.saturating_mul(4))
-            .map_err(|_|"invalid frame stride")?
-            || frame.pixels.len()!=frame.stride as usize*frame.height as usize {
+        if frame.width==0||frame.height==0||
+            frame.stride<i32::try_from(frame.width.saturating_mul(4))
+                .map_err(|_|"invalid frame stride")?
+            ||frame.pixels.len()!=frame.stride as usize*frame.height as usize{
             return Err("invalid child frame".into());
         }
-        let row_bytes=frame.width as usize*4;
-        for row in 0..frame.height as usize {
-            let src=row*frame.stride as usize;
-            let dst=(y as usize+row)*stride as usize+x as usize*4;
-            pixels[dst..dst+row_bytes].copy_from_slice(&frame.pixels[src..src+row_bytes]);
+        // Negative margins can place a notification outside the canvas.
+        // Cairo clips those pixels; match this behavior with signed offsets
+        // rather than translating or clamping the notification rectangle.
+        let from_x=i64::from(x).max(0);
+        let to_x=(i64::from(x)+i64::from(frame.width)).min(i64::from(width));
+        let from_y=i64::from(y).max(0);
+        let to_y=(i64::from(y)+i64::from(frame.height)).min(i64::from(height));
+        if from_x>=to_x||from_y>=to_y{continue;}
+        for py in from_y..to_y {
+            let src_row=(py-i64::from(y)) as usize*frame.stride as usize;
+            let dst_row=py as usize*stride as usize;
+            for px in from_x..to_x{
+                let src_offset=src_row+(px-i64::from(x)) as usize*4;
+                let dst_offset=dst_row+px as usize*4;
+                composite_bgra_over(
+                    &mut pixels[dst_offset..dst_offset+4],
+                    &frame.pixels[src_offset..src_offset+4],
+                );
+            }
         }
     }
     Ok(Some(PixelFrame{width,height,stride:stride as i32,pixels}))
@@ -602,6 +639,41 @@ mod tests {
         assert_eq!(image.width,180);
         assert!(image.height<100);
         assert!(image.pixels.iter().any(|x|*x!=0));
+    }
+
+    #[test]
+    fn negative_margins_overlap_and_clip_like_upstream_mako() {
+        use crate::wayland::PopupMargins;
+        let red=PixelFrame{
+            width:4,height:3,stride:16,pixels:[0u8,0,255,255].repeat(12),
+        };
+        let blue=PixelFrame{
+            width:4,height:3,stride:16,pixels:[255u8,0,0,255].repeat(12),
+        };
+        let margins=[
+            PopupMargins{top:-1,right:-1,bottom:-2,left:-1},
+            PopupMargins{top:-1,right:-1,bottom:0,left:-1},
+        ];
+        let (w,h,positions)=mako_stack_geometry(
+            &[(4,3),(4,3)],&margins,StackAlignment::Left
+        ).unwrap();
+        assert_eq!((w,h),(2,3));
+        assert_eq!(positions,vec![(-1,-1),(-1,0)]);
+        let image=compose_mako_stack(&[red,blue],&margins,StackAlignment::Left)
+            .unwrap().unwrap();
+        assert_eq!((image.width,image.height),(2,3));
+        assert_eq!(&image.pixels[0..4],&[255,0,0,255]);
+        assert_eq!(&image.pixels[image.stride as usize*2..image.stride as usize*2+4],
+            &[255,0,0,255]);
+    }
+
+    #[test]
+    fn overlapping_argb_pixels_use_source_over_not_blind_replacement() {
+        let mut destination=[0u8,0,255,255];
+        composite_bgra_over(&mut destination,&[0,0,0,0]);
+        assert_eq!(destination,[0,0,255,255]);
+        composite_bgra_over(&mut destination,&[128,0,0,128]);
+        assert_eq!(destination,[128,0,127,255]);
     }
 
     #[test]
