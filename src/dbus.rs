@@ -168,7 +168,10 @@ impl FreedesktopNotifications {
             .unwrap_or_else(||std::sync::Arc::new(crate::config::Config::default()));
         let styles=std::iter::once(&config.global)
             .chain(config.rules.iter().map(|rule|&rule.options));
-        let mut body=false;
+        // Mako always contributes its built-in [grouped] format
+        // "(%g) <b>%s</b>\\n%b" to superstyle, so body is advertised
+        // even if the root and all user criteria replace %b.
+        let mut body=true;
         let (mut markup,mut actions,mut icons)=(false,false,false);
         for style in styles {
             if style.get("format").is_some_and(|f|f.contains("%b")){body=true;}
@@ -307,7 +310,7 @@ mod tests {
             ).unwrap())
         );
         assert_eq!(service.get_capabilities(),
-            ["body-markup","actions","icon-static",
+            ["body","body-markup","actions","icon-static",
              "x-canonical-private-synchronous","x-dunst-stack-tag"]);
         let scoped_body=FreedesktopNotifications::with_runtime(
             SharedRuntime::new(crate::config::Config::parse(
