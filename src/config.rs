@@ -60,6 +60,12 @@ impl Selector {
         if key == "group-index" && value.parse::<i32>().is_err() {
             return Err(format!("invalid group-index '{value}'"));
         }
+        if key == "anchor" && ![
+            "top-right","top-center","top-left","bottom-right",
+            "bottom-center","bottom-left","center-right","center-left","center",
+        ].contains(&value) {
+            return Err(format!("invalid anchor '{value}'"));
+        }
         Ok(Self { key: key.into(), value: value.into(), regex })
     }
 
@@ -297,7 +303,11 @@ fn parse_selectors(text: &str) -> Result<Vec<Selector>, String> {
             Selector::new(key, value)
         } else if let Some(key) = token.strip_prefix('!') {
             Selector::new(key, "false")
-        } else { Selector::new(&token, "true") }
+        } else if ["actionable","expiring","grouped","hidden"].contains(&token.as_str()) {
+            Selector::new(&token, "true")
+        } else {
+            Err(format!("invalid boolean criteria field '{token}'"))
+        }
     }).collect()
 }
 
@@ -475,6 +485,21 @@ mod tests {
         n.urgency = "critical";
         assert_eq!(c.style_for(&n)["width"], "440");
     }
+    #[test]
+    fn bare_nonboolean_selectors_and_invalid_anchor_are_rejected_like_mako() {
+        for raw in ["[app-name]","[category]","[summary]","[body]",
+            "[mode]","[output]","[urgency]","[group-index]",
+            "[!app-name]","[anchor=not-an-anchor]"] {
+            assert!(Config::parse(&format!("{raw}\nbackground-color=#123456\n")).is_err(),
+                "invalid selector unexpectedly accepted: {raw}");
+        }
+        for raw in ["[actionable]","[!actionable]","[grouped]",
+            "[hidden]","[expiring]","[anchor=bottom-center]"] {
+            assert!(Config::parse(&format!("{raw}\nbackground-color=#123456\n")).is_ok(),
+                "valid selector rejected: {raw}");
+        }
+    }
+
     #[test]
     fn repeated_sort_direction_replaces_previous_bit() {
         let c = Config::parse("sort=+time\nsort=-time\nsort=+priority\n").unwrap();
