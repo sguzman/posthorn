@@ -17,6 +17,10 @@ use nix::poll::{poll, PollFd, PollFlags};
 use std::os::fd::AsFd;
 use std::time::Duration;
 use crate::render::PixelFrame;
+use wayland_protocols::xdg::activation::v1::client::{
+    xdg_activation_v1,
+    xdg_activation_token_v1,
+};
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::{self, Layer},
     zwlr_layer_surface_v1::{self, Anchor, KeyboardInteractivity},
@@ -154,6 +158,7 @@ struct ConfigureState {
     clicks: Vec<PointerClick>,
     output_names: Vec<(wl_output::WlOutput,String)>,
     released_buffers: Vec<wl_buffer::WlBuffer>,
+    activation_token: Option<String>,
 }
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for ConfigureState {
@@ -161,6 +166,19 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for ConfigureState {
         _: &mut Self, _: &wl_registry::WlRegistry, _: wl_registry::Event,
         _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>,
     ) {}
+}
+
+delegate_noop!(ConfigureState: ignore xdg_activation_v1::XdgActivationV1);
+impl Dispatch<xdg_activation_token_v1::XdgActivationTokenV1, ()> for ConfigureState {
+    fn event(
+        state:&mut Self, _: &xdg_activation_token_v1::XdgActivationTokenV1,
+        event:xdg_activation_token_v1::Event,
+        _: &(), _: &Connection, _: &QueueHandle<Self>,
+    ) {
+        if let xdg_activation_token_v1::Event::Done {token} = event {
+            state.activation_token = Some(token);
+        }
+    }
 }
 
 delegate_noop!(ConfigureState: ignore wl_compositor::WlCompositor);
@@ -417,6 +435,7 @@ pub struct LivePresenter {
     compositor: wl_compositor::WlCompositor,
     shell: zwlr_layer_shell_v1::ZwlrLayerShellV1,
     shm: wl_shm::WlShm,
+    xdg_activation: Option<xdg_activation_v1::XdgActivationV1>,
     state: ConfigureState,
     _seat: Option<wl_seat::WlSeat>,
     active: Option<LiveSurface>,
@@ -464,6 +483,7 @@ impl LivePresenter {
         let shm = globals.bind(&qh, 1..=1, ())?;
         // Headless preview still works without a pointer-capable seat.
         let seat = globals.bind(&qh, 1..=9, ()).ok();
+        let xdg_activation = globals.bind(&qh, 1..=1, ()).ok();
         // wl_output.name is available from version 4. Bind every named
         // output instead of incorrectly selecting the first global.
         let named_outputs:Vec<_>=globals.contents().clone_list().into_iter()
@@ -477,7 +497,7 @@ impl LivePresenter {
             queue.roundtrip(&mut state)?;
         }
         Ok(Self {
-            conn, queue, qh, compositor, shell, shm,
+            conn, queue, qh, compositor, shell, shm, xdg_activation,
             state, _seat: seat, active: None, retired: Vec::new(),
         })
     }
@@ -671,6 +691,30 @@ impl LivePresenter {
 
     pub fn take_clicks(&mut self) -> Vec<PointerClick> {
         std::mem::take(&mut self.state.clicks)
+    }
+
+    /// Request a compositor-issued token for a real pointer/touch serial.
+    /// Mako emits ActivationToken just before ActionInvoked. A missing global
+    /// or compositor refusal is not a fatal notification error.
+    pub fn request_activation_token(&mut self,serial:u32)
+        -> Result<Option<String>,Box<dyn std::error::Error>>
+    {
+        if serial==0 {return Ok(None);}
+        let (Some(activation),Some(seat),Some(active))=
+            (self.xdg_activation.as_ref(),self._seat.as_ref(),self.active.as_ref())
+        else {return Ok(None)};
+        self.state.activation_token=None;
+        let token=activation.get_activation_token(&self.qh,());
+        token.set_serial(serial,seat);
+        token.set_surface(&active.surface);
+        token.commit();
+        self.conn.flush()?;
+        // Mako likewise waits for the compositor's token response. Dispatch
+        // one roundtrip instead of spinning forever if no token is delivered.
+        self.queue.roundtrip(&mut self.state)?;
+        let issued=self.state.activation_token.take().filter(|s|!s.is_empty());
+        token.destroy();
+        Ok(issued)
     }
 
     pub fn clear(&mut self) {

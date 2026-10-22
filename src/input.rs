@@ -104,6 +104,16 @@ pub async fn dispatch_click(
     conn:&Connection,runtime:&SharedRuntime,click:PointerClick,
 ) -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
+    dispatch_click_with_activation(conn,runtime,click,None).await
+}
+
+/// Activation tokens originate only from compositor-issued click serials,
+/// never from notification content or control API calls.
+pub async fn dispatch_click_with_activation(
+    conn:&Connection,runtime:&SharedRuntime,click:PointerClick,
+    activation_token:Option<&str>,
+) -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
     let config=runtime.config();
     let Some((id,binding))=hit_test(runtime,click)? else {return Ok(())};
     match binding {
@@ -126,8 +136,10 @@ pub async fn dispatch_click(
             };
             for id in ids {closed(conn,runtime,id,true).await?;}
         }
-        NotifyBinding::InvokeDefaultAction=>invoke(conn,runtime,id,"default").await?,
-        NotifyBinding::InvokeAction(key)=>invoke(conn,runtime,id,&key).await?,
+        NotifyBinding::InvokeDefaultAction=>
+            invoke(conn,runtime,id,"default",activation_token).await?,
+        NotifyBinding::InvokeAction(key)=>
+            invoke(conn,runtime,id,&key,activation_token).await?,
     }
     Ok(())
 }
@@ -156,10 +168,15 @@ pub fn can_invoke_action(runtime:&SharedRuntime,id:u32,key:&str)->io::Result<boo
         && note.actions.iter().any(|a|a.key==key))
 }
 
-async fn invoke(conn:&Connection,runtime:&SharedRuntime,id:u32,key:&str)
+async fn invoke(conn:&Connection,runtime:&SharedRuntime,id:u32,key:&str,
+    activation_token:Option<&str>)
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
     if can_invoke_action(runtime,id,key)? {
+        if let Some(token)=activation_token.filter(|token|!token.is_empty()) {
+            conn.emit_signal(None::<&str>,OBJECT_PATH,BUS_NAME,
+                "ActivationToken",&(id,token)).await?;
+        }
         conn.emit_signal(None::<&str>,OBJECT_PATH,BUS_NAME,
             "ActionInvoked",&(id,key)).await?;
     }

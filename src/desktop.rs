@@ -222,7 +222,12 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
     compose_mako_stack(&frames,&margins,align).map_err(other)
 }
 
-fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<PointerClick>) -> io::Result<()> {
+struct DesktopClick {
+    click:PointerClick,
+    activation_token:Option<String>,
+}
+
+fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<DesktopClick>) -> io::Result<()> {
     let mut viewer=LivePresenter::connect().map_err(other)?;
     let (mut previous, mut previous_modes)=(Vec::new(),Vec::new());
     let mut previous_revision=u64::MAX;
@@ -250,8 +255,13 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<P
         }
         viewer.poll_events().map_err(other)?;
         for click in viewer.take_clicks() {
-            // No GUI thread can directly mutate D-Bus state or emit signals.
-            if sender.send(click).is_err() { return Ok(()); }
+            // The Wayland thread owns compositor objects and must request the
+            // token. The async task owns emission of the D-Bus signals.
+            let activation_token=viewer.request_activation_token(click.serial)
+                .map_err(other)?;
+            if sender.send(DesktopClick{click,activation_token}).is_err() {
+                return Ok(());
+            }
         }
         std::thread::sleep(Duration::from_millis(45));
     }
@@ -287,8 +297,10 @@ async fn run_private_desktop_instance(conn:zbus::Connection,runtime:SharedRuntim
     loop {
         tokio::select! {
             click=clicks.recv() => {
-                if let Some(click)=click {
-                    crate::input::dispatch_click(&conn,&runtime,click).await?;
+                if let Some(event)=click {
+                    crate::input::dispatch_click_with_activation(
+                        &conn,&runtime,event.click,event.activation_token.as_deref()
+                    ).await?;
                 }
             }
             result = &mut visual => {
