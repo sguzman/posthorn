@@ -77,6 +77,24 @@ fn rounded(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, radius: CornerRa
     cr.close_path();
 }
 
+/// Mako's directional padding is top,right,bottom,left. Clamp negative
+/// values when measuring text, matching the nonnegative physical inset.
+#[derive(Clone,Copy,Debug)]
+struct Padding {top:u32,right:u32,bottom:u32,left:u32}
+impl Padding {
+    fn parse(style:&Options)->Self{
+        let raw=style.get("padding").map(String::as_str).unwrap_or("5");
+        let margin=crate::wayland::PopupMargins::parse_mako(raw)
+            .unwrap_or(crate::wayland::PopupMargins::uniform(5));
+        Self{
+            top:margin.top.max(0) as u32,
+            right:margin.right.max(0) as u32,
+            bottom:margin.bottom.max(0) as u32,
+            left:margin.left.max(0) as u32,
+        }
+    }
+}
+
 fn paint_icon(cr:&cairo::Context,icon:&IconPixels,x:f64,y:f64,scale:f64)
     -> Result<(),String>
 {
@@ -130,10 +148,11 @@ fn measure_height_with_icon(
         return Err("invalid notification dimensions".into());
     }
     let border=integer_option(style,"border-size",2).min(width/2);
-    let padding=style.get("padding")
-        .and_then(|s|s.split(',').next()).and_then(|s|s.parse::<u32>().ok())
-        .unwrap_or(5);
-    let frame_padding=border.saturating_add(padding);
+    let padding=Padding::parse(style);
+    let width_padding=border.saturating_mul(2)
+        .saturating_add(padding.left).saturating_add(padding.right);
+    let height_padding=border.saturating_mul(2)
+        .saturating_add(padding.top).saturating_add(padding.bottom);
     let icon_location=style.get("icon-location").map(String::as_str).unwrap_or("left");
     let vertical=icon_location=="top"||icon_location=="bottom";
     let max_size=integer_option(style,"max-icon-size",64);
@@ -142,16 +161,18 @@ fn measure_height_with_icon(
         ((f64::from(img.width)*ratio).round() as u32,
          (f64::from(img.height)*ratio).round() as u32)
     });
-    let text_width=width.saturating_sub(frame_padding.saturating_mul(2))
-        .saturating_sub(
-            if !vertical{icon_size.map_or(0,|(w,_)|w.saturating_add(padding.saturating_mul(2)))}
-            else{0}
-        ).max(1);
-    let text_height=cap.saturating_sub(frame_padding.saturating_mul(2))
-        .saturating_sub(
-            if vertical{icon_size.map_or(0,|(_,h)|h.saturating_add(padding.saturating_mul(2)))}
-            else{0}
-        ).max(1);
+    let horizontal_extra=if icon_location=="right" {padding.right}
+        else{padding.left};
+    let vertical_extra=if icon_location=="bottom" {padding.bottom}
+        else{padding.top};
+    let text_width=width.saturating_sub(width_padding)
+        .saturating_sub(if !vertical {
+            icon_size.map_or(0,|(w,_)|w.saturating_add(horizontal_extra.saturating_mul(2)))
+        }else{0}).max(1);
+    let text_height=cap.saturating_sub(height_padding)
+        .saturating_sub(if vertical {
+            icon_size.map_or(0,|(_,h)|h.saturating_add(vertical_extra.saturating_mul(2)))
+        }else{0}).max(1);
 
     let markup=style.get("markup")
         .is_none_or(|v|v=="1"||v.eq_ignore_ascii_case("true"));
@@ -182,10 +203,10 @@ fn measure_height_with_icon(
     }else{0};
     let text=measured.min(text_height);
     let content=if let Some((_,icon_h))=icon_size{
-        if vertical{text.saturating_add(icon_h).saturating_add(padding)}
+        if vertical{text.saturating_add(icon_h).saturating_add(vertical_extra)}
         else{text.max(icon_h)}
     }else{text};
-    let mut actual=content.saturating_add(frame_padding.saturating_mul(2));
+    let mut actual=content.saturating_add(height_padding);
     actual=actual.max(CornerRadii::parse(style).required_height(border));
     Ok(actual.min(cap).max(1))
 }
@@ -210,9 +231,11 @@ pub fn render_notification_group(
     let (w, h) = (width as i32, height as i32);
     let border = integer_option(style, "border-size", 2).min(width/2).min(height/2) as f64;
     let radius=CornerRadii::parse(style);
-    let padding = style.get("padding")
-        .and_then(|s| s.split(',').next())
-        .and_then(|s| s.parse::<u32>().ok()).unwrap_or(5) as f64;
+    let pad=Padding::parse(style);
+    let top=f64::from(pad.top);
+    let right=f64::from(pad.right);
+    let bottom=f64::from(pad.bottom);
+    let left=f64::from(pad.left);
     let foreground = color_option(style, "text-color", "#FFFFFFFF")?;
     let background = color_option(style, "background-color", "#285577FF")?;
     let border_color = color_option(style, "border-color", "#4C7899FF")?;
@@ -281,10 +304,10 @@ pub fn render_notification_group(
         escape_markup(&format!("{}\\n{}", note.summary, note.body))
     };
 
-    let interior_w=(f64::from(width)-(border+padding)*2.0).max(1.0);
-    let interior_h=(f64::from(height)-(border+padding)*2.0).max(1.0);
-    let mut text_x=border+padding;
-    let mut text_y=border+padding;
+    let interior_w=(f64::from(width)-2.0*border-left-right).max(1.0);
+    let interior_h=(f64::from(height)-2.0*border-top-bottom).max(1.0);
+    let mut text_x=border+left;
+    let mut text_y=border+top;
     let mut available_w=interior_w;
     let mut available_h=interior_h;
 
@@ -295,28 +318,31 @@ pub fn render_notification_group(
         let h=f64::from(icon.height);
         let horizontal=location=="left"||location=="right";
         let reserved=if horizontal{available_w}else{available_h};
-        let max_length=(reserved-padding-1.0).max(0.0);
+        let at_side=match location{
+            "right"=>right,"top"=>top,"bottom"=>bottom,_=>left,
+        };
+        let max_length=(reserved-at_side-1.0).max(0.0);
         let scale=1.0f64.min(max_size/w.max(h))
             .min(interior_w/w).min(interior_h/h)
             .min(max_length/if horizontal{w}else{h});
         if scale>0.0{
             let (iw,ih)=(w*scale,h*scale);
             let x=match location {
-                "right"=>f64::from(width)-border-padding-iw,
-                "top"|"bottom"=>border+padding+(interior_w-iw)/2.0,
-                _=>border+padding,
+                "right"=>f64::from(width)-border-right-iw,
+                "top"|"bottom"=>border+left+(interior_w-iw)/2.0,
+                _=>border+left,
             };
             let y=match location {
-                "bottom"=>f64::from(height)-border-padding-ih,
-                "left"|"right"=>border+padding+(interior_h-ih)/2.0,
-                _=>border+padding,
+                "bottom"=>f64::from(height)-border-bottom-ih,
+                "left"|"right"=>border+top+(interior_h-ih)/2.0,
+                _=>border+top,
             };
             paint_icon(&context,&icon,x,y,scale)?;
             match location {
-                "right"=>available_w=(available_w-iw-padding).max(1.0),
-                "top"=>{text_y+=ih+padding;available_h=(available_h-ih-padding).max(1.0)},
-                "bottom"=>available_h=(available_h-ih-padding).max(1.0),
-                _=>{text_x+=iw+padding;available_w=(available_w-iw-padding).max(1.0)},
+                "right"=>available_w=(available_w-iw-2.0*right).max(1.0),
+                "top"=>{text_y+=ih+2.0*top;available_h=(available_h-ih-2.0*top).max(1.0)},
+                "bottom"=>available_h=(available_h-ih-2.0*bottom).max(1.0),
+                _=>{text_x+=iw+2.0*left;available_w=(available_w-iw-2.0*left).max(1.0)},
             }
         }
     }
@@ -549,6 +575,23 @@ mod tests {
             body: "Line 2".into(), category: "success".into(),
             ..Request::default() });
         store.active().iter().find(|n| n.id == id).unwrap().clone()
+    }
+
+    #[test]
+    fn directional_padding_affects_actual_notification_height() {
+        let mut style=Options::new();
+        for (key,value) in [("width","240"),("height","180"),
+            ("border-size","0"),("padding","2,4,6,8")] {
+            style.insert(key.into(),value.into());
+        }
+        let pad=Padding::parse(&style);
+        assert_eq!((pad.top,pad.right,pad.bottom,pad.left),(2,4,6,8));
+        let original=measure_notification_height(&fixture(),&style).unwrap();
+        style.insert("padding".into(),"20,4,30,8".into());
+        let taller=measure_notification_height(&fixture(),&style).unwrap();
+        assert!(taller>original,"vertical padding changes popup height");
+        let frame=render_notification(&fixture(),&style).unwrap();
+        assert_eq!(frame.height,taller);
     }
 
     #[test]
