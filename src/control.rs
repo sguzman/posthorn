@@ -371,9 +371,11 @@ mod tests {
 
     #[test]
     fn unsupported_group_criteria_fail_without_dismissing() {
-        let runtime=SharedRuntime::new(crate::config::Config::parse(
-            "group-by=group-index\n"
-        ).unwrap());
+        // The parser now rejects this Mako-invalid rule. Keep testing that
+        // the control API fails safely if handed a malformed in-memory config.
+        let mut config=crate::config::Config::default();
+        config.global.insert("group-by".into(),"group-index".into());
+        let runtime=SharedRuntime::new(config);
         let control=MakoControl::with_runtime(runtime.clone());
         runtime.store.lock().unwrap().push(Request::default());
         let opts=[("group".into(),OwnedValue::from(true))].into();

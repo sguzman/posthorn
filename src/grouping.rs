@@ -23,7 +23,8 @@ impl GroupSpec {
     pub fn parse(text: &str) -> Result<Self, String> {
         let mut fields = Vec::new();
         let mut disabled = false;
-        for token in text.split(',') {
+        // Mako tokenizes group-by using strtok_r, ignoring empty tokens.
+        for token in text.split(',').filter(|token| !token.is_empty()) {
             let field = match token {
                 "app-name" => Some(GroupField::AppName),
                 "app-icon" => Some(GroupField::AppIcon),
@@ -44,9 +45,9 @@ impl GroupSpec {
                 if !fields.contains(&field) { fields.push(field); }
             }
         }
-        if disabled && !fields.is_empty() {
-            return Err("group-by=none cannot be combined with other fields".into());
-        }
+        // The 'none' bit short-circuits matching in upstream Mako, even
+        // when other valid fields were provided in the same specification.
+        if disabled { fields.clear(); }
         Ok(Self { fields, disabled })
     }
 }
@@ -93,7 +94,7 @@ pub fn group_ordered<'a>(
     let mut groups: Vec<Group> = Vec::new();
     let mut positions: HashMap<Vec<String>, usize> = HashMap::new();
     for note in notifications {
-        if spec.disabled || spec.fields.is_empty() {
+        if spec.disabled {
             groups.push(Group {ids: vec![note.id]});
             continue;
         }
@@ -148,10 +149,23 @@ mod tests {
     }
 
     #[test]
+    fn empty_group_spec_matches_all_notifications_like_mako() {
+        let mut state = NotificationStore::new(5);
+        state.push(request("alpha", "warning"));
+        state.push(request("beta", "success"));
+        let grouped = group_ordered(state.active(), &GroupSpec::parse("").unwrap());
+        assert_eq!(grouped.len(), 1);
+        assert_eq!(grouped[0].ids.len(), 2);
+        let disabled = group_ordered(state.active(), &GroupSpec::parse("none,app-name").unwrap());
+        assert_eq!(disabled.len(), 2);
+        assert_eq!(GroupSpec::parse("app-name,,category").unwrap().fields.len(), 2);
+    }
+
+    #[test]
     fn unsupported_fields_fail_explicitly() {
         assert!(GroupSpec::parse("app-name,unsupported").is_err());
-        assert!(GroupSpec::parse("none,app-name").is_err());
+        assert_eq!(GroupSpec::parse("none,app-name").unwrap(), GroupSpec::parse("none").unwrap());
         assert!(GroupSpec::parse("group-index").is_err());
-        assert!(GroupSpec::parse("app-name,,category").is_err());
+        assert!(GroupSpec::parse("app-name,unknown").is_err());
     }
 }

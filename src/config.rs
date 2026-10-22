@@ -388,8 +388,12 @@ fn validate_option(key: &str, value: &str) -> Result<(), String> {
             "group-index", "anchor", "output", "none",
         ];
         // Mako accepts comma-separated criteria *field names*, not selector values.
-        if value.split(',').all(|field| FIELDS.contains(&field))
-            && crate::grouping::GroupSpec::parse(value).is_ok() {
+        // Mako uses strtok_r here: repeated/trailing separators are ignored,
+        // and 'none' wins even when combined with other valid fields.
+        // Some fields parse successfully but are rejected by validate_criteria.
+        let fields: Vec<_> = value.split(',').filter(|field| !field.is_empty()).collect();
+        if fields.iter().all(|field| FIELDS.contains(field))
+            && !fields.iter().any(|field| ["grouped", "group-index", "anchor", "output"].contains(field)) {
             return Ok(());
         }
     }
@@ -525,7 +529,7 @@ mod tests {
         assert!(Config::parse("format=<b>%s</b>\\\\n%b\n").is_ok());
         assert!(Config::parse("group-by=app-name,summary,category\n").is_ok());
         assert!(Config::parse("group-by=magic-field\n").is_err());
-        assert!(Config::parse("group-by=app-name,,summary\n").is_err());
+        assert!(Config::parse("group-by=app-name,,summary\n").is_ok());
     }
     #[test]
     fn urgency_matches_upstream_aliases_case_insensitively() {
@@ -564,33 +568,35 @@ mod tests {
         for criteria in [
             "summary=hello summary~=^hello", "body=world body~=world",
         ] {
-            assert!(Config::parse(&format!("[{criteria}]\\nwidth=400\\n")).is_err(),
+            assert!(Config::parse(&format!("[{criteria}]\nwidth=400\n")).is_err(),
                 "conflicting criteria unexpectedly accepted: {criteria}");
         }
-        assert!(Config::parse("[summary~=^hello body=world]\\nwidth=400\\n").is_ok());
+        assert!(Config::parse("[summary~=^hello body=world]\nwidth=400\n").is_ok());
     }
 
     #[test]
     fn mako_restricts_surface_and_group_settings_by_selector() {
         for source in [
-            "[grouped]\\nanchor=bottom-right\\n",
-            "[group-index=0]\\noutput=DP-1\\n",
-            "[output=DP-1]\\ngroup-by=app-name\\n",
-            "[anchor=top-right]\\noutput=DP-1\\n",
-            "[category=urgent]\\nmax-visible=3\\n",
-            "[category=urgent hidden]\\nformat=%s\\n",
-            "group-by=group-index\\n",
-            "group-by=app-name,output\\n",
-            "group-by=none,app-name\\n",
+            "[grouped]\nanchor=bottom-right\n",
+            "[group-index=0]\noutput=DP-1\n",
+            "[output=DP-1]\ngroup-by=app-name\n",
+            "[anchor=top-right]\noutput=DP-1\n",
+            "[category=urgent]\nmax-visible=3\n",
+            "[category=urgent hidden]\nformat=%s\n",
+            "group-by=group-index\n",
+            "group-by=app-name,output\n",
         ] {
             assert!(Config::parse(source).is_err(), "Mako-invalid config accepted: {source}");
         }
         for source in [
-            "[output=DP-1]\\nmax-visible=3\\n",
-            "[anchor=bottom-right]\\nmax-visible=2\\n",
-            "[hidden]\\nformat=%h\\n",
-            "[category=urgent hidden=false]\\nformat=%s\\n",
-            "group-by=app-name,category\\n",
+            "[output=DP-1]\nmax-visible=3\n",
+            "[anchor=bottom-right]\nmax-visible=2\n",
+            "[hidden]\nformat=%h\n",
+            "[category=urgent hidden=false]\nformat=%s\n",
+            "group-by=app-name,category\n",
+            "group-by=none,app-name\n",
+            "group-by=app-name,,category\n",
+            "group-by=\n",
         ] {
             assert!(Config::parse(source).is_ok(), "Mako-valid config rejected: {source}");
         }
