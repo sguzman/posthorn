@@ -238,6 +238,17 @@ mod tests {
     }
 
     #[test]
+    fn whitespace_prefixed_width_matches_renderer_hit_testing(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "width= 420\nheight=65\nmargin=0\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        assert_eq!(hit_test(&runtime,click(410.0,10.0,273)).unwrap(),
+            Some((id,NotifyBinding::Dismiss{save_history:true})));
+        assert!(hit_test(&runtime,click(430.0,10.0,273)).unwrap().is_none());
+    }
+
+    #[test]
     fn dispatch_targets_only_rectangles_and_correct_mouse_binding() {
         let cfg=Config::parse(
             "width=100\nheight=40\nmargin=5\non-button-left=invoke-default-action\n             on-button-right=dismiss\n[category=warning]\non-button-left=none\n"

@@ -476,6 +476,15 @@ mod tests {
     }
 
     #[test]
+    fn whitespace_prefixed_max_visible_controls_existing_notification_count(){
+        let runtime=SharedRuntime::new(Config::parse("max-visible= 1\n").unwrap());
+        runtime.store.lock().unwrap().push(Request::default());
+        runtime.store.lock().unwrap().push(Request::default());
+        assert_eq!(visible_notifications(&runtime).unwrap().len(),1,
+            "Mako-validated whitespace must not reset the visibility limit");
+    }
+
+    #[test]
     fn negative_max_visible_keeps_all_groups_in_display_order() {
         let runtime=SharedRuntime::new(Config::parse("max-visible=-1\n").unwrap());
         for _ in 0..7 {
