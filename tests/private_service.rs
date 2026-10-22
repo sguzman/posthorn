@@ -110,7 +110,7 @@ async fn private_control_menu_invokes_existing_action_without_shell()
 }
 
 #[tokio::test]
-async fn action_dictionary_order_and_duplicates_survive_dbus_roundtrip()
+async fn action_dictionary_wire_conversion_has_deterministic_keys()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
     use zbus::zvariant::Value;
@@ -139,13 +139,12 @@ async fn action_dictionary_order_and_duplicates_survive_dbus_roundtrip()
         (key.as_str().to_owned(),label.as_str().to_owned())
     }).collect();
     assert_eq!(actual,vec![
-        ("open".into(),"Open late".into()),
         ("dismiss".into(),"Ignore".into()),
-        ("open".into(),"Open early".into()),
+        ("open".into(),"Open late".into()),
     ]);
     let text=posthorn::ctl::notification_text(&notes[0]);
     assert!(text.contains(
-        "  Actions:\n    open: Open late\n    dismiss: Ignore\n    open: Open early\n"
+        "  Actions:\n    dismiss: Ignore\n    open: Open late\n"
     ),"{text}");
     Ok(())
 }

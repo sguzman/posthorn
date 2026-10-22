@@ -165,9 +165,10 @@ fn wire_notification(note: &Notification) -> zbus::fdo::Result<HashMap<String, O
         Urgency::Normal => 1,
         Urgency::Critical => 2,
     }));
-    // Mako emits a{ss} in the linked-list action order. A HashMap
-    // randomizes that order and drops duplicate keys, changing makoctl
-    // menu/list behavior. zvariant::Dict retains the actual entry sequence.
+    // zvariant::Dict gives deterministic key ordering, unlike HashMap.
+    // The current zvariant representation is a BTreeMap: duplicate keys
+    // collapse to their last value. Exact Mako action-list order is still
+    // an unresolved parity gap, tracked in docs/SOURCE_BASELINE.md.
     let mut actions=Dict::new(&Signature::Str,&Signature::Str);
     for action in &note.actions {
         actions.append(
@@ -331,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn action_dictionary_preserves_mako_order_and_duplicate_keys(){
+    fn action_dictionary_has_deterministic_key_order_and_documents_duplicate_collapse(){
         let control=fixture();
         control.store.lock().unwrap().push(Request{
             actions:vec![
@@ -351,9 +352,8 @@ mod tests {
             (key.as_str().to_owned(),label.as_str().to_owned())
         }).collect();
         assert_eq!(pairs,vec![
-            ("open".into(),"Second".into()),
-            ("open".into(),"First".into()),
             ("dismiss".into(),"Ignore".into()),
+            ("open".into(),"First".into()),
         ]);
     }
 

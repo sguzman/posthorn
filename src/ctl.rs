@@ -259,9 +259,9 @@ pub fn update_modes(mut current: Vec<String>, edits: &[(char, String)]) -> Vec<S
     current
 }
 
-/// Keep the wire a{ss} entry sequence intact. Mako's linked-list actions
-/// are emitted in reverse sender order and may contain duplicate keys.
-/// Converting the dictionary into a HashMap destroys both properties.
+/// Read a{ss} entries deterministically without converting to a HashMap.
+/// The current zvariant representation sorts keys and collapses duplicates.
+/// Mako's original action-list order remains an explicitly tracked parity gap.
 fn action_pairs(map:&HashMap<String,OwnedValue>)->Vec<(String,String)>{
     let Some(value)=map.get("actions") else{return Vec::new()};
     let Value::Dict(dict)=&**value else{return Vec::new()};
@@ -271,8 +271,8 @@ fn action_pairs(map:&HashMap<String,OwnedValue>)->Vec<(String,String)>{
     }).collect()
 }
 
-/// Resolve a menu program's selected title to the first matching action key
-/// in Mako's wire iteration order (not alphabetical key order).
+/// Resolve a selected menu label against the first matching wire entry.
+/// The exact Mako list order is not yet preserved by zvariant::Dict.
 fn selected_action_key(
     actions:&[(String,String)],selected:&str,
 )->Option<String>{
@@ -615,7 +615,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_list_and_json_keep_mako_dictionary_action_order(){
+    fn menu_list_and_json_follow_stable_zvariant_dictionary_order(){
         use zbus::zvariant::{Dict,Signature};
         let mut dict=Dict::new(&Signature::Str,&Signature::Str);
         for (key,label) in [
@@ -627,15 +627,14 @@ mod tests {
         fields.insert("id".into(),OwnedValue::from(8u32));
         fields.insert("actions".into(),Value::Dict(dict).try_to_owned().unwrap());
         assert_eq!(action_pairs(&fields),vec![
-            ("z".into(),"Last".into()),
             ("a".into(),"First".into()),
             ("z".into(),"Duplicate".into()),
         ]);
         assert!(notification_text(&fields).contains(
-            "  Actions:\n    z: Last\n    a: First\n    z: Duplicate\n"
+            "  Actions:\n    a: First\n    z: Duplicate\n"
         ));
         assert!(notification_json_text(&fields).contains(
-            r#""actions": {"z": "Last", "a": "First", "z": "Duplicate"}"#
+            r#""actions": {"a": "First", "z": "Duplicate"}"#
         ));
     }
 

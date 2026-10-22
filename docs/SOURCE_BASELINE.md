@@ -35,6 +35,19 @@ change how they call the Freedesktop Notification protocol. Until parity:
 | `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango markup/colors/file and inline icons with Mako-style HiDPI theme-size selection, progress fill, measured heights, group counts, directional text/icon padding, per-corner border radius, icon clipping, signed-margin overlap and ARGB composition; fractional-scale-specific presentation and exact Mako Pango metrics remain incomplete |
 | `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Private live/headless services, post-grouping on-notify hooks and quiet-mode sound tests, Mako-style `mode -s`, GNU getopt compact arguments, printed mode results, duplicate suppression and mutually exclusive -a/-r/-t validation, text history/list and upstream-style JSON formatting, transactional reload, dynamic group/list reapplication on SetMode/Reload, sender action invocation retained under actions=0 styles; XDG token protocol covered headlessly, exact control parity incomplete |
 
+## Known action dictionary limitation
+
+Mako 1.11 writes action entries in internal linked-list order, including repeated
+keys, into its `a{ss}` control D-Bus field. Posthorn currently uses zvariant's
+ordered `Dict` abstraction, backed by a `BTreeMap`: distinct keys are sorted
+and duplicate keys collapse to the final label. Its in-memory notification
+actions remain ordered, and action invocation still sees that list, but the
+control `ListNotifications`/`ListHistory` and `posthornctl menu` output are
+not exact Mako parity for nonalphabetic order or repeated keys. D-Bus itself
+describes duplicate keys in a dictionary as malformed, even though Mako emits
+them. Do not claim this corner case completed until a tested representation
+preserves Mako's wire semantics.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
