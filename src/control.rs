@@ -8,7 +8,7 @@
 use std::collections::{HashMap,HashSet};
 use std::sync::{Arc, Mutex};
 
-use zbus::{interface, zvariant::{OwnedValue, Value}, Connection};
+use zbus::{interface, zvariant::{Dict, OwnedValue, Signature, Value}, Connection};
 
 use crate::dbus::{BUS_NAME, OBJECT_PATH};
 use crate::notification::{CloseReason, Notification, NotificationStore, Urgency};
@@ -165,9 +165,18 @@ fn wire_notification(note: &Notification) -> zbus::fdo::Result<HashMap<String, O
         Urgency::Normal => 1,
         Urgency::Critical => 2,
     }));
-    let actions: HashMap<String, String> = note.actions.iter()
-        .map(|action| (action.key.clone(), action.label.clone())).collect();
-    obj.insert("actions".into(), OwnedValue::from(actions));
+    // Mako emits a{ss} in the linked-list action order. A HashMap
+    // randomizes that order and drops duplicate keys, changing makoctl
+    // menu/list behavior. zvariant::Dict retains the actual entry sequence.
+    let mut actions=Dict::new(&Signature::Str,&Signature::Str);
+    for action in &note.actions {
+        actions.append(
+            Value::from(action.key.as_str()),
+            Value::from(action.label.as_str()),
+        ).map_err(|e|zbus::fdo::Error::Failed(e.to_string()))?;
+    }
+    obj.insert("actions".into(),Value::Dict(actions).try_to_owned()
+        .map_err(|e|zbus::fdo::Error::Failed(e.to_string()))?);
     Ok(obj)
 }
 
@@ -319,6 +328,33 @@ mod tests {
         assert_eq!(u8::try_from(list[0].get("urgency").unwrap()).unwrap(), 255);
         assert_eq!(u32::try_from(list[0].get("id").unwrap()).unwrap(), 1);
         assert!(list[0].contains_key("actions"));
+    }
+
+    #[test]
+    fn action_dictionary_preserves_mako_order_and_duplicate_keys(){
+        let control=fixture();
+        control.store.lock().unwrap().push(Request{
+            actions:vec![
+                Action{key:"open".into(),label:"Second".into()},
+                Action{key:"open".into(),label:"First".into()},
+                Action{key:"dismiss".into(),label:"Ignore".into()},
+            ],
+            ..Request::default()
+        });
+        let notes=control.snapshot(false).unwrap();
+        let value=&notes[0]["actions"];
+        let Value::Dict(dict)=&**value else {panic!("actions must be a{ss}")};
+        let pairs:Vec<_>=dict.iter().map(|(key,label)|{
+            let (Value::Str(key),Value::Str(label))=(key,label) else{
+                panic!("expected string action key and label");
+            };
+            (key.as_str().to_owned(),label.as_str().to_owned())
+        }).collect();
+        assert_eq!(pairs,vec![
+            ("open".into(),"Second".into()),
+            ("open".into(),"First".into()),
+            ("dismiss".into(),"Ignore".into()),
+        ]);
     }
 
     #[test]
