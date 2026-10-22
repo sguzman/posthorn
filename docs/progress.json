@@ -60,13 +60,13 @@
               "id": "T103",
               "emoji": "🧰",
               "name": "Complete option validation, built-in grouping and escaping semantics",
-              "progress": 73
+              "progress": 75
             },
             {
               "id": "T104",
               "emoji": "📂",
               "name": "Include files with Mako-compatible path behavior",
-              "progress": 79
+              "progress": 81
             },
             {
               "id": "T105",
@@ -109,7 +109,7 @@
               "id": "T205",
               "emoji": "🔤",
               "name": "Pango markup/escaping, format specifiers and actions",
-              "progress": 80
+              "progress": 81
             }
           ]
         },
@@ -128,7 +128,7 @@
               "id": "T302",
               "emoji": "🧾",
               "name": "Implement full Mako D-Bus control interface, properties and JSON",
-              "progress": 91
+              "progress": 92
             },
             {
               "id": "T303",
@@ -172,7 +172,7 @@
               "id": "T501",
               "emoji": "⌨️",
               "name": "Port makoctl operations with compatibility tests",
-              "progress": 90
+              "progress": 92
             },
             {
               "id": "T502",
@@ -209,7 +209,7 @@
         {
           "emoji": "📜",
           "name": "Mako history/control API parity",
-          "progress": 91
+          "progress": 92
         }
       ]
     },
