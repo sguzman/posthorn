@@ -114,11 +114,14 @@ busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s introspect org.posthor
 busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
   /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
   'susssasa{sv}i' 'Posthorn screenshot' 0 '' 'Success' '' 0 1 'category' 's' 'success' 7000 >/dev/null
+warning_id=""
 for category in failure warning; do
-  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
+  result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
     /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
-    'susssasa{sv}i' 'Posthorn screenshot' 0 '' "$category" '' 0 1 'category' 's' "$category" 7000 >/dev/null
+    'susssasa{sv}i' 'Posthorn screenshot' 0 '' "$category" '' 0 1 'category' 's' "$category" 7000)"
+  if [[ "$category" == warning ]]; then warning_id="${result#u }"; fi
 done
+[[ "$warning_id" =~ ^[0-9]+$ ]] || { echo "Invalid warning notification ID: $warning_id"; exit 1; }
 sleep 0.5
 grim "$root/popup.png"
 /usr/bin/python3 - "$root/popup.png" <<'PY'
@@ -152,4 +155,39 @@ assert top_rows["warning"] < top_rows["failure"] < top_rows["success"], (
     f"Mako newest-first stack order changed: {top_rows}"
 )
 PY
-echo 'Headless Sway + private D-Bus + layer-shell popup + screenshot color: OK'
+# Close one popup through the actual Freedesktop method. The compositor must
+# repaint the stack, removing that color without erasing the remaining popups.
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
+  /org/freedesktop/Notifications org.freedesktop.Notifications CloseNotification \
+  'u' "$warning_id" >/dev/null
+cat > "$root/check-dismissed.py" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+
+counts = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+warning = counts[(113, 85, 54)]
+success = counts[(48, 87, 71)]
+failure = counts[(104, 65, 72)]
+if warning >= 100 or success < 300 or failure < 300:
+    raise SystemExit(
+        f"Dismiss/repaint mismatch: warning={warning}, "
+        f"success={success}, failure={failure}"
+    )
+PY
+dismiss_repainted=0
+for _ in {1..30}; do
+  sleep 0.2
+  grim "$root/after-close.png"
+  if /usr/bin/python3 "$root/check-dismissed.py" "$root/after-close.png" >/dev/null 2>&1; then
+    dismiss_repainted=1
+    break
+  fi
+done
+if [[ "$dismiss_repainted" != 1 ]]; then
+  /usr/bin/python3 "$root/check-dismissed.py" "$root/after-close.png"
+  echo 'Notification close did not repaint the live Wayland stack'
+  cat "$root/posthorn.log"
+  exit 1
+fi
+echo 'Headless Sway + private D-Bus + layer-shell screenshot colors/order + close/repaint: OK'
