@@ -742,6 +742,37 @@ impl Drop for LivePresenter {
     }
 }
 
+/// Expand one logical-pixel ARGB8888 image to a physical-size SHM buffer.
+/// The Wayland layer surface remains measured in logical pixels; the caller
+/// sets wl_surface.buffer_scale to the same integer scale.
+pub fn scale_frame(frame:&PixelFrame,scale:u32)->Result<PixelFrame,String>{
+    validate_frame(frame).map_err(str::to_owned)?;
+    if !(1..=8).contains(&scale){return Err("unsupported Wayland output scale".into());}
+    let width=frame.width.checked_mul(scale).ok_or("scaled width overflow")?;
+    let height=frame.height.checked_mul(scale).ok_or("scaled height overflow")?;
+    let stride=width.checked_mul(4).ok_or("scaled stride overflow")?;
+    let len=u64::from(stride)*u64::from(height);
+    if width>4096||height>4096||len>64*1024*1024||len>i32::MAX as u64{
+        return Err("scaled Wayland buffer exceeds safe bounds".into());
+    }
+    if scale==1{return Ok(frame.clone());}
+    let mut pixels=vec![0u8;len as usize];
+    for y in 0..frame.height as usize{
+        let src_row=y*frame.stride as usize;
+        for x in 0..frame.width as usize {
+            let src=src_row+x*4;
+            for dy in 0..scale as usize {
+                for dx in 0..scale as usize {
+                    let dst=(y*scale as usize+dy)*stride as usize
+                        +(x*scale as usize+dx)*4;
+                    pixels[dst..dst+4].copy_from_slice(&frame.pixels[src..src+4]);
+                }
+            }
+        }
+    }
+    Ok(PixelFrame{width,height,stride:stride as i32,pixels})
+}
+
 fn validate_frame(frame: &PixelFrame) -> Result<(), &'static str> {
     if frame.width == 0 || frame.height == 0 { return Err("empty frame"); }
     let expected_stride = i64::from(frame.width) * 4;
@@ -777,6 +808,27 @@ mod tests {
             x: state.pointer_x, y: state.pointer_y, button: 272, serial: 5,
         });
         assert_eq!(state.clicks.remove(0).button, 272);
+    }
+
+    #[test]
+    fn hidpi_buffer_scales_physical_pixels_without_blending_argb(){
+        let frame=PixelFrame{
+            width:2,height:1,stride:8,
+            pixels:vec![10,20,30,255,40,50,60,128],
+        };
+        let scaled=scale_frame(&frame,2).unwrap();
+        assert_eq!((scaled.width,scaled.height,scaled.stride),(4,2,16));
+        assert_eq!(&scaled.pixels[0..4],[10,20,30,255]);
+        assert_eq!(&scaled.pixels[4..8],[10,20,30,255]);
+        assert_eq!(&scaled.pixels[8..12],[40,50,60,128]);
+        assert_eq!(&scaled.pixels[16..32],&scaled.pixels[0..16]);
+        assert_eq!(scale_frame(&frame,1).unwrap().pixels,frame.pixels);
+        assert!(scale_frame(&frame,0).is_err());
+        assert!(scale_frame(&frame,9).is_err());
+        assert!(scale_frame(&PixelFrame{
+            width:4096,height:4096,stride:16384,
+            pixels:vec![0;4096*4096*4],
+        },2).is_err());
     }
 
     #[test]
