@@ -72,7 +72,15 @@ impl FreedesktopNotifications {
         if tag.is_empty() {
             tag = text_hint("x-canonical-private-synchronous");
         }
-        let urgency = match hints.get("urgency").and_then(|v| u8::try_from(v).ok()) {
+        // Mako accepts byte ('y'), uint32 ('u', notably Chromium), and
+        // signed int32 ('i') urgency variants. Checking only 'y' silently
+        // treats real Chromium critical/low notifications as normal.
+        let urgency_number = hints.get("urgency").and_then(|v| {
+            u8::try_from(v).ok().map(i64::from)
+                .or_else(||u32::try_from(v).ok().map(i64::from))
+                .or_else(||i32::try_from(v).ok().map(i64::from))
+        });
+        let urgency = match urgency_number {
             Some(0) => Urgency::Low,
             Some(2) => Urgency::Critical,
             _ => Urgency::Normal,
@@ -264,6 +272,26 @@ mod tests {
         assert_eq!(default.get_capabilities(),
             ["body","body-markup","actions","icon-static",
              "x-canonical-private-synchronous","x-dunst-stack-tag"]);
+    }
+
+    #[test]
+    fn chromium_uint32_and_signed_int32_urgency_hints_match_mako() {
+        let service=service();
+        for (variant,expected) in [
+            (OwnedValue::from(0u8),Urgency::Low),
+            (OwnedValue::from(2u8),Urgency::Critical),
+            (OwnedValue::from(0u32),Urgency::Low),
+            (OwnedValue::from(2u32),Urgency::Critical),
+            (OwnedValue::from(0i32),Urgency::Low),
+            (OwnedValue::from(2i32),Urgency::Critical),
+            (OwnedValue::from(1i32),Urgency::Normal),
+        ] {
+            let hints=[("urgency".into(),variant)].into();
+            let id=service.apply_notify("sender",0,"","Urgency","",
+                Vec::new(),hints,0).unwrap();
+            let active=service.store.lock().unwrap();
+            assert_eq!(active.active().iter().find(|n|n.id==id).unwrap().urgency,expected);
+        }
     }
 
     #[test]
