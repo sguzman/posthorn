@@ -28,7 +28,7 @@ change how they call the Freedesktop Notification protocol. Until parity:
 
 | Upstream source | Posthorn scope | State |
 | --- | --- | --- |
-| `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; stricter Mako selector validation (bare booleans only, anchor names), signed max-history disabling, format/group validation, progress-color operators, and transactional reload |
+| `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; stricter Mako selector validation (bare booleans only, anchor names, last repeated field wins), signed max-history disabling, format/group validation, progress-color operators, and transactional reload |
 | `notification.c` | IDs, replace, close, timeout, history, groups, format | Timers, dismiss/restore and per-notification history policy; indexed grouped visibility (including explicit secondary-member overrides), per-output/anchor visibility limits, count formatting and per-notification overflow placeholders tested; dynamic grouping remains partial |
 | `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Private development bus with image-data, image-path, progress, reload, conditional root-style GetCapabilities, ActivationToken ordering and on-notify action/dismiss signal tests; full protocol parity pending |
 | `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Private desktop has stacked SHM layer-shell surfaces with redraw reuse and release-aware SHM buffers, named outputs and integer buffer-scale changes, XDG activation token requests, pointer/touch, anchors, and outer-margin placement; live compositor QA pending |

@@ -342,7 +342,7 @@ fn parse_selectors(text: &str) -> Result<Vec<Selector>, String> {
     if escape { return Err("trailing backslash in criteria".into()); }
     if quote { return Err("unmatched quote in criteria".into()); }
     if !current.is_empty() { tokens.push(current); }
-    tokens.into_iter().map(|token| {
+    let parsed: Vec<Selector> = tokens.into_iter().map(|token| {
         if let Some((key, value)) = token.split_once('=') {
             Selector::new(key, value)
         } else if let Some(key) = token.strip_prefix('!') {
@@ -356,7 +356,19 @@ fn parse_selectors(text: &str) -> Result<Vec<Selector>, String> {
         } else {
             Err(format!("invalid boolean criteria field '{token}'"))
         }
-    }).collect()
+    }).collect::<Result<_, _>>()?;
+    // Upstream parse_criteria writes fields to one criteria struct. Repeating
+    // the same field replaces its prior value; matching every occurrence
+    // independently would incorrectly make many valid sections impossible.
+    let mut selectors: Vec<Selector> = Vec::new();
+    for selector in parsed {
+        if let Some(existing) = selectors.iter_mut().find(|s| s.key == selector.key) {
+            *existing = selector;
+        } else {
+            selectors.push(selector);
+        }
+    }
+    Ok(selectors)
 }
 
 fn parse_bool(text: &str) -> Option<bool> {
@@ -600,6 +612,30 @@ mod tests {
         ] {
             assert!(Config::parse(source).is_ok(), "Mako-valid config rejected: {source}");
         }
+    }
+
+    #[test]
+    fn mako_last_repeated_selector_wins_without_affecting_other_fields() {
+        let c = Config::parse(
+            "[category=wrong category=success app-name=example]\nwidth=440\n"
+        ).unwrap();
+        assert_eq!(c.style_for(&note("success", &["default"]))["width"], "440");
+        assert_eq!(c.style_for(&note("wrong", &["default"]))["width"], "300");
+
+        let c = Config::parse(
+            "[summary~=^Wrong summary~=^Saved]\nheight=140\n"
+        ).unwrap();
+        assert_eq!(c.style_for(&note("general", &["default"]))["height"], "140");
+
+        let c = Config::parse(
+            "[mode=quiet mode=default !actionable]\nwidth=420\n"
+        ).unwrap();
+        assert_eq!(c.style_for(&note("general", &["default"]))["width"], "420");
+
+        // Different selector types are *not* duplicates and remain forbidden.
+        assert!(Config::parse(
+            "[summary=Saved summary~=^Saved]\nwidth=420\n"
+        ).is_err());
     }
 
     #[test]
