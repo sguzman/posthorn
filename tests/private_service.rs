@@ -245,3 +245,56 @@ async fn click_activation_signal_precedes_action_and_close()
     assert!(runtime.store.lock().unwrap().active().is_empty());
     Ok(())
 }
+
+#[tokio::test]
+async fn on_notify_bindings_dismiss_and_invoke_without_replay()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use futures_util::StreamExt;
+    let cfg=Config::parse(
+        "[category=ephemeral]\non-notify=dismiss\n         [category=interactive]\non-notify=invoke-default-action\n"
+    )?;
+    let (conn,runtime)=open_private_service(cfg).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let mut signals=desktop.receive_all_signals().await?;
+    let hints:HashMap<String,OwnedValue>=[(
+        "category".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("ephemeral"))?,
+    )].into();
+    let first:u32=desktop.call("Notify",&(
+        "fixture",0u32,"","Auto dismiss","",
+        Vec::<String>::new(),hints,-1i32,
+    )).await?;
+    let closed=tokio::time::timeout(
+        std::time::Duration::from_secs(3),signals.next()
+    ).await?.ok_or("missing automatic dismissal signal")?;
+    assert_eq!(closed.header().member().unwrap().as_str(),"NotificationClosed");
+    assert_eq!(closed.body().deserialize::<(u32,u32)>()?,(first,2));
+    assert!(runtime.store.lock().unwrap().active().is_empty());
+    assert_eq!(runtime.store.lock().unwrap().history().len(),1);
+    let _:()=control.call("RestoreNotification",&()).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),1,
+        "restoring must not replay the on-notify dismissal");
+
+    let hints:HashMap<String,OwnedValue>=[(
+        "category".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("interactive"))?,
+    )].into();
+    let next:u32=desktop.call("Notify",&(
+        "fixture",0u32,"","Auto action","",
+        vec!["default".to_string(),"Open".to_string()],hints,-1i32,
+    )).await?;
+    let action=tokio::time::timeout(
+        std::time::Duration::from_secs(3),signals.next()
+    ).await?.ok_or("missing automatic action")?;
+    assert_eq!(action.header().member().unwrap().as_str(),"ActionInvoked");
+    assert_eq!(action.body().deserialize::<(u32,String)>()?,
+        (next,"default".into()));
+    let closed=tokio::time::timeout(
+        std::time::Duration::from_secs(3),signals.next()
+    ).await?.ok_or("missing action close")?;
+    assert_eq!(closed.header().member().unwrap().as_str(),"NotificationClosed");
+    assert_eq!(closed.body().deserialize::<(u32,u32)>()?,(next,2));
+    Ok(())
+}
