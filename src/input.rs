@@ -153,13 +153,20 @@ pub fn needs_activation_token(binding:&NotifyBinding)->bool{
     matches!(binding,NotifyBinding::InvokeDefaultAction|NotifyBinding::InvokeAction(_))
 }
 
-/// Mako's actions=0 is a display/style option, not an authorization gate.
-/// Both the control interface and invoke-action bindings search the actual
-/// action list sent by the application, independent of the matched style.
+/// Mako's notify_action_invoked() suppresses BOTH action and activation-token
+/// signals when the notification's resolved style has actions=0. It still
+/// retains the sender action list, and a click still dismisses the popup.
 pub fn can_invoke_action(runtime:&SharedRuntime,id:u32,key:&str)->io::Result<bool>{
-    let store=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?;
-    Ok(store.active().iter().find(|n|n.id==id)
-        .is_some_and(|note|note.actions.iter().any(|a|a.key==key)))
+    let note=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?
+        .active().iter().find(|n|n.id==id).cloned();
+    let Some(note)=note else{return Ok(false)};
+    if !note.actions.iter().any(|action|action.key==key){return Ok(false);}
+    let index=crate::grouping::active_group_index(runtime,id).map_err(error)?;
+    let modes=runtime.modes().lock().map_err(|_|error("mode lock poisoned"))?
+        .clone();
+    let style=crate::desktop::style_for_note_index(runtime,&note,&modes,index);
+    Ok(style.get("actions")
+        .is_none_or(|v|v=="1"||v.eq_ignore_ascii_case("true")))
 }
 
 async fn invoke(conn:&Connection,runtime:&SharedRuntime,id:u32,key:&str,
@@ -250,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn actions_style_does_not_remove_sender_actions() {
+    fn actions_style_keeps_keys_but_suppresses_action_signals() {
         let runtime=SharedRuntime::new(Config::parse(
             "[category=warning]\nactions=0\n"
         ).unwrap());
@@ -265,7 +272,10 @@ mod tests {
                 key:"default".into(),label:"Open".into(),
             }],..Request::default()
         });
-        assert!(can_invoke_action(&runtime,disabled,"default").unwrap());
+        assert!(!can_invoke_action(&runtime,disabled,"default").unwrap());
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .find(|n|n.id==disabled).unwrap().actions.len(),1,
+            "Mako stores actions even when signal emission is disabled");
         assert!(can_invoke_action(&runtime,allowed,"default").unwrap());
         assert!(!can_invoke_action(&runtime,allowed,"unknown").unwrap());
     }
@@ -295,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn grouped_actions_style_does_not_suppress_existing_action_key() {
+    fn grouped_actions_style_disables_signals_after_grouping() {
         let config=Config::parse(
             "group-by=app-name\n[grouped]\nactions=0\n"
         ).unwrap();
@@ -307,11 +317,14 @@ mod tests {
             }],
             ..Request::default()
         };
+        let now=std::time::Instant::now();
         let first=runtime.store.lock().unwrap().push(request());
+        runtime.schedule_without_hook(first,now).unwrap();
         assert!(can_invoke_action(&runtime,first,"default").unwrap());
         let second=runtime.store.lock().unwrap().push(request());
-        assert!(can_invoke_action(&runtime,first,"default").unwrap());
-        assert!(can_invoke_action(&runtime,second,"default").unwrap());
+        runtime.schedule_without_hook(second,now).unwrap();
+        assert!(!can_invoke_action(&runtime,first,"default").unwrap());
+        assert!(!can_invoke_action(&runtime,second,"default").unwrap());
     }
 
     #[test]

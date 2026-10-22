@@ -828,7 +828,7 @@ async fn dbus_inline_image_and_progress_reach_rendered_pixels()
 }
 
 #[tokio::test]
-async fn actions_false_does_not_block_control_or_click_invocation()
+async fn actions_false_suppresses_action_signals_but_click_still_dismisses()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
     use futures_util::StreamExt;
@@ -851,25 +851,21 @@ async fn actions_false_does_not_block_control_or_click_invocation()
         hints,-1i32
     )).await?;
     let _:()=ctl.call("InvokeAction",&(id,"default")).await?;
-    let message=tokio::time::timeout(
-        std::time::Duration::from_secs(3),signals.next()
-    ).await?.ok_or("expected control action signal")?;
-    assert_eq!(message.header().member().unwrap().as_str(),"ActionInvoked");
-    let (target,key):(u32,String)=message.body().deserialize()?;
-    assert_eq!((target,key),(id,"default".to_owned()));
+    assert!(tokio::time::timeout(
+        std::time::Duration::from_millis(120),signals.next()
+    ).await.is_err(),"actions=FALSE must suppress control ActionInvoked");
     assert_eq!(runtime.store.lock().unwrap().active().len(),1,
         "Mako control InvokeAction must not dismiss the notification");
     dispatch_click(&conn,&runtime,PointerClick{
         x:30.0,y:20.0,button:272,serial:15,
     }).await?;
-    let action=tokio::time::timeout(
-        std::time::Duration::from_secs(3),signals.next()
-    ).await?.ok_or("expected click action signal")?;
-    assert_eq!(action.header().member().unwrap().as_str(),"ActionInvoked");
     let closed=tokio::time::timeout(
         std::time::Duration::from_secs(3),signals.next()
     ).await?.ok_or("expected click close signal")?;
     assert_eq!(closed.header().member().unwrap().as_str(),"NotificationClosed");
+    assert!(tokio::time::timeout(
+        std::time::Duration::from_millis(120),signals.next()
+    ).await.is_err(),"actions=FALSE click must not emit a later action signal");
     assert!(runtime.store.lock().unwrap().active().is_empty());
     Ok(())
 }

@@ -131,9 +131,16 @@ impl MakoControl {
         }.cloned();
         drop(store);
         let Some(note)=note else {return Ok(None)};
-        // Mako searches the internal action list (newest action pair
-        // first), regardless of the style's actions=0 visibility setting.
-        Ok(note.actions.iter().any(|a|a.key==key).then_some(note.id))
+        // Mako scans the retained action list but its
+        // notify_action_invoked() suppresses signals for actions=0 styles.
+        if !note.actions.iter().any(|a|a.key==key){return Ok(None);}
+        if let Some(runtime)=&self.runtime{
+            if !crate::input::can_invoke_action(runtime,note.id,key)
+                .map_err(|e|zbus::fdo::Error::Failed(e.to_string()))?{
+                return Ok(None);
+            }
+        }
+        Ok(Some(note.id))
     }
 }
 
@@ -418,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn control_invoke_preserves_action_keys_when_style_actions_disabled() {
+    fn control_invoke_respects_actions_disabled_style() {
         let runtime=SharedRuntime::new(crate::config::Config::parse(
             "[category=warning]\nactions=0\n"
         ).unwrap());
@@ -429,9 +436,10 @@ mod tests {
             }],..Request::default()
         });
         let control=MakoControl::with_runtime(runtime);
-        assert_eq!(control.find_action(id,"default").unwrap(),Some(id));
-        assert_eq!(control.find_action(0,"default").unwrap(),Some(id));
+        assert_eq!(control.find_action(id,"default").unwrap(),None);
+        assert_eq!(control.find_action(0,"default").unwrap(),None);
         assert_eq!(control.find_action(id,"missing").unwrap(),None);
+        assert_eq!(control.store.lock().unwrap().active()[0].actions.len(),1);
     }
 
     #[test]
