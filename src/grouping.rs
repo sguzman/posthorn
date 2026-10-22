@@ -175,10 +175,19 @@ pub fn active_group_ids(
 pub fn active_group_index(
     runtime:&crate::runtime::SharedRuntime,target_id:u32
 )->Result<i32,String>{
-    let ids=active_group_ids(runtime,target_id)?;
-    if ids.len()<2{return Ok(-1);}
-    Ok(ids.iter().position(|&id|id==target_id)
-        .and_then(|index|i32::try_from(index).ok()).unwrap_or(-1))
+    // A notification can belong to a group created by a different
+    // notification's criteria. Its own group-by may still be "none".
+    let (notes,modes)={
+        let store=runtime.store.lock()
+            .map_err(|_|"notification store lock poisoned")?;
+        let mode_state=runtime.modes();
+        let modes=mode_state.lock()
+            .map_err(|_|"mode state lock poisoned")?;
+        (store.active().iter().cloned().collect::<Vec<_>>(),modes.clone())
+    };
+    Ok(group_ordered_scoped(runtime,notes.iter(),&modes)?
+        .into_iter().find(|group|group.ids.contains(&target_id))
+        .and_then(|group|group.index_of(target_id)).unwrap_or(-1))
 }
 
 #[cfg(test)]
@@ -257,7 +266,8 @@ mod tests {
         assert_eq!(active_group_ids(&runtime,regular).unwrap(),vec![regular]);
         assert_eq!(active_group_ids(&runtime,unrelated).unwrap(),vec![unrelated]);
         assert_eq!(active_group_index(&runtime,warning).unwrap(),1);
-        assert_eq!(active_group_index(&runtime,regular).unwrap(),-1);
+        assert_eq!(active_group_index(&runtime,regular).unwrap(),1);
+        assert_eq!(active_group_index(&runtime,unrelated).unwrap(),-1);
     }
 
     #[test]
