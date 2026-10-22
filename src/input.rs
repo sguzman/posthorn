@@ -155,17 +155,20 @@ pub fn needs_activation_token(binding:&NotifyBinding)->bool{
     matches!(binding,NotifyBinding::InvokeDefaultAction|NotifyBinding::InvokeAction(_))
 }
 
-/// Request an XDG activation token only if the matching action can emit it.
-/// Disabled actions or missing action keys still dismiss the notification on
-/// click, but Mako's notify_action_invoked() cannot use a token for them.
+/// Mako's try_invoke_action() allocates a compositor token as soon as it
+/// finds a matching key, BEFORE notify_action_invoked() checks actions=0.
+/// Do not conflate token-request eligibility with signal eligibility.
 pub fn should_request_activation_token(
     runtime:&SharedRuntime,id:u32,binding:&NotifyBinding,
 )->io::Result<bool>{
-    match binding {
-        NotifyBinding::InvokeDefaultAction=>can_invoke_action(runtime,id,"default"),
-        NotifyBinding::InvokeAction(key)=>can_invoke_action(runtime,id,key),
-        _=>Ok(false),
-    }
+    let key=match binding {
+        NotifyBinding::InvokeDefaultAction=>"default",
+        NotifyBinding::InvokeAction(key)=>key.as_str(),
+        _=>return Ok(false),
+    };
+    let store=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?;
+    Ok(store.active().iter().find(|n|n.id==id)
+        .is_some_and(|n|n.actions.iter().any(|a|a.key==key)))
 }
 
 /// Mako's notify_action_invoked() suppresses BOTH action and activation-token
@@ -393,7 +396,10 @@ mod tests {
         let invoke=NotifyBinding::InvokeDefaultAction;
         assert!(needs_activation_token(&invoke),
             "binding kind may need activation when style permits");
-        assert!(!should_request_activation_token(&runtime,disabled,&invoke).unwrap());
+        // Upstream requests the compositor token before actions=0 prevents
+        // ActionInvoked/ActivationToken signals.
+        assert!(should_request_activation_token(&runtime,disabled,&invoke).unwrap());
+        assert!(!can_invoke_action(&runtime,disabled,"default").unwrap());
         assert!(should_request_activation_token(&runtime,allowed,&invoke).unwrap());
         assert!(!should_request_activation_token(&runtime,allowed,
             &NotifyBinding::InvokeAction("missing".into())).unwrap());
