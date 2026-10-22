@@ -298,3 +298,40 @@ async fn on_notify_bindings_dismiss_and_invoke_without_replay()
     assert_eq!(closed.body().deserialize::<(u32,u32)>()?,(next,2));
     Ok(())
 }
+
+#[tokio::test]
+async fn grouped_on_notify_exec_runs_after_grouping_but_not_on_restore()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let dir=tempfile::tempdir()?;
+    let marker=dir.path().join("grouped-hook");
+    let config=Config::parse(&format!(
+        "group-by=app-name\n         [grouped]\non-notify=exec touch '{}'\n",
+        marker.display()
+    ))?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let actions=Vec::<String>::new();
+    let hints=HashMap::<String,OwnedValue>::new();
+    let _:u32=desktop.call("Notify",&(
+        "same",0u32,"","First","",actions.clone(),hints.clone(),-1i32
+    )).await?;
+    assert!(!marker.exists(),"ungrouped first notification must not run group hook");
+    let second:u32=desktop.call("Notify",&(
+        "same",0u32,"","Second","",actions,hints,-1i32
+    )).await?;
+    tokio::time::timeout(std::time::Duration::from_secs(3),async{
+        while !marker.exists(){
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await?;
+    std::fs::remove_file(&marker)?;
+    let mut opts=HashMap::new();
+    opts.insert("id".to_string(),OwnedValue::from(second));
+    let _:()=control.call("DismissNotifications",&(opts,)).await?;
+    let _:()=control.call("RestoreNotification",&()).await?;
+    assert!(runtime.store.lock().unwrap().active().iter().any(|n|n.id==second));
+    assert!(!marker.exists(),"restoring must not launch the grouped hook again");
+    Ok(())
+}
