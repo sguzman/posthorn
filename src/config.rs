@@ -249,7 +249,11 @@ impl Config {
                 let path = resolve_include(value).map_err(|e|err(&location,e))?;
                 self.load(&path, depth+1, seen)?;
             } else if current.is_none() && key == "max-history" {
-                self.max_history = value.parse::<usize>().map_err(|_|err(&location,"invalid max-history"))?;
+                // Mako parses max-history as a signed int and treats
+                // zero or negative values as history disabled.
+                let signed=value.parse::<i32>()
+                    .map_err(|_|err(&location,"invalid max-history"))?;
+                self.max_history=signed.max(0) as usize;
             } else if current.is_none() && key == "sort" {
                 if !["+priority", "-priority", "+time", "-time"].contains(&value) {
                     return Err(err(&location,"invalid sort order"));
@@ -489,6 +493,16 @@ mod tests {
         n.urgency = "critical";
         assert_eq!(c.style_for(&n)["width"], "440");
     }
+    #[test]
+    fn signed_max_history_matches_mako_nonpositive_disable_semantics() {
+        for setting in ["max-history=-1","max-history=-100","max-history=0"] {
+            let config=Config::parse(&format!("{setting}\n")).unwrap();
+            assert_eq!(config.max_history,0);
+        }
+        assert_eq!(Config::parse("max-history=7\n").unwrap().max_history,7);
+        assert!(Config::parse("max-history=2147483648\n").is_err());
+    }
+
     #[test]
     fn bare_nonboolean_selectors_and_invalid_anchor_are_rejected_like_mako() {
         for raw in ["[app-name]","[category]","[summary]","[body]",
