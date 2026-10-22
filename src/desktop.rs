@@ -423,11 +423,12 @@ mod tests {
     }
 
     #[test]
-    fn per_category_max_visible_controls_own_notification_selection(){
+    fn output_scoped_max_visible_controls_notification_selection(){
         let runtime=SharedRuntime::new(Config::parse(
-            "max-visible=1\n[category=urgent]\nmax-visible=3\n"
+            "output=DP-1\nmax-visible=1\n[output=DP-1]\nmax-visible=3\n"
         ).unwrap());
-        // Newest first: the third slot is permitted by the category rule.
+        // Mako permits max-visible to be overridden by output or anchor,
+        // not by a category selector.
         let older=runtime.store.lock().unwrap().push(Request{
             category:"urgent".into(),..Request::default()
         });

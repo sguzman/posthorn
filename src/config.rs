@@ -269,9 +269,49 @@ impl Config {
                 }
             }
         }
+        // Upstream Mako validates the *whole criteria section*, not only
+        // individual options. Includes are validated independently, too.
+        for rule in &self.rules {
+            validate_rule(rule).map_err(|message| err(&rule.source, message))?;
+        }
         let _ = path; // reserved for richer include diagnostics
         Ok(())
     }
+}
+
+/// Match upstream Mako 1.11 validate_criteria restrictions. A syntactically
+/// valid option can still be invalid for the selectors of its section.
+fn validate_rule(rule: &Rule) -> Result<(), String> {
+    let has = |key: &str| rule.selectors.iter().any(|selector| selector.key == key);
+    if has("summary") && has("summary~") {
+        return Err("cannot combine summary and summary~ selectors".into());
+    }
+    if has("body") && has("body~") {
+        return Err("cannot combine body and body~ selectors".into());
+    }
+
+    let surface_or_group = ["grouped", "group-index", "output", "anchor"]
+        .iter().any(|key| has(key));
+    if surface_or_group {
+        for option in ["anchor", "output", "group-by"] {
+            if rule.options.contains_key(option) {
+                return Err(format!("'{option}' cannot be set under grouped, group-index, output or anchor criteria"));
+            }
+        }
+    }
+
+    // Mako excludes output, anchor and hidden from its "non-surface"
+    // selector test. Only those selectors may control max-visible.
+    let non_surface = rule.selectors.iter().any(|selector|
+        !matches!(selector.key.as_str(), "output" | "anchor" | "hidden"));
+    if non_surface && rule.options.contains_key("max-visible") {
+        return Err("max-visible is only allowed with output and/or anchor criteria".into());
+    }
+    if non_surface && rule.selectors.iter().any(|selector|
+        selector.key == "hidden" && parse_bool(&selector.value) == Some(true)) {
+        return Err("hidden=true cannot be combined with non-surface selectors".into());
+    }
+    Ok(())
 }
 
 fn resolve_include(value: &str) -> Result<PathBuf, String> {
@@ -348,7 +388,8 @@ fn validate_option(key: &str, value: &str) -> Result<(), String> {
             "group-index", "anchor", "output", "none",
         ];
         // Mako accepts comma-separated criteria *field names*, not selector values.
-        if value.split(',').all(|field| FIELDS.contains(&field)) {
+        if value.split(',').all(|field| FIELDS.contains(&field))
+            && crate::grouping::GroupSpec::parse(value).is_ok() {
             return Ok(());
         }
     }
@@ -515,6 +556,43 @@ mod tests {
             "[hidden]","[expiring]","[anchor=bottom-center]"] {
             assert!(Config::parse(&format!("{raw}\nbackground-color=#123456\n")).is_ok(),
                 "valid selector rejected: {raw}");
+        }
+    }
+
+    #[test]
+    fn mako_rejects_conflicting_exact_and_regex_selectors() {
+        for criteria in [
+            "summary=hello summary~=^hello", "body=world body~=world",
+        ] {
+            assert!(Config::parse(&format!("[{criteria}]\\nwidth=400\\n")).is_err(),
+                "conflicting criteria unexpectedly accepted: {criteria}");
+        }
+        assert!(Config::parse("[summary~=^hello body=world]\\nwidth=400\\n").is_ok());
+    }
+
+    #[test]
+    fn mako_restricts_surface_and_group_settings_by_selector() {
+        for source in [
+            "[grouped]\\nanchor=bottom-right\\n",
+            "[group-index=0]\\noutput=DP-1\\n",
+            "[output=DP-1]\\ngroup-by=app-name\\n",
+            "[anchor=top-right]\\noutput=DP-1\\n",
+            "[category=urgent]\\nmax-visible=3\\n",
+            "[category=urgent hidden]\\nformat=%s\\n",
+            "group-by=group-index\\n",
+            "group-by=app-name,output\\n",
+            "group-by=none,app-name\\n",
+        ] {
+            assert!(Config::parse(source).is_err(), "Mako-invalid config accepted: {source}");
+        }
+        for source in [
+            "[output=DP-1]\\nmax-visible=3\\n",
+            "[anchor=bottom-right]\\nmax-visible=2\\n",
+            "[hidden]\\nformat=%h\\n",
+            "[category=urgent hidden=false]\\nformat=%s\\n",
+            "group-by=app-name,category\\n",
+        ] {
+            assert!(Config::parse(source).is_ok(), "Mako-valid config rejected: {source}");
         }
     }
 
