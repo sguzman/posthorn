@@ -314,7 +314,7 @@ mod tests {
              "x-canonical-private-synchronous","x-dunst-stack-tag"]);
         let scoped_body=FreedesktopNotifications::with_runtime(
             SharedRuntime::new(crate::config::Config::parse(
-                "format=%s\\nmarkup=0\\nactions=0\\nicons=0\\n[category=success]\\nformat=%b\\n"
+                "format=%s\nmarkup=0\nactions=0\nicons=0\n[category=success]\nformat=%b\n"
             ).unwrap())
         );
         assert_eq!(scoped_body.get_capabilities(),
