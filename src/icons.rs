@@ -198,6 +198,12 @@ pub fn decode_icon(path:&Path)->Option<IconPixels>{
     Some(IconPixels{width:w,height:h,bgra:out})
 }
 
+fn max_icon_size(style:&Options)->u32{
+    style.get("max-icon-size")
+        .and_then(|text|crate::config::parse_nonnegative_mako(text))
+        .unwrap_or(64)
+}
+
 pub fn load_note_icon(note:&Notification,style:&Options)->Option<IconPixels>{
     load_note_icon_scaled(note,style,1)
 }
@@ -211,7 +217,7 @@ pub fn load_note_icon_scaled(
     // image-data has higher precedence than image-path and app_icon.
     if let Some(image)=&note.image_data {return Some(image.clone());}
     if note.app_icon.is_empty(){return None;}
-    let max_size=style.get("max-icon-size").and_then(|s|s.parse().ok()).unwrap_or(64);
+    let max_size=max_icon_size(style);
     let path=resolve_icon_scaled(&note.app_icon,
         style.get("icon-path").map(String::as_str).unwrap_or(""),
         max_size,output_scale)?;
@@ -266,6 +272,18 @@ mod tests {
         assert_eq!(resolve_icon("file:///tmp/hello%20world.png","",64),
             Some(PathBuf::from("/tmp/hello world.png")));
         assert!(resolve_icon("file:///%00hidden","",64).is_none());
+    }
+
+    #[test]
+    fn icon_theme_lookup_uses_mako_signed_numeric_parser(){
+        let mut style=Options::new();
+        assert_eq!(max_icon_size(&style),64);
+        style.insert("max-icon-size".into()," \\t+16".into());
+        assert_eq!(max_icon_size(&style),16);
+        style.insert("max-icon-size".into(),"48".into());
+        assert_eq!(max_icon_size(&style),48);
+        style.insert("max-icon-size".into(),"2147483648".into());
+        assert_eq!(max_icon_size(&style),64);
     }
 
     #[test]
