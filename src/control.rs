@@ -114,6 +114,11 @@ impl MakoControl {
             .collect();
         let mut active=self.modes.lock().map_err(|_|internal_error())?;
         *active=unique;
+        drop(active);
+        if let Some(runtime)=&self.runtime {
+            runtime.reapply_active_history_policies()
+                .map_err(zbus::fdo::Error::Failed)?;
+        }
         Ok(())
     }
 
@@ -309,6 +314,25 @@ mod tests {
         assert_eq!(u8::try_from(list[0].get("urgency").unwrap()).unwrap(), 1);
         assert_eq!(u32::try_from(list[0].get("id").unwrap()).unwrap(), 1);
         assert!(list[0].contains_key("actions"));
+    }
+
+    #[test]
+    fn mode_change_reapplies_history_for_notifications_already_active() {
+        let runtime=SharedRuntime::new(crate::config::Config::parse(
+            "history=1\n[mode=quiet]\nhistory=0\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule(id,std::time::Instant::now()).unwrap();
+        let ctl=MakoControl::with_runtime(runtime.clone());
+        ctl.set_modes_impl(vec!["quiet".into()]).unwrap();
+        assert!(runtime.close(id,CloseReason::Dismissed,true).unwrap());
+        assert!(runtime.store.lock().unwrap().history().is_empty());
+
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule(id,std::time::Instant::now()).unwrap();
+        ctl.set_modes_impl(vec!["default".into()]).unwrap();
+        assert!(runtime.close(id,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(runtime.store.lock().unwrap().history()[0].id,id);
     }
 
     #[test]

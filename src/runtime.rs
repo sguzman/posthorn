@@ -74,7 +74,44 @@ impl SharedRuntime {
         *active=Arc::new(updated);
         store.set_sort_policy(sort);
         store.set_max_history(max_history);
+        drop(active);
+        drop(store);
+        // Upstream reapply_config rebuilds styles for existing notifications,
+        // including the history option. Their original timers are retained.
+        self.reapply_active_history_policies()?;
         self.revision.fetch_add(1,Ordering::Release);
+        Ok(())
+    }
+
+    /// Recalculate active notification history eligibility after Mako-style
+    /// mode/config reapplication. This does not reschedule timers or trigger
+    /// on-notify bindings, which upstream also leaves alone.
+    pub fn reapply_active_history_policies(&self)->Result<(),String>{
+        let (notes,modes)={
+            let store=self.store.lock()
+                .map_err(|_|"notification store lock poisoned")?;
+            let modes=self.modes.lock()
+                .map_err(|_|"mode state lock poisoned")?;
+            (store.active().iter().cloned().collect::<Vec<_>>(),modes.clone())
+        };
+        let groups=crate::grouping::group_ordered_scoped(self,notes.iter(),&modes)?;
+        let mut indices=HashMap::new();
+        for group in groups {
+            for id in &group.ids {
+                indices.insert(*id,group.index_of(*id).unwrap_or(-1));
+            }
+        }
+        let mut updated=HashMap::new();
+        for note in &notes {
+            let index=indices.get(&note.id).copied().unwrap_or(-1);
+            let style=crate::desktop::style_for_note_index(self,note,&modes,index);
+            let history=style.get("history")
+                .is_none_or(|v|v=="1"||v.eq_ignore_ascii_case("true"));
+            updated.insert(note.id,history);
+        }
+        let mut policies=self.history_policies.lock()
+            .map_err(|_|"history policy lock poisoned")?;
+        *policies=updated;
         Ok(())
     }
 
@@ -371,6 +408,35 @@ mod tests {
         assert_eq!(runtime.expire(now+Duration::from_millis(500)).unwrap(),vec![id]);
         assert_eq!(runtime.expire(now+Duration::from_millis(800)).unwrap(),vec![other]);
         assert_eq!(runtime.store.lock().unwrap().history().len(),1);
+    }
+
+    #[test]
+    fn reload_reapplies_existing_history_without_resetting_deadlines() {
+        let dir=tempfile::tempdir().unwrap();
+        let path=dir.path().join("config");
+        std::fs::write(&path,
+            "history=0\ndefault-timeout=1000\n").unwrap();
+        let runtime=SharedRuntime::from_path(&path).unwrap();
+        let now=Instant::now();
+        let first=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule(first,now).unwrap();
+        let old_deadline=runtime.next_deadline().unwrap();
+        assert_eq!(old_deadline,Some(now+Duration::from_millis(1000)));
+        std::fs::write(&path,
+            "history=1\ndefault-timeout=5000\n").unwrap();
+        runtime.reload().unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),old_deadline,
+            "style reapplication cannot restart running timers");
+        assert!(runtime.close(first,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(runtime.store.lock().unwrap().history()[0].id,first);
+
+        let second=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule(second,now).unwrap();
+        std::fs::write(&path,"history=0\n").unwrap();
+        runtime.reload().unwrap();
+        assert!(runtime.close(second,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(runtime.store.lock().unwrap().history().len(),1,
+            "a successful reload must update history eligibility");
     }
 
     #[test]
