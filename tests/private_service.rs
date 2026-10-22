@@ -268,6 +268,40 @@ async fn control_reload_swaps_styles_and_preserves_last_good_file()
 }
 
 #[tokio::test]
+async fn chromium_urgency_variants_are_preserved_over_real_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::notification::Urgency;
+    let (conn,runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    for (value,expected) in [
+        (OwnedValue::from(2u32),Urgency::Critical),
+        (OwnedValue::from(0i32),Urgency::Low),
+        (OwnedValue::from(2i32),Urgency::Critical),
+        (OwnedValue::from(0u8),Urgency::Low),
+    ] {
+        let hints:HashMap<String,OwnedValue>=[("urgency".into(),value)].into();
+        let id:u32=desktop.call("Notify",&(
+            "urgency-fixture",0u32,"","Hint","",Vec::<String>::new(),
+            hints,-1i32
+        )).await?;
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .find(|n|n.id==id).unwrap().urgency,expected);
+        let all:Vec<HashMap<String,OwnedValue>>=
+            ctl.call("ListNotifications",&()).await?;
+        let record=all.iter().find(|item|
+            item.get("id").and_then(|v|u32::try_from(v).ok())==Some(id)
+        ).ok_or("missing wire notification")?;
+        let urgency=u8::try_from(record.get("urgency").unwrap())?;
+        assert_eq!(urgency,match expected{
+            Urgency::Low=>0,Urgency::Normal=>1,Urgency::Critical=>2,
+        });
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn dbus_inline_image_and_progress_reach_rendered_pixels()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
