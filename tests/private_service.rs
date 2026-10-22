@@ -235,6 +235,49 @@ async fn scoped_group_dismissal_uses_selected_notification_criteria_over_dbus()
 }
 
 #[tokio::test]
+async fn ascending_sort_groups_after_later_scoped_warning_over_private_bus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::desktop::visible_members_indexed;
+    use posthorn::hooks::NotifyBinding;
+    use posthorn::input::dispatch_binding;
+    let config=Config::parse(
+        "sort=+time\ngroup-by=none\n[category=warning]\ngroup-by=app-name\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let send=|app:&str,category:&str| {
+        let hint:HashMap<String,OwnedValue>=[(
+            "category".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from(category)).unwrap()
+        )].into();
+        (app.to_owned(),hint)
+    };
+    let (app,hints)=send("same","success");
+    let old:u32=desktop.call("Notify",&(
+        app,0u32,"","Old","",Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let (app,hints)=send("different","success");
+    let other:u32=desktop.call("Notify",&(
+        app,0u32,"","Other","",Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let (app,hints)=send("same","warning");
+    let newest:u32=desktop.call("Notify",&(
+        app,0u32,"","Warning","",Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let visible=visible_members_indexed(&runtime)?;
+    assert_eq!(visible.iter().map(|v|(v.notification.id,v.group_count))
+        .collect::<Vec<_>>(),vec![(old,2),(other,1)],
+        "later scoped warning must regroup earlier plain notification at +time");
+    dispatch_binding(&conn,&runtime,newest,NotifyBinding::DismissGroup,None).await?;
+    let active:Vec<HashMap<String,OwnedValue>>=ctl.call("ListNotifications",&()).await?;
+    assert_eq!(active.len(),1);
+    assert_eq!(u32::try_from(active[0].get("id").unwrap())?,other);
+    Ok(())
+}
+
+#[tokio::test]
 async fn grouped_history_follows_arrival_and_dismissal_over_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
