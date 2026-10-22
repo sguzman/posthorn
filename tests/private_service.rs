@@ -284,6 +284,53 @@ async fn ascending_sort_groups_after_later_scoped_warning_over_private_bus()
 }
 
 #[tokio::test]
+async fn removing_group_trigger_regroups_survivors_over_private_bus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::desktop::visible_members_indexed;
+    let config=Config::parse(
+        "group-by=none\n[category=warning]\ngroup-by=app-name\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let send=|app:&str,category:&str| {
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from(category)).unwrap()
+        )].into();
+        (app.to_owned(),hints)
+    };
+    let (app,hints)=send("same","success");
+    let first:u32=desktop.call("Notify",&(
+        app,0u32,"","First","",Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let (app,hints)=send("same","warning");
+    let trigger:u32=desktop.call("Notify",&(
+        app,0u32,"","Group trigger","",Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let (app,hints)=send("different","success");
+    let other:u32=desktop.call("Notify",&(
+        app,0u32,"","Other","",Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let (app,hints)=send("same","success");
+    let newest:u32=desktop.call("Notify",&(
+        app,0u32,"","Newest","",Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let _:()=desktop.call("CloseNotification",&(trigger,)).await?;
+    let active:Vec<HashMap<String,OwnedValue>>=
+        ctl.call("ListNotifications",&()).await?;
+    assert_eq!(active.iter().map(|record|
+        u32::try_from(record.get("id").unwrap()).unwrap()).collect::<Vec<_>>(),
+        vec![newest,first,other],
+        "Mako uses the removed trigger's group-by to reorder survivors");
+    let visible=visible_members_indexed(&runtime)?;
+    assert_eq!(visible.iter().map(|n|(n.notification.id,n.group_count))
+        .collect::<Vec<_>>(),vec![(newest,2),(other,1)]);
+    Ok(())
+}
+
+#[tokio::test]
 async fn grouped_history_follows_arrival_and_dismissal_over_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
