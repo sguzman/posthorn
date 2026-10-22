@@ -1090,6 +1090,34 @@ async fn click_activation_signal_precedes_action_and_close()
 }
 
 #[tokio::test]
+async fn posix_dotall_summary_criteria_drive_private_dbus_on_notify()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let cfg=Config::parse(
+        "[summary~=^Line.One$]\non-notify=dismiss\n"
+    )?;
+    let (conn,runtime)=open_private_service(cfg).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let id:u32=desktop.call("Notify",&(
+        "multiline-criteria",0u32,"","Line\nOne","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    {
+        let store=runtime.store.lock().unwrap();
+        assert!(store.active().is_empty(),
+            "Mako POSIX REG_EXTENDED without REG_NEWLINE matches newline with dot");
+        assert_eq!(store.history().front().map(|note|note.id),Some(id));
+    }
+    let other:u32=desktop.call("Notify",&(
+        "multiline-criteria",0u32,"","Prefix\nLine\nOne","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().front().map(|n|n.id),
+        Some(other),"^ must still anchor to the complete notification summary");
+    Ok(())
+}
+
+#[tokio::test]
 async fn on_notify_bindings_dismiss_and_invoke_without_replay()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
