@@ -236,6 +236,11 @@ pub fn active_group_index(
             .map_err(|_|"mode state lock poisoned")?;
         (store.active().iter().cloned().collect::<Vec<_>>(),modes.clone())
     };
+    // Mako keeps group_index on the notification object; a replacement
+    // can leave an index that the remaining group length would not imply.
+    if let Some(note)=notes.iter().find(|note|note.id==target_id){
+        if note.grouping_applied {return Ok(note.group_index);}
+    }
     Ok(group_ordered_scoped(runtime,notes.iter(),&modes)?
         .into_iter().find(|group|group.ids.contains(&target_id))
         .and_then(|group|group.index_of(target_id)).unwrap_or(-1))

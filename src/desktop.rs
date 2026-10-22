@@ -126,7 +126,11 @@ fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
         let count=group.ids.len();
         for (index,id) in group.ids.iter().enumerate() {
             if let Some(note)=by_id.iter().find(|n|&n.id==id) {
-                let group_index=if count>1{index as i32}else{-1};
+                let (group_index,real_count)=if note.grouping_applied{
+                    (note.group_index,note.group_count)
+                }else{
+                    (if count>1{index as i32}else{-1},count)
+                };
                 let style=style_for_note_index(runtime,note,&modes,group_index);
                 let limit=style.get("max-visible")
                     .and_then(|v|v.parse::<i32>().ok()).unwrap_or(5);
@@ -141,7 +145,7 @@ fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
                     continue;
                 }
                 selected.push(VisibleMember{
-                    notification:note.clone(),group_count:count,group_index,
+                    notification:note.clone(),group_count:real_count,group_index,
                 });
                 if group_index<=0 {displayed_groups+=1;}
             }
@@ -162,7 +166,11 @@ pub fn displayable_groups(runtime:&SharedRuntime)->io::Result<usize>{
         .map_err(other)?{
         if let Some(id)=group.ids.first(){
             if let Some(n)=store.active().iter().find(|n|&n.id==id){
-                let style=style_for_note_group(runtime,n,&modes,group.ids.len());
+                let style=if n.grouping_applied{
+                    style_for_note_index(runtime,n,&modes,n.group_index)
+                }else{
+                    style_for_note_group(runtime,n,&modes,group.ids.len())
+                };
                 if !style.get("invisible").is_some_and(|v|
                     v=="1"||v.eq_ignore_ascii_case("true")){
                     count+=1;
@@ -473,6 +481,37 @@ mod tests {
             runtime.store.lock().unwrap().push(Request::default());
         }
         assert_eq!(visible_notifications(&runtime).unwrap().len(),7);
+    }
+
+    #[test]
+    fn surviving_stale_group_leader_keeps_its_recorded_group_style() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=none\n[category=warning]\ngroup-by=app-name\n[grouped]\nbackground-color=#112233\n"
+        ).unwrap());
+        let now=std::time::Instant::now();
+        let old=runtime.store.lock().unwrap().push(Request{
+            app_name:"app".into(),tag:"progress".into(),..Request::default()
+        });
+        runtime.schedule(old,now).unwrap();
+        let leader=runtime.store.lock().unwrap().push(Request{
+            app_name:"app".into(),category:"warning".into(),..Request::default()
+        });
+        runtime.schedule(leader,now).unwrap();
+        assert_eq!(crate::grouping::active_group_index(&runtime,leader).unwrap(),0);
+        assert_eq!(crate::grouping::active_group_index(&runtime,old).unwrap(),1);
+        let replaced=runtime.store.lock().unwrap().push(Request{
+            app_name:"app".into(),tag:"progress".into(),..Request::default()
+        });
+        assert_eq!(replaced,old);
+        runtime.schedule(replaced,now).unwrap();
+        let visible=visible_members_indexed(&runtime).unwrap();
+        let first=visible.iter().find(|member|member.notification.id==leader).unwrap();
+        assert_eq!((first.group_index,first.group_count),(0,2),
+            "Mako preserves the grouping style and original count");
+        assert_eq!(crate::grouping::active_group_index(&runtime,leader).unwrap(),0);
+        let style=style_for_note_index(&runtime,&first.notification,
+            &["default".into()],first.group_index);
+        assert_eq!(style["background-color"],"#112233");
     }
 
     #[test]
