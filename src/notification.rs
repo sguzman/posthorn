@@ -410,6 +410,10 @@ mod tests {
     fn explicit_id_replacement_retains_group_metadata_and_list_position() {
         let mut store=NotificationStore::new(8);
         let a=store.push(Request{app_name:"app".into(),..Request::default()});
+        // A live notification completes its own initial grouping pass before
+        // later messages can group it. Test that lifecycle, not a raw push.
+        store.regroup_new_notification(a,
+            &crate::grouping::GroupSpec::parse("none").unwrap());
         let unrelated=store.push(Request{app_name:"other".into(),..Request::default()});
         let b=store.push(Request{app_name:"app".into(),..Request::default()});
         store.regroup_new_notification(b,
