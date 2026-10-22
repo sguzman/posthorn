@@ -26,5 +26,7 @@ jobs:
       - run: cargo build --bin posthorn
       - name: Verify 1x private popup and close/repaint
         run: dbus-run-session -- bash tests/headless_wayland.sh
+      - name: Verify 1.25x fractional compositor popup and close/repaint
+        run: POSTHORN_TEST_SCALE=1.25 dbus-run-session -- bash tests/headless_wayland.sh
       - name: Verify 2x HiDPI private popup and close/repaint
         run: POSTHORN_TEST_SCALE=2 dbus-run-session -- bash tests/headless_wayland.sh

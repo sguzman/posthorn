@@ -20,11 +20,15 @@ export WLR_HEADLESS_OUTPUTS=1
 export WLR_RENDERER=pixman
 export XDG_CURRENT_DESKTOP=sway
 
-# Exercise the same D-Bus / compositor acceptance at 1x and 2x.
-# The larger 2x output keeps four notifications visible at once.
+# Exercise D-Bus and compositor behavior at 1x, 1.25x and 2x outputs.
+# The larger outputs keep four notifications visible at once. Fractional
+# output smoke does not claim wp_fractional_scale_v1 buffer negotiation.
 test_scale="${POSTHORN_TEST_SCALE:-1}"
-case "$test_scale" in 1) resolution="1280x720";; 2) resolution="1920x1080";;
-  *) echo "Unsupported acceptance test scale: $test_scale"; exit 1;; esac
+case "$test_scale" in
+  1) resolution="1280x720";;
+  1.25|2) resolution="1920x1080";;
+  *) echo "Unsupported acceptance test scale: $test_scale"; exit 1;;
+esac
 printf 'output * resolution %s scale %s\n' "$resolution" "$test_scale" > "$root/sway.conf"
 sway --unsupported-gpu -c "$root/sway.conf" >"$root/sway.log" 2>&1 &
 sway_pid=$!
