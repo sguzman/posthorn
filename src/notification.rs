@@ -177,23 +177,31 @@ impl NotificationStore {
 
     pub fn push(&mut self, request: Request) -> u32 {
         // `replaces_id` only refers to currently active notifications.
-        let existing = if request.replaces_id != 0 {
-            self.active.iter().position(|n| n.id == request.replaces_id)
-        } else { None };
-        let existing = existing.or_else(|| {
-            if request.tag.is_empty() { return None; }
-            self.active.iter().position(|n|
-                n.app_name == request.app_name && n.tag == request.tag)
-        });
-        if let Some(index) = existing {
-            let id = self.active[index].id;
-            // Upstream reset_notification preserves grouping metadata until
-            // its new notification grouping pass is applied.
-            let (group_index,group_count)=(self.active[index].group_index,
-                self.active[index].group_count);
-            self.active[index] = Notification::from_request(id, request);
+        let direct_replace = if request.replaces_id != 0 {
+            self.active.iter().position(|n|n.id==request.replaces_id)
+        } else {None};
+        // Mako handles an explicit existing ID by reset_notification,
+        // retaining its group index/count and position. A matching stack
+        // tag instead creates a new notification at the old list position.
+        // That new object begins ungrouped, even though it inherits the ID.
+        if let Some(index)=direct_replace {
+            let id=self.active[index].id;
+            let old=&self.active[index];
+            let (group_index,group_count,grouping_applied)=
+                (old.group_index,old.group_count,old.grouping_applied);
+            self.active[index]=Notification::from_request(id,request);
             self.active[index].group_index=group_index;
             self.active[index].group_count=group_count;
+            self.active[index].grouping_applied=grouping_applied;
+            return id;
+        }
+        let tag_replace=if request.tag.is_empty(){None}else{
+            self.active.iter().position(|n|
+                n.app_name==request.app_name && n.tag==request.tag)
+        };
+        if let Some(index)=tag_replace {
+            let id=self.active[index].id;
+            self.active[index]=Notification::from_request(id,request);
             return id;
         }
         let id = self.allocate_id();
@@ -398,6 +406,49 @@ mod tests {
         assert_eq!(first,store.push(c));
         assert_eq!(store.active().len(),2);
     }
+    #[test]
+    fn explicit_id_replacement_retains_group_metadata_and_list_position() {
+        let mut store=NotificationStore::new(8);
+        let a=store.push(Request{app_name:"app".into(),..Request::default()});
+        let unrelated=store.push(Request{app_name:"other".into(),..Request::default()});
+        let b=store.push(Request{app_name:"app".into(),..Request::default()});
+        store.regroup_new_notification(b,
+            &crate::grouping::GroupSpec::parse("app-name").unwrap());
+        assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![b,a,unrelated]);
+        let mut replacement=Request{
+            replaces_id:a,app_name:"changed".into(),..Request::default()
+        };
+        replacement.summary="New payload".into();
+        assert_eq!(store.push(replacement),a);
+        let note=store.active().iter().find(|n|n.id==a).unwrap();
+        assert_eq!((note.group_index,note.group_count,note.grouping_applied),(1,2,true));
+        assert_eq!(note.summary,"New payload");
+        assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![b,a,unrelated]);
+    }
+
+    #[test]
+    fn stack_tag_replacement_inherits_id_and_slot_but_not_group_state() {
+        let mut store=NotificationStore::new(8);
+        let a=store.push(Request{app_name:"app".into(),
+            tag:"progress".into(),..Request::default()});
+        let unrelated=store.push(Request{app_name:"other".into(),..Request::default()});
+        let b=store.push(Request{app_name:"app".into(),..Request::default()});
+        store.regroup_new_notification(b,
+            &crate::grouping::GroupSpec::parse("app-name").unwrap());
+        assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![b,a,unrelated]);
+        let replaced=store.push(Request{app_name:"app".into(),
+            tag:"progress".into(),summary:"Updated".into(),..Request::default()});
+        assert_eq!(replaced,a);
+        let note=store.active().iter().find(|n|n.id==a).unwrap();
+        assert_eq!((note.group_index,note.group_count,note.grouping_applied),(-1,1,false));
+        assert_eq!(note.summary,"Updated");
+        assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![b,a,unrelated]);
+    }
+
     #[test]
     fn restore_preserves_active_sort_policy() {
         let mut store=NotificationStore::new(4);
