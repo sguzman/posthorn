@@ -1,9 +1,7 @@
-//! Staged Mako control-interface port. Not registered on the session bus yet.
-//! Keep this separate from the Freedesktop interface because Mako exposes both.
-//!
-//! This module deliberately returns explicit errors for operations whose runtime
-//! semantics (group dismissal or reload) are not implemented. The MVP gate is
-//! closed until the full interface and renderer are integrated.
+//! Mako control-interface implementation on Posthorn's isolated development
+//! session-bus name. The public Mako method and property signatures are retained.
+//! Group dismissal, modes, and transactional reload are implemented; exact
+//! action dictionary ordering and production cutover remain open MVP gates.
 
 use std::collections::{HashMap,HashSet};
 use std::sync::{Arc, Mutex};

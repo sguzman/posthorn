@@ -1,8 +1,8 @@
 //! Cairo/Pango software renderer for Mako-like notification surfaces.
 //!
-//! Renders real Pango markup/text into a premultiplied ARGB32 buffer suitable
-//! for Wayland wl_shm on little-endian Linux. Icons, multi-notification layout,
-//! Input/activation and exact upstream text metrics remain MVP parity tasks.
+//! Renders Pango markup, icons, grouped counts and overflow text into a
+//! premultiplied ARGB32 buffer for Wayland wl_shm on little-endian Linux.
+//! Exact upstream Pango metrics and fractional-scale presentation remain MVP tasks.
 
 use pangocairo::{cairo, pango};
 use crate::config::Options;

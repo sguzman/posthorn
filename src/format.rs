@@ -1,7 +1,7 @@
-//! Port of Mako's format specifier handling, without premature GUI behavior.
+//! Port of Mako's format placeholders and markup escaping.
 //!
-//! Pango decides whether application-supplied body markup is valid. The
-//! renderer will eventually supply that decision; unknown markup is escaped.
+//! The Cairo/Pango renderer handles body-markup validation and falls back
+//! to escaped text when sender-provided markup is invalid.
 
 use std::fmt;
 

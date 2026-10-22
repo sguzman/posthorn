@@ -74,9 +74,9 @@ pub fn style_for_note_index(
     config.style_for(&traits)
 }
 
-/// Select only the first visible member from each Mako grouping pass.
-/// The hidden-count placeholder is separate TODO work; this prevents
-/// duplicate group popups and applies max-visible to groups rather than IDs.
+/// Project Mako-visible group members and enforce max-visible per group.
+/// The compositor frame builder also renders an overflow placeholder for
+/// hidden notifications; secondary members can be explicitly re-shown by style.
 pub fn visible_notifications(runtime:&SharedRuntime)->io::Result<Vec<Notification>>{
     Ok(visible_members(runtime)?.into_iter().map(|(note,_)|note).collect())
 }

@@ -1,7 +1,7 @@
-//! Mako-compatible grouping projection of the ordered active notification list.
-//!
-//! This module does not yet physically reorder notification surfaces or apply
-//! Mako's built-in hidden/group-index criteria to the rendered view.
+//! Mako-compatible grouping of the active notification list.
+//! The runtime records persistent group membership and display ordering;
+//! the desktop projection applies grouped/hidden and group-index styling.
+//! Exact cross-output surface association remains a parity task.
 
 use std::collections::{HashMap,HashSet};
 use crate::notification::{Notification, Urgency};
