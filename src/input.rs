@@ -6,7 +6,7 @@
 //! bindings; actual Hyprland activation behavior remains unverified.
 
 use std::io;
-use crate::grouping::{active_group_ids,active_group_index};
+use crate::grouping::active_group_ids;
 use crate::hooks::NotifyBinding;
 use crate::notification::{CloseReason,Notification};
 use crate::runtime::SharedRuntime;
@@ -153,19 +153,13 @@ pub fn needs_activation_token(binding:&NotifyBinding)->bool{
     matches!(binding,NotifyBinding::InvokeDefaultAction|NotifyBinding::InvokeAction(_))
 }
 
-/// The Mako actions=0 option suppresses ActionInvoked, while the matching
-/// click binding may still dismiss the notification.
+/// Mako's actions=0 is a display/style option, not an authorization gate.
+/// Both the control interface and invoke-action bindings search the actual
+/// action list sent by the application, independent of the matched style.
 pub fn can_invoke_action(runtime:&SharedRuntime,id:u32,key:&str)->io::Result<bool>{
-    let note=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?
-        .active().iter().find(|n|n.id==id).cloned();
-    let Some(note)=note else {return Ok(false)};
-    let group_index=active_group_index(runtime,id).map_err(error)?;
-    let modes=runtime.modes().lock().map_err(|_|error("mode lock poisoned"))?
-        .clone();
-    let style=style_for_note_index(runtime,&note,&modes,group_index);
-    Ok(style.get("actions").is_none_or(|v|
-        v=="1"||v.eq_ignore_ascii_case("true"))
-        && note.actions.iter().any(|a|a.key==key))
+    let store=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?;
+    Ok(store.active().iter().find(|n|n.id==id)
+        .is_some_and(|note|note.actions.iter().any(|a|a.key==key)))
 }
 
 async fn invoke(conn:&Connection,runtime:&SharedRuntime,id:u32,key:&str,
@@ -256,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn actions_disabled_by_category_do_not_emit_invocation() {
+    fn actions_style_does_not_remove_sender_actions() {
         let runtime=SharedRuntime::new(Config::parse(
             "[category=warning]\nactions=0\n"
         ).unwrap());
@@ -271,7 +265,7 @@ mod tests {
                 key:"default".into(),label:"Open".into(),
             }],..Request::default()
         });
-        assert!(!can_invoke_action(&runtime,disabled,"default").unwrap());
+        assert!(can_invoke_action(&runtime,disabled,"default").unwrap());
         assert!(can_invoke_action(&runtime,allowed,"default").unwrap());
         assert!(!can_invoke_action(&runtime,allowed,"unknown").unwrap());
     }
@@ -301,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    fn grouped_actions_disabled_criterion_suppresses_signal() {
+    fn grouped_actions_style_does_not_suppress_existing_action_key() {
         let config=Config::parse(
             "group-by=app-name\n[grouped]\nactions=0\n"
         ).unwrap();
@@ -316,8 +310,8 @@ mod tests {
         let first=runtime.store.lock().unwrap().push(request());
         assert!(can_invoke_action(&runtime,first,"default").unwrap());
         let second=runtime.store.lock().unwrap().push(request());
-        assert!(!can_invoke_action(&runtime,first,"default").unwrap());
-        assert!(!can_invoke_action(&runtime,second,"default").unwrap());
+        assert!(can_invoke_action(&runtime,first,"default").unwrap());
+        assert!(can_invoke_action(&runtime,second,"default").unwrap());
     }
 
     #[test]

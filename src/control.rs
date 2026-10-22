@@ -126,12 +126,8 @@ impl MakoControl {
         }.cloned();
         drop(store);
         let Some(note)=note else {return Ok(None)};
-        if let Some(runtime)=&self.runtime {
-            // The selected notification is the one tested by makoctl.
-            return crate::input::can_invoke_action(runtime,note.id,key)
-                .map_err(|e|zbus::fdo::Error::Failed(e.to_string()))
-                .map(|allow|allow.then_some(note.id));
-        }
+        // The Mako control method searches the sender-supplied actions
+        // directly. Its style's actions=0 never removes those action keys.
         Ok(note.actions.iter().any(|a|a.key==key).then_some(note.id))
     }
 }
@@ -357,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn control_invoke_honors_mako_actions_disabled_criteria() {
+    fn control_invoke_preserves_action_keys_when_style_actions_disabled() {
         let runtime=SharedRuntime::new(crate::config::Config::parse(
             "[category=warning]\nactions=0\n"
         ).unwrap());
@@ -368,8 +364,9 @@ mod tests {
             }],..Request::default()
         });
         let control=MakoControl::with_runtime(runtime);
-        assert_eq!(control.find_action(id,"default").unwrap(),None);
-        assert_eq!(control.find_action(0,"default").unwrap(),None);
+        assert_eq!(control.find_action(id,"default").unwrap(),Some(id));
+        assert_eq!(control.find_action(0,"default").unwrap(),Some(id));
+        assert_eq!(control.find_action(id,"missing").unwrap(),None);
     }
 
     #[test]
