@@ -421,9 +421,16 @@ fn parse_selectors(text: &str) -> Result<Vec<Selector>, String> {
 
 /// Upstream parse_int uses strtol: leading whitespace is accepted, but
 /// trailing nonnumeric characters are rejected. Keep i32 bounds safe.
-fn parse_signed_mako(text:&str)->Option<i32>{
-    let trimmed=text.trim_start_matches([' ','\t']);
+pub fn parse_signed_mako(text:&str)->Option<i32>{
+    let trimmed=text.trim_start_matches(|c:char|c.is_ascii_whitespace());
     trimmed.parse::<i32>().ok()
+}
+
+/// Apply the same signed int32 parsing that config validation uses, without
+/// silently losing leading-whitespace values at runtime. Mako parse_int_ge
+/// refuses negative values and limits all these options to signed 32-bit.
+pub fn parse_nonnegative_mako(text:&str)->Option<u32>{
+    u32::try_from(parse_signed_mako(text)?).ok()
 }
 
 fn parse_bool(text: &str) -> Option<bool> {
@@ -592,6 +599,16 @@ mod tests {
             "Unicode NBSP is not a Mako leading whitespace character");
         assert!(Config::parse("width=215\u{a0}\n").is_err(),
             "Unicode NBSP is not stripped from Mako values");
+    }
+
+    #[test]
+    fn numeric_runtime_conversion_keeps_mako_valid_leading_whitespace(){
+        assert_eq!(parse_signed_mako("  -42"),Some(-42));
+        assert_eq!(parse_signed_mako("\t+42"),Some(42));
+        assert_eq!(parse_signed_mako("42 "),None);
+        assert_eq!(parse_signed_mako("2147483648"),None);
+        assert_eq!(parse_nonnegative_mako(" \t+440"),Some(440));
+        assert_eq!(parse_nonnegative_mako(" -4"),None);
     }
 
     #[test]

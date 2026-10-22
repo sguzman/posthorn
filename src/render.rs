@@ -21,7 +21,18 @@ pub struct PixelFrame {
 }
 
 fn integer_option(style: &Options, key: &str, default: u32) -> u32 {
-    style.get(key).and_then(|v| v.parse::<u32>().ok()).unwrap_or(default)
+    style.get(key).and_then(|v|crate::config::parse_nonnegative_mako(v))
+        .unwrap_or(default)
+}
+
+#[cfg(test)]
+#[test]
+fn validated_leading_whitespace_width_and_border_size_reach_renderer(){
+    let mut style=Options::new();
+    style.insert("width".into()," 440".into());
+    style.insert("border-size".into()," \t+3".into());
+    assert_eq!(integer_option(&style,"width",300),440);
+    assert_eq!(integer_option(&style,"border-size",2),3);
 }
 
 fn color_option(style: &Options, key: &str, fallback: &str) -> Result<Color, String> {

@@ -133,7 +133,7 @@ fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
                 };
                 let style=style_for_note_index(runtime,note,&modes,group_index);
                 let limit=style.get("max-visible")
-                    .and_then(|v|v.parse::<i32>().ok()).unwrap_or(5);
+                    .and_then(|v|crate::config::parse_signed_mako(v)).unwrap_or(5);
                 if limit>=0&&displayed_groups>=limit as usize {
                     // Upstream increments hidden count for every excluded
                     // notification, including secondary grouped members.

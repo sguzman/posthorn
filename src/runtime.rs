@@ -204,7 +204,7 @@ impl SharedRuntime {
         };
         let style = config.style_for(&traits);
         let default_ms = style.get("default-timeout")
-            .and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
+            .and_then(|x| crate::config::parse_nonnegative_mako(x)).unwrap_or(0);
         let ignore_sender = style.get("ignore-timeout")
             .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
         let timeout = note.timeout_ms(default_ms, ignore_sender);
@@ -311,6 +311,17 @@ mod tests {
     use super::*;
     use crate::notification::{Request, Urgency};
     use std::time::Duration;
+
+    #[test]
+    fn default_timeout_with_leading_space_still_arms_expiration(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "default-timeout= 350\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(id,Instant::now()).unwrap();
+        assert!(runtime.next_deadline().unwrap().is_some(),
+            "Mako accepts a whitespace-prefixed default-timeout");
+    }
 
     #[test]
     fn category_timeout_overrides_and_replacement_reschedules() {
