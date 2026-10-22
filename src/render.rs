@@ -34,13 +34,46 @@ fn set_color(cr: &cairo::Context, c: Color) {
         f64::from(c.blue) / 255.0, f64::from(c.alpha) / 255.0);
 }
 
-fn rounded(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, radius: f64) {
-    let r = radius.max(0.0).min(w / 2.0).min(h / 2.0);
+#[derive(Clone,Copy,Debug,PartialEq)]
+struct CornerRadii {tl:f64,tr:f64,br:f64,bl:f64}
+impl CornerRadii {
+    fn parse(style:&Options)->Self{
+        // Mako uses CSS-like 1..4 values in top-left, top-right,
+        // bottom-right, bottom-left order.
+        let raw=style.get("border-radius").map(String::as_str).unwrap_or("0");
+        let margins=crate::wayland::PopupMargins::parse_mako(raw)
+            .unwrap_or(crate::wayland::PopupMargins::uniform(0));
+        Self {
+            tl:f64::from(margins.top.max(0)),
+            tr:f64::from(margins.right.max(0)),
+            br:f64::from(margins.bottom.max(0)),
+            bl:f64::from(margins.left.max(0)),
+        }
+    }
+    fn inset(self,border:f64)->Self{
+        Self{
+            tl:(self.tl-border).max(0.0),
+            tr:(self.tr-border).max(0.0),
+            br:(self.br-border).max(0.0),
+            bl:(self.bl-border).max(0.0),
+        }
+    }
+    fn required_height(self,border:u32)->u32{
+        let corner=self.tl+self.bl;
+        let other=self.tr+self.br;
+        (corner.max(other) as u32).saturating_add(border.saturating_mul(2))
+    }
+}
+fn rounded(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, radius: CornerRadii) {
+    // Bound individual radii for a valid Cairo path even with large
+    // user-provided values and small notification rectangles.
+    let cap=(w/2.0).min(h/2.0).max(0.0);
+    let [tl,tr,br,bl]=[radius.tl,radius.tr,radius.br,radius.bl].map(|r|r.min(cap));
     cr.new_sub_path();
-    cr.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
-    cr.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
-    cr.arc(x + r, y + h - r, r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
-    cr.arc(x + r, y + r, r, std::f64::consts::PI, 3.0 * std::f64::consts::FRAC_PI_2);
+    cr.arc(x+w-tr,y+tr,tr,-std::f64::consts::FRAC_PI_2,0.0);
+    cr.arc(x+w-br,y+h-br,br,0.0,std::f64::consts::FRAC_PI_2);
+    cr.arc(x+bl,y+h-bl,bl,std::f64::consts::FRAC_PI_2,std::f64::consts::PI);
+    cr.arc(x+tl,y+tl,tl,std::f64::consts::PI,3.0*std::f64::consts::FRAC_PI_2);
     cr.close_path();
 }
 
@@ -153,9 +186,7 @@ fn measure_height_with_icon(
         else{text.max(icon_h)}
     }else{text};
     let mut actual=content.saturating_add(frame_padding.saturating_mul(2));
-    let radius=style.get("border-radius").and_then(|s|s.split(',').next())
-        .and_then(|s|s.parse::<u32>().ok()).unwrap_or(0);
-    actual=actual.max(radius.saturating_mul(2).saturating_add(border.saturating_mul(2)));
+    actual=actual.max(CornerRadii::parse(style).required_height(border));
     Ok(actual.min(cap).max(1))
 }
 
@@ -178,9 +209,7 @@ pub fn render_notification_group(
     }
     let (w, h) = (width as i32, height as i32);
     let border = integer_option(style, "border-size", 2).min(width/2).min(height/2) as f64;
-    let radius = style.get("border-radius")
-        .and_then(|s| s.split(',').next())
-        .and_then(|s| s.parse::<u32>().ok()).unwrap_or(0) as f64;
+    let radius=CornerRadii::parse(style);
     let padding = style.get("padding")
         .and_then(|s| s.split(',').next())
         .and_then(|s| s.parse::<u32>().ok()).unwrap_or(5) as f64;
@@ -198,7 +227,7 @@ pub fn render_notification_group(
     if border > 0.0 {
         set_color(&context, background);
         rounded(&context, border, border, f64::from(width) - 2.0*border,
-            f64::from(height) - 2.0*border, (radius-border).max(0.0));
+            f64::from(height) - 2.0*border, radius.inset(border));
         context.fill().map_err(|e| e.to_string())?;
     } else {
         // An unbordered rectangle is entirely the configured background.
@@ -225,7 +254,7 @@ pub fn render_notification_group(
         let inner_height=(f64::from(height)-2.0*border).max(0.0);
         context.save().map_err(|e|e.to_string())?;
         rounded(&context,border,border,inner_width,inner_height,
-            (radius-border).max(0.0));
+            radius.inset(border));
         context.clip();
         context.set_operator(operator);
         set_color(&context,color);
@@ -520,6 +549,35 @@ mod tests {
             body: "Line 2".into(), category: "success".into(),
             ..Request::default() });
         store.active().iter().find(|n| n.id == id).unwrap().clone()
+    }
+
+    #[test]
+    fn mako_directional_border_radii_draw_each_corner_independently() {
+        let note=fixture();
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","120"),("height","100"),("border-size","0"),
+            ("border-radius","24,0,0,0"),
+            ("background-color","#305747"),
+        ]{style.insert(key.into(),value.into());}
+        assert_eq!(CornerRadii::parse(&style),CornerRadii{
+            tl:24.0,tr:0.0,br:0.0,bl:0.0
+        });
+        let frame=render_notification(&note,&style).unwrap();
+        let pixel=|x:usize,y:usize|{
+            let i=y*frame.stride as usize+x*4;
+            [frame.pixels[i],frame.pixels[i+1],frame.pixels[i+2],frame.pixels[i+3]]
+        };
+        assert_eq!(pixel(0,0)[3],0,"rounded top-left corner transparent");
+        assert_eq!(pixel(frame.width as usize-1,0)[3],255,
+            "square top-right corner remains filled");
+        assert_eq!(pixel(0,frame.height as usize-1)[3],255,
+            "square bottom-left corner remains filled");
+        style.insert("border-radius".into(),"4,8,12,16".into());
+        assert_eq!(CornerRadii::parse(&style),CornerRadii{
+            tl:4.0,tr:8.0,br:12.0,bl:16.0
+        });
+        assert!(CornerRadii::parse(&style).required_height(2)>=24);
     }
 
     #[test]
