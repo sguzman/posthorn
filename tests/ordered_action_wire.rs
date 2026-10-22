@@ -3,6 +3,9 @@
 //! no user notification content or private workstation paths are involved.
 
 use serde::ser::{Serialize, SerializeMap, Serializer};
+use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
+use std::fmt;
+use zbus::zvariant::{DeserializeValue, OwnedValue};
 use zbus::zvariant::{serialized::Context, SerializeValue, Type, LE};
 use std::collections::HashMap;
 
@@ -17,6 +20,56 @@ impl Serialize for OrderedActionDict {
             map.serialize_entry(key,label)?;
         }
         map.end()
+    }
+}
+
+
+impl<'de> Deserialize<'de> for OrderedActionDict {
+    fn deserialize<D:Deserializer<'de>>(deserializer:D)->Result<Self,D::Error>{
+        struct EntriesVisitor;
+        impl<'de> Visitor<'de> for EntriesVisitor {
+            type Value=OrderedActionDict;
+            fn expecting(&self,f:&mut fmt::Formatter)->fmt::Result{
+                write!(f,"ordered D-Bus a{{ss}} dictionary entries")
+            }
+            fn visit_map<A:MapAccess<'de>>(self,mut map:A)->Result<Self::Value,A::Error>{
+                let mut result=Vec::new();
+                while let Some((key,label))=map.next_entry::<String,String>()?{
+                    result.push((key,label));
+                }
+                Ok(OrderedActionDict(result))
+            }
+        }
+        deserializer.deserialize_map(EntriesVisitor)
+    }
+}
+
+#[derive(Debug,Type)]
+#[zvariant(signature = "a{sv}")]
+struct OrderedEnvelopeRead{actions:OrderedActionDict}
+
+impl<'de> Deserialize<'de> for OrderedEnvelopeRead {
+    fn deserialize<D:Deserializer<'de>>(deserializer:D)->Result<Self,D::Error>{
+        struct RecordVisitor;
+        impl<'de> Visitor<'de> for RecordVisitor {
+            type Value=OrderedEnvelopeRead;
+            fn expecting(&self,f:&mut fmt::Formatter)->fmt::Result{
+                write!(f,"D-Bus a{{sv}} with ordered actions")
+            }
+            fn visit_map<A:MapAccess<'de>>(self,mut map:A)->Result<Self::Value,A::Error>{
+                let mut actions=OrderedActionDict(Vec::new());
+                while let Some(key)=map.next_key::<String>()?{
+                    if key=="actions" {
+                        let wrapped:DeserializeValue<'de,OrderedActionDict>=map.next_value()?;
+                        actions=wrapped.0;
+                    }else{
+                        let _:OwnedValue=map.next_value()?;
+                    }
+                }
+                Ok(OrderedEnvelopeRead{actions})
+            }
+        }
+        deserializer.deserialize_map(RecordVisitor)
     }
 }
 
@@ -71,4 +124,20 @@ fn nested_variant_keeps_original_action_order_under_a_sv(){
     let (decoded,_):(HashMap<String,zbus::zvariant::OwnedValue>,_)=
         encoded.deserialize().unwrap();
     assert!(decoded.contains_key("actions"));
+}
+
+#[test]
+fn custom_client_deserializer_keeps_duplicate_actions_inside_variants(){
+    let record=ActionEnvelope{actions:OrderedActionDict(vec![
+        ("zebra".into(),"First".into()),
+        ("alpha".into(),"Middle".into()),
+        ("zebra".into(),"Last".into()),
+    ])};
+    let bytes=zbus::zvariant::to_bytes(Context::new_dbus(LE,0),&record).unwrap();
+    let (decoded,_):(OrderedEnvelopeRead,_)=bytes.deserialize().unwrap();
+    assert_eq!(decoded.actions.0,vec![
+        ("zebra".into(),"First".into()),
+        ("alpha".into(),"Middle".into()),
+        ("zebra".into(),"Last".into()),
+    ]);
 }
