@@ -281,6 +281,27 @@ mod tests {
     }
 
     #[test]
+    fn mode_switch_rechecks_action_style_for_existing_notification() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "[category=warning]\nactions=0\n[mode=allow-actions]\nactions=TRUE\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request{
+            category:"warning".into(),
+            actions:vec![crate::notification::Action{
+                key:"default".into(),label:"Open".into(),
+            }],..Request::default()
+        });
+        assert!(!can_invoke_action(&runtime,id,"default").unwrap());
+        *runtime.modes().lock().unwrap()=vec!["allow-actions".into()];
+        runtime.reapply_active_grouping().unwrap();
+        assert!(can_invoke_action(&runtime,id,"default").unwrap(),
+            "enabled mode must allow action signals without replacing the note");
+        *runtime.modes().lock().unwrap()=vec!["default".into()];
+        runtime.reapply_active_grouping().unwrap();
+        assert!(!can_invoke_action(&runtime,id,"default").unwrap());
+    }
+
+    #[test]
     fn exposed_secondary_group_member_uses_its_own_input_binding() {
         let runtime=SharedRuntime::new(Config::parse(
             "group-by=app-name\nmax-visible=4\nwidth=120\nheight=40\n             [grouped]\ninvisible=0\n             [group-index=1]\non-button-left=none\n"
