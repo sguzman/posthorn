@@ -40,7 +40,7 @@ change how they call the Freedesktop Notification protocol. Until parity:
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
 It is not the workstation's default desktop notification service. The private desktop path
 renders and updates stacked Wayland popups, with basic mouse/touch bindings,
-with layer-shell configure/SHM attachment and success, failure, and warning screenshot colors, newest-first stacking and right-anchor placement verified under isolated headless Sway; it has not been visually exercised under Hyprland. Exact Mako Pango metrics,
+with layer-shell configure/SHM attachment and success, failure, and warning screenshot colors, newest-first stacking, right-anchor placement, and post-CloseNotification popup removal verified under isolated headless Sway; it has not been visually exercised under Hyprland. Exact Mako Pango metrics,
 advanced grouping, output hotplug, native-resolution HiDPI text, compositor-driven XDG activation and touch QA,
 exact reload semantics for existing active timeouts, and control formatting remain.
 Current parsing is a subset; POSIX vs Rust regex and many style options

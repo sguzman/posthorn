@@ -184,7 +184,7 @@
               "id": "T503",
               "emoji": "🧪",
               "name": "End-to-end on Hyprland, notify-send and Edge activation",
-              "progress": 37
+              "progress": 39
             },
             {
               "id": "T504",
@@ -199,7 +199,7 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 84
+          "progress": 85
         },
         {
           "emoji": "🎨",

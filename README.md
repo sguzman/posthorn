@@ -99,7 +99,7 @@ isolated headless Sway compositor (wlroots). It launches the private
 `org.posthorn.Development` desktop service, calls Freedesktop `Notify`,
 observes layer-shell `configure` and `wl_surface.attach` protocol traffic,
 then uses wlroots screencopy to capture the headless output and verify
-that all three success/failure/warning category colors actually appear in newest-first order near the configured right anchor. This proves
+that all three success/failure/warning category colors actually appear in newest-first order near the configured right anchor. After a Freedesktop CloseNotification, a second screenshot must show the closed category gone while other category popups remain. This proves
 basic compositor rendering and category color propagation, **not** pixel-perfect
 Hyprland parity, fractional HiDPI, or production service ownership. The installed Mako daemon is never
 involved.
