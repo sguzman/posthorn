@@ -681,6 +681,29 @@ async fn chromium_urgency_variants_are_preserved_over_real_dbus()
 }
 
 #[tokio::test]
+async fn raw_signed_progress_hint_preserved_across_replacements_over_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::default()).await?;
+    let dest=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let send=|replaces_id:u32,value:Option<i32>|(
+        "progress-wire",replaces_id,"","Status","",Vec::<String>::new(),
+        value.map(|v|[("value".into(),OwnedValue::from(v))]
+            .into_iter().collect::<HashMap<String,OwnedValue>>())
+            .unwrap_or_default(),-1i32
+    );
+    let id:u32=dest.call("Notify",&send(0,Some(170))).await?;
+    assert_eq!(runtime.store.lock().unwrap().active()[0].progress,170);
+    let replaced:u32=dest.call("Notify",&send(id,Some(-10))).await?;
+    assert_eq!(replaced,id);
+    assert_eq!(runtime.store.lock().unwrap().active()[0].progress,-10);
+    let replaced:u32=dest.call("Notify",&send(id,None)).await?;
+    assert_eq!(replaced,id);
+    assert_eq!(runtime.store.lock().unwrap().active()[0].progress,-1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn dbus_inline_image_and_progress_reach_rendered_pixels()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {

@@ -796,6 +796,16 @@ mod tests {
         note.progress=0;
         let empty=render_notification(&note,&style).unwrap();
         assert_eq!(&empty.pixels[first..first+4],&[0,0,0,255]);
+        note.progress=-9;
+        let negative=render_notification(&note,&style).unwrap();
+        assert_eq!(negative.pixels,empty.pixels,
+            "Mako clamps negative progress to zero width");
+        note.progress=100;
+        let full=render_notification(&note,&style).unwrap();
+        note.progress=170;
+        let too_large=render_notification(&note,&style).unwrap();
+        assert_eq!(too_large.pixels,full.pixels,
+            "Mako clamps excessive progress width at 100%");
     }
 
     #[test]
