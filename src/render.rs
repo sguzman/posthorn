@@ -8,7 +8,7 @@ use pangocairo::{cairo, pango};
 use crate::config::Options;
 use crate::format::{decode_format, escape_markup, render_notification_format, FormatNotification};
 use crate::notification::Notification;
-use crate::raster::Color;
+use crate::raster::{Color,ProgressBlend,parse_progress_color_mako};
 use crate::icons::{IconPixels,load_note_icon,load_note_icon_scaled};
 
 #[derive(Clone, Debug)]
@@ -304,17 +304,12 @@ pub fn render_notification_group_scaled(
     if note.progress>0 {
         let configured=style.get("progress-color").map(String::as_str)
             .unwrap_or("#5588AAFF");
-        let tokens:Vec<_>=configured.split_whitespace().collect();
-        let (operator,color)=match tokens.as_slice() {
-            [mode,color] if mode.eq_ignore_ascii_case("source")=>
-                (cairo::Operator::Source,*color),
-            [mode,color] if mode.eq_ignore_ascii_case("over")=>
-                (cairo::Operator::Over,*color),
-            [color]=>(cairo::Operator::Over,*color),
-            _=>return Err("invalid progress-color setting".into()),
-        };
-        let color=Color::parse_mako(color)
+        let (blend,color)=parse_progress_color_mako(configured)
             .map_err(|e|format!("progress-color: {e}"))?;
+        let operator=match blend{
+            ProgressBlend::Over=>cairo::Operator::Over,
+            ProgressBlend::Source=>cairo::Operator::Source,
+        };
         let inner_width=(f64::from(width)-2.0*border).max(0.0);
         let inner_height=(f64::from(height)-2.0*border).max(0.0);
         context.save().map_err(|e|e.to_string())?;

@@ -30,6 +30,27 @@ impl Color {
     }
 }
 
+/// The only Cairo operators accepted by Mako's progress-color parser.
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+pub enum ProgressBlend { Over, Source }
+
+/// Mirrors Mako 1.11 parse_mako_color(): tokenize on ASCII space/tab only,
+/// accept case-insensitive "over" and "source", and ignore later tokens.
+pub fn parse_progress_color_mako(raw:&str)->Result<(ProgressBlend,Color),&'static str>{
+    let mut tokens=raw.split([' ','\t']).filter(|token|!token.is_empty());
+    let first=tokens.next().ok_or("missing progress color")?;
+    let (blend,color)=if first.starts_with('#'){
+        (ProgressBlend::Over,first)
+    }else if first.eq_ignore_ascii_case("over"){
+        (ProgressBlend::Over,tokens.next().ok_or("missing progress color")?)
+    }else if first.eq_ignore_ascii_case("source"){
+        (ProgressBlend::Source,tokens.next().ok_or("missing progress color")?)
+    }else{
+        return Err("invalid progress color operator");
+    };
+    Ok((blend,Color::parse_mako(color)?))
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RectangleStyle {
     pub background: Color,
@@ -105,6 +126,21 @@ mod tests {
         assert_eq!(Color::parse_mako("#715536").unwrap().blue,0x36);
         assert_eq!(Color::parse_mako("#gggggg"),Err("invalid hex digit"));
         assert!(Color::parse_mako("305747").is_err());
+    }
+
+    #[test]
+    fn progress_color_matches_mako_strtok_and_ignores_extra_tokens(){
+        let c=Color::parse_mako("#112233").unwrap();
+        assert_eq!(parse_progress_color_mako(" \tOVER \t#112233 trailing"),
+            Ok((ProgressBlend::Over,c)));
+        assert_eq!(parse_progress_color_mako("SoUrCe #112233 trailing"),
+            Ok((ProgressBlend::Source,c)));
+        assert_eq!(parse_progress_color_mako("#112233 extra"),
+            Ok((ProgressBlend::Over,c)));
+        assert!(parse_progress_color_mako("source").is_err());
+        assert!(parse_progress_color_mako("multiply #112233").is_err());
+        assert!(parse_progress_color_mako("source\u{a0}#112233").is_err());
+        assert!(parse_progress_color_mako("").is_err());
     }
 
     #[test]

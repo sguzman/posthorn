@@ -487,14 +487,7 @@ fn validate_option(key: &str, value: &str) -> Result<(), String> {
             if (raw.len()==6 || raw.len()==8) && raw.chars().all(|x|x.is_ascii_hexdigit()) { return Ok(()); }
         }
     } else if key=="progress-color" {
-        let words:Vec<_>=value.split_whitespace().collect();
-        let color=match words.as_slice(){
-            [color]=>Some(*color),
-            [mode,color] if mode.eq_ignore_ascii_case("over")
-                || mode.eq_ignore_ascii_case("source")=>Some(*color),
-            _=>None,
-        };
-        if color.is_some_and(|c|crate::raster::Color::parse_mako(c).is_ok()){
+        if crate::raster::parse_progress_color_mako(value).is_ok(){
             return Ok(());
         }
     }
@@ -558,11 +551,12 @@ mod tests {
 
     #[test]
     fn progress_color_parses_mako_source_and_over_syntax() {
-        for value in ["#5588AAFF","source #123456","OVER #55667788"] {
+        for value in ["#5588AAFF","source #123456","OVER #55667788",
+            "source #FFFFFF trailing"," #112233 extra"] {
             assert!(Config::parse(&format!("progress-color={value}\n")).is_ok());
         }
         for value in ["purple","source","multiply #112233",
-            "over #11223","source #FFFFFF trailing"] {
+            "over #11223","source\u{a0}#FFFFFF"] {
             assert!(Config::parse(&format!("progress-color={value}\n")).is_err());
         }
     }
