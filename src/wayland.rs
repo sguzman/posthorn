@@ -107,8 +107,8 @@ impl PopupMargins {
         // C Mako uses strtok_r: repeated separators produce no token,
         // and parse_directional deliberately inspects only four values.
         let values:Vec<i32>=raw.split(',').filter(|v|!v.is_empty())
-            .take(4).map(|v|v.trim_start_matches([' ','\t']).parse())
-            .collect::<Result<_,_>>().ok()?;
+            .take(4).map(crate::config::parse_signed_mako)
+            .collect::<Option<Vec<_>>>()?;
         match values.as_slice() {
             [a]=>Some(Self::uniform(*a)),
             [v,h]=>Some(Self{top:*v,right:*h,bottom:*v,left:*h}),
@@ -1000,6 +1000,12 @@ mod tests {
     #[test]
     fn directional_margins_match_mako_one_to_four_value_parsing() {
         assert_eq!(PopupMargins::parse_mako("10"),Some(PopupMargins::uniform(10)));
+        assert_eq!(PopupMargins::parse_mako(" 10,\t20"),Some(PopupMargins{
+            top:10,right:20,bottom:10,left:20
+        }));
+        assert_eq!(PopupMargins::parse_mako("1,\u{b}2"),Some(PopupMargins{
+            top:1,right:2,bottom:1,left:2
+        }));
         assert_eq!(PopupMargins::parse_mako("10,20"),
             Some(PopupMargins{top:10,right:20,bottom:10,left:20}));
         assert_eq!(PopupMargins::parse_mako("10,20,30"),
