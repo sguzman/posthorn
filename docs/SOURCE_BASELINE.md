@@ -38,15 +38,16 @@ change how they call the Freedesktop Notification protocol. Until parity:
 ## Known action dictionary limitation
 
 Mako 1.11 writes action entries in internal linked-list order, including repeated
-keys, into its `a{ss}` control D-Bus field. Posthorn currently uses zvariant's
-ordered `Dict` abstraction, backed by a `BTreeMap`: distinct keys are sorted
-and duplicate keys collapse to the final label. Its in-memory notification
-actions remain ordered, and action invocation still sees that list, but the
-control `ListNotifications`/`ListHistory` and `posthornctl menu` output are
-not exact Mako parity for nonalphabetic order or repeated keys. D-Bus itself
-describes duplicate keys in a dictionary as malformed, even though Mako emits
-them. Do not claim this corner case completed until a tested representation
-preserves Mako's wire semantics.
+keys, into its `a{ss}` control D-Bus field. Posthorn's `ListNotifications`
+and `ListHistory` methods now use a custom ordered serializer; an isolated
+byte-level proof has passed CI, and private D-Bus method-level regression
+coverage is being established. The `Notifications` property still passes
+through zvariant's `Value`/BTreeMap representation, which sorts entries and
+collapses duplicate keys. `posthornctl menu` and CLI list/history decoding
+also still lose the original order for those cases. The D-Bus specification
+discourages duplicate dictionary keys even though Mako emits them. This
+limited exception remains open until the property and CLI paths are tested
+against Mako's raw wire behavior.
 
 ## Explicit nonclaims
 

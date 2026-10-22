@@ -344,8 +344,12 @@ impl MakoControl {
     }
 
     #[zbus(property, name = "Notifications")]
-    fn notifications(&self) -> zbus::fdo::Result<Vec<OrderedNotificationWire>> {
-        self.ordered_snapshot(false)
+    fn notifications(&self) -> zbus::fdo::Result<Vec<HashMap<String, OwnedValue>>> {
+        // zbus's #[interface(property)] requires Into<Value>, which
+        // materializes the nested dictionary and collapses duplicate keys.
+        // Custom ordered serialization works for the two read methods;
+        // property fidelity remains an explicit compatibility gap.
+        self.snapshot(false)
     }
 
     #[zbus(name = "Reload")]
