@@ -14,25 +14,34 @@ impl fmt::Display for FormatError {
 }
 impl std::error::Error for FormatError {}
 
-/// Convert config-file `\\n` to a newline, preserve literal `\\\\`, reject
-/// unknown `%` substitutions as Mako does.
+/// Decode Mako's format grammar: \n becomes a newline and \\ a literal
+/// backslash. Unrecognized backslash escapes retain the backslash. Mako's
+/// parse_format accepts a terminal '%' and a terminal backslash, too.
 pub fn decode_format(value: &str) -> Result<String, FormatError> {
     let mut output = String::new();
     let mut chars = value.chars();
     while let Some(ch) = chars.next() {
         match ch {
-            '%' => {
-                let next = chars.next().ok_or_else(|| FormatError("trailing %".into()))?;
-                if !SPECIFIERS.contains(next) {
-                    return Err(FormatError(format!("unknown format specifier %{next}")));
+            '%' => match chars.next() {
+                Some(next) => {
+                    if !SPECIFIERS.contains(next) {
+                        return Err(FormatError(format!("unknown format specifier %{next}")));
+                    }
+                    output.push('%');
+                    output.push(next);
                 }
-                output.push('%'); output.push(next);
-            }
+                // Upstream parse_format sees the terminating NUL through
+                // strchr(), then format_text emits the final '%' literally.
+                None => output.push('%'),
+            },
             '\\' => match chars.next() {
                 Some('n') => output.push('\n'),
                 Some('\\') => output.push('\\'),
-                Some(other) => output.push(other),
-                None => return Err(FormatError("trailing backslash".into())),
+                Some(other) => {
+                    output.push('\\');
+                    output.push(other);
+                }
+                None => output.push('\\'),
             },
             _ => output.push(ch),
         }
@@ -110,7 +119,11 @@ mod tests {
     fn recognizes_mako_placeholders_and_escapes() {
         assert_eq!(decode_format("<b>%s</b>\\n%b\\\\%%").unwrap(),"<b>%s</b>\n%b\\%%");
         assert!(decode_format("%z").is_err());
-        assert!(decode_format("%").is_err());
+        assert_eq!(decode_format("%").unwrap(),"%");
+        assert_eq!(decode_format(r"prefix\q\s").unwrap(),r"prefix\q\s");
+        assert_eq!(decode_format(r"ending\").unwrap(),r"ending\");
+        assert_eq!(decode_format(r"\%").unwrap(),r"\%");
+        assert_eq!(decode_format("a\\nb").unwrap(),"a\nb");
     }
     #[test]
     fn escapes_untrusted_summary_but_retains_intentional_template_markup() {
