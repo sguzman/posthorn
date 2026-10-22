@@ -366,7 +366,11 @@ mod tests {
         assert_eq!(&pixels.pixels[idx..idx+4],&[0x47,0x57,0x30,0xff]);
         runtime.close(a,CloseReason::Dismissed,false).unwrap();
         let after=snapshot_frame(&runtime).unwrap().unwrap();
-        assert_eq!(after.height,first_height+8);
+        let remaining=runtime.store.lock().unwrap().active()[0].clone();
+        let style=style_for_note(&runtime,&remaining,&["default".into()]);
+        let measured=crate::render::measure_notification_height(&remaining,&style).unwrap();
+        assert_eq!(after.height,measured+8,
+            "the remaining popup keeps both its top and trailing bottom margin");
     }
 
     #[test]
