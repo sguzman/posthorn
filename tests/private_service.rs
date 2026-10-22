@@ -297,6 +297,40 @@ async fn invalid_known_hint_variant_does_not_replace_notification()
 }
 
 #[tokio::test]
+async fn absent_urgency_is_wire_unknown_and_not_selector_normal()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let config=Config::parse(
+        "width=180\n[urgency=normal]\nwidth=375\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let dest=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let unknown:u32=dest.call("Notify",&(
+        "urgency-missing",0u32,"","No hint","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let normal:u32=dest.call("Notify",&(
+        "urgency-normal",0u32,"","Normal","",Vec::<String>::new(),
+        [("urgency".into(),OwnedValue::from(1u8))]
+            .into_iter().collect::<HashMap<String,OwnedValue>>(),-1i32
+    )).await?;
+    let notes=runtime.store.lock().unwrap();
+    let unknown_note=notes.active().iter().find(|n|n.id==unknown).unwrap().clone();
+    let normal_note=notes.active().iter().find(|n|n.id==normal).unwrap().clone();
+    drop(notes);
+    let modes=["default".into()];
+    assert_eq!(posthorn::desktop::style_for_note(&runtime,&unknown_note,&modes)["width"],"180");
+    assert_eq!(posthorn::desktop::style_for_note(&runtime,&normal_note,&modes)["width"],"375");
+    let listed:Vec<HashMap<String,OwnedValue>>=ctl.call("ListNotifications",&()).await?;
+    let unknown_record=listed.iter().find(|record|
+        record.get("id").and_then(|x|u32::try_from(x).ok())==Some(unknown)
+    ).ok_or("unknown urgency record missing")?;
+    assert_eq!(u8::try_from(unknown_record.get("urgency").unwrap())?,255);
+    Ok(())
+}
+
+#[tokio::test]
 async fn chromium_urgency_variants_are_preserved_over_real_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
