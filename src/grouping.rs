@@ -110,34 +110,59 @@ pub fn group_ordered<'a>(
     groups
 }
 
-/// Group a display-order snapshot using each leading notification's resolved
-/// group-by style rather than assuming one global grouping specification.
-/// This is a projection: it does not mutate notification IDs or active order.
+/// Replay grouping passes in notification arrival order, as Mako does on
+/// each Notify. A newest-first or oldest-first visual sort does *not* change
+/// the order in which per-notification group-by rules are executed.
+///
+/// This remains a projection of currently active IDs: a replaced ID keeps
+/// its original chronological identity, and full replacement-time regrouping
+/// is pending. The active store is never mutated by rendering.
 pub fn group_ordered_scoped<'a>(
     runtime:&crate::runtime::SharedRuntime,
     notifications:impl IntoIterator<Item=&'a Notification>,
     modes:&[String],
 )->Result<Vec<Group>,String>{
     let notes:Vec<&Notification>=notifications.into_iter().collect();
-    let mut claimed=HashSet::new();
-    let mut groups=Vec::new();
-    for leader in &notes {
-        if claimed.contains(&leader.id){continue;}
-        let style=crate::desktop::style_for_note_index(runtime,leader,modes,-1);
+    let by_id:HashMap<u32,&Notification>=notes.iter().map(|n|(n.id,*n)).collect();
+    let mut order:Vec<u32>=notes.iter().map(|n|n.id).collect();
+    let mut group_index:HashMap<u32,i32>=order.iter().map(|id|(*id,-1)).collect();
+    // Fresh Mako notification IDs increase monotonically. Replay the
+    // arrival-triggered grouping passes, not the final display order.
+    let mut arrivals=notes.clone();
+    arrivals.sort_by_key(|n|n.id);
+    for arriving in arrivals {
+        let style=crate::desktop::style_for_note_index(runtime,arriving,modes,-1);
         let spec=GroupSpec::parse(style.get("group-by")
             .map(String::as_str).unwrap_or("none"))?;
-        let mut ids=vec![leader.id];
-        claimed.insert(leader.id);
-        if !spec.disabled {
-            let all=group_ordered(notes.iter().copied(),&spec);
-            if let Some(matching)=all.into_iter()
-                .find(|g|g.ids.contains(&leader.id)) {
-                for id in matching.ids {
-                    if claimed.insert(id){ids.push(id);}
-                }
-            }
+        if spec.disabled{continue;}
+        let wanted=key(arriving,&spec);
+        let matched:Vec<u32>=order.iter().copied().filter(|id|{
+            by_id.get(id).is_some_and(|note|
+                note.id<=arriving.id && key(note,&spec)==wanted)
+        }).collect();
+        if matched.is_empty(){continue;}
+        let selected:HashSet<u32>=matched.iter().copied().collect();
+        let first=order.iter().position(|id|selected.contains(id))
+            .ok_or("group projection lost an active notification")?;
+        // Upstream group_notifications extracts all matched members from
+        // the ordered list and inserts them at their first previous position.
+        order.retain(|id|!selected.contains(id));
+        order.splice(first..first,matched.iter().copied());
+        for (index,id) in matched.iter().enumerate() {
+            group_index.insert(*id,if matched.len()==1{-1}else{index as i32});
         }
-        groups.push(Group{ids});
+    }
+    let mut groups:Vec<Group>=Vec::new();
+    for id in order {
+        let index=group_index.get(&id).copied().unwrap_or(-1);
+        if index>0 && groups.last().is_some_and(|g|
+            g.ids.len()==index as usize
+                && g.ids.first().is_some_and(|head|
+                    group_index.get(head)==Some(&0))) {
+            groups.last_mut().expect("checked last group").ids.push(id);
+        } else {
+            groups.push(Group{ids:vec![id]});
+        }
     }
     Ok(groups)
 }
@@ -271,6 +296,43 @@ mod tests {
         assert_eq!(active_group_index(&runtime,warning).unwrap(),-1);
         assert_eq!(active_group_index(&runtime,regular).unwrap(),-1);
         assert_eq!(active_group_index(&runtime,unrelated).unwrap(),-1);
+    }
+
+    #[test]
+    fn scoped_arrival_grouping_is_independent_of_time_sort_direction() {
+        for ascending in [true,false] {
+            let runtime=crate::runtime::SharedRuntime::new(
+                crate::config::Config::parse(&format!(
+                    "sort={}time\\ngroup-by=none\\n[category=warning]\\ngroup-by=app-name\\n",
+                    if ascending{"+"}else{"-"}
+                ).replace("\\n","\n")).unwrap()
+            );
+            let old=runtime.store.lock().unwrap().push(request("same","success"));
+            let middle=runtime.store.lock().unwrap().push(request("other","success"));
+            let warning=runtime.store.lock().unwrap().push(request("same","warning"));
+            let active=runtime.store.lock().unwrap();
+            let groups=group_ordered_scoped(&runtime,active.active(),
+                &["default".into()]).unwrap();
+            assert_eq!(groups.len(),2);
+            assert_eq!(groups[0].ids,
+                if ascending{vec![old,warning]}else{vec![warning,old]});
+            assert_eq!(groups[1].ids,vec![middle]);
+        }
+    }
+
+    #[test]
+    fn scoped_rules_only_see_notifications_that_have_already_arrived() {
+        let runtime=crate::runtime::SharedRuntime::new(
+            crate::config::Config::parse(
+                "sort=+time\ngroup-by=none\n[category=warning]\ngroup-by=app-name\n"
+            ).unwrap()
+        );
+        let warning=runtime.store.lock().unwrap().push(request("same","warning"));
+        let later=runtime.store.lock().unwrap().push(request("same","success"));
+        let groups=group_ordered_scoped(&runtime,
+            runtime.store.lock().unwrap().active().iter().cloned().collect::<Vec<_>>().iter(),
+            &["default".into()]).unwrap();
+        assert_eq!(groups,vec![Group{ids:vec![warning]},Group{ids:vec![later]}]);
     }
 
     #[test]
