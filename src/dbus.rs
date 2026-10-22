@@ -161,20 +161,35 @@ impl FreedesktopNotifications {
 impl FreedesktopNotifications {
     #[zbus(name = "GetCapabilities")]
     fn get_capabilities(&self) -> Vec<String> {
-        // Mako advertises capabilities from its root style, not from
-        // currently visible category rules and not as a fixed list.
-        let config=self.runtime.as_ref().map(SharedRuntime::config);
-        let style=config.as_ref().map(|c|&c.global);
-        let option=|key:&str|style.and_then(|s|s.get(key)).map(String::as_str);
-        let enabled=|key:&str,default:bool|option(key)
-            .map(|v|v=="1"||v.eq_ignore_ascii_case("true")).unwrap_or(default);
-        let mut capabilities=Vec::new();
-        if option("format").unwrap_or("<b>%s</b>\\n%b").contains("%b"){
-            capabilities.push("body");
+        // Upstream Mako creates config.superstyle by collecting the union
+        // of root, built-in and user criteria styles. Its advertised features
+        // describe what ANY notification may render, not just the root.
+        let config=self.runtime.as_ref().map(SharedRuntime::config)
+            .unwrap_or_else(||std::sync::Arc::new(crate::config::Config::default()));
+        let styles=std::iter::once(&config.global)
+            .chain(config.rules.iter().map(|rule|&rule.options));
+        let mut body=false;
+        let (mut markup,mut actions,mut icons)=(false,false,false);
+        for style in styles {
+            if style.get("format").is_some_and(|f|f.contains("%b")){body=true;}
+            for (key,target) in [
+                ("markup",&mut markup),("actions",&mut actions),("icons",&mut icons)
+            ]{
+                let enabled=style.get(key)
+                    .is_some_and(|v|v=="1"||v.eq_ignore_ascii_case("true"));
+                // Root style supplies the defaults; omitted scoped options
+                // must not turn an already-true capability off.
+                *target |= enabled;
+            }
         }
-        if enabled("markup",true){capabilities.push("body-markup");}
-        if enabled("actions",true){capabilities.push("actions");}
-        if enabled("icons",true){capabilities.push("icon-static");}
+        // Mako's built-in root icons default to true, including when this
+        // parser has no explicit "icons" entry in its defaults map.
+        if !config.global.contains_key("icons"){icons=true;}
+        let mut capabilities=Vec::new();
+        if body{capabilities.push("body");}
+        if markup{capabilities.push("body-markup");}
+        if actions{capabilities.push("actions");}
+        if icons{capabilities.push("icon-static");}
         capabilities.extend(["x-canonical-private-synchronous","x-dunst-stack-tag"]);
         capabilities.into_iter().map(str::to_string).collect()
     }
@@ -285,14 +300,22 @@ mod tests {
     }
 
     #[test]
-    fn capabilities_track_mako_root_style_not_category_rules() {
+    fn capabilities_are_superset_of_all_mako_criteria_styles() {
         let service=FreedesktopNotifications::with_runtime(
             SharedRuntime::new(crate::config::Config::parse(
                 "format=%s\nmarkup=0\nactions=0\nicons=0\n                 [category=success]\nmarkup=1\nactions=1\nicons=1\n"
             ).unwrap())
         );
         assert_eq!(service.get_capabilities(),
-            ["x-canonical-private-synchronous","x-dunst-stack-tag"]);
+            ["body-markup","actions","icon-static",
+             "x-canonical-private-synchronous","x-dunst-stack-tag"]);
+        let scoped_body=FreedesktopNotifications::with_runtime(
+            SharedRuntime::new(crate::config::Config::parse(
+                "format=%s\\nmarkup=0\\nactions=0\\nicons=0\\n[category=success]\\nformat=%b\\n"
+            ).unwrap())
+        );
+        assert_eq!(scoped_body.get_capabilities(),
+            ["body","x-canonical-private-synchronous","x-dunst-stack-tag"]);
         let default=FreedesktopNotifications::with_runtime(
             SharedRuntime::new(crate::config::Config::default())
         );
