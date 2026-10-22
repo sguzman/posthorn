@@ -174,7 +174,9 @@ pub fn decode_icon(path:&Path)->Option<IconPixels>{
 }
 
 pub fn load_note_icon(note:&Notification,style:&Options)->Option<IconPixels>{
-    if style.get("icons").is_some_and(|v|v=="0"||v=="false"){return None;}
+    if style.get("icons").is_some_and(|v|v=="0"||v.eq_ignore_ascii_case("false")){
+        return None;
+    }
     // image-data has higher precedence than image-path and app_icon.
     if let Some(image)=&note.image_data {return Some(image.clone());}
     if note.app_icon.is_empty(){return None;}
@@ -205,6 +207,23 @@ mod tests {
         assert!(decode_raw_image(1,1,3,true,8,4,&[0;4]).is_none());
         assert!(decode_raw_image(1,1,4,true,16,4,&[0;4]).is_none());
         assert!(decode_raw_image(1,1,4,true,8,3,&[0;4]).is_none());
+    }
+
+    #[test]
+    fn uppercase_false_disables_inline_and_file_icons() {
+        let mut store=crate::notification::NotificationStore::new(0);
+        store.push(crate::notification::Request{
+            app_icon:"/nonexistent/picture.png".into(),
+            image_data:Some(IconPixels{
+                width:1,height:1,bgra:vec![10,20,30,255],
+            }),
+            ..crate::notification::Request::default()
+        });
+        let note=store.active().front().unwrap();
+        let style=crate::config::Config::parse("icons=FALSE\n").unwrap().global;
+        assert!(load_note_icon(note,&style).is_none());
+        let enabled=crate::config::Config::parse("icons=TRUE\n").unwrap().global;
+        assert_eq!(load_note_icon(note,&enabled).unwrap().width,1);
     }
 
     #[test]

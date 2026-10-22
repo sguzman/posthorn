@@ -168,7 +168,8 @@ pub fn displayable_groups(runtime:&SharedRuntime)->io::Result<usize>{
         if let Some(id)=group.ids.first(){
             if let Some(n)=store.active().iter().find(|n|&n.id==id){
                 let style=style_for_note_group(runtime,n,&modes,group.ids.len());
-                if !style.get("invisible").is_some_and(|v|v=="1"||v=="true"){
+                if !style.get("invisible").is_some_and(|v|
+                    v=="1"||v.eq_ignore_ascii_case("true")){
                     count+=1;
                 }
             }
@@ -612,6 +613,18 @@ mod tests {
         let two=snapshot_frame_scaled(&runtime,2).unwrap().unwrap();
         assert_eq!((two.width,two.height),(one.width*2,one.height*2));
         assert!(snapshot_frame_scaled(&runtime,0).is_err());
+    }
+
+    #[test]
+    fn uppercase_invisible_rule_excludes_displayable_groups() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "[category=silent]\ninvisible=TRUE\n"
+        ).unwrap());
+        runtime.store.lock().unwrap().push(Request{
+            category:"silent".into(),..Request::default()
+        });
+        assert_eq!(displayable_groups(&runtime).unwrap(),0);
+        assert!(visible_members_indexed(&runtime).unwrap().is_empty());
     }
 
     #[test]
