@@ -382,7 +382,7 @@ pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error +
                 print!("{}",modes_text(&modes));
             } else {
                 let replacement=update_modes(modes,&edit);
-                let _: ()=proxy.call("SetModes",&(replacement,)).await?;
+                let _: ()=proxy.call("SetModes",&(replacement.clone(),)).await?;
                 print!("{}",modes_text(&replacement));
             }
         }
