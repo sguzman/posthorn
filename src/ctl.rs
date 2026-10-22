@@ -11,6 +11,39 @@ use zbus::{zvariant::{OwnedValue,Value}, Connection, Proxy};
 use crate::control::{CONTROL_INTERFACE, CONTROL_PATH};
 use crate::service::PRIVATE_BUS_NAME;
 
+/// CLI usage mirrors makoctl 1.11, but Posthorn still targets a private
+/// development D-Bus service; it is not a production daemon replacement.
+pub const USAGE: &str = r#"Usage: posthornctl <command> [options...]
+
+Commands:
+  dismiss [-n id]                Dismiss the notification with the
+                                 given id, or the last notification
+                                 if none is given
+          [-a|--all]             Dismiss all notifications
+          [-g|--group]           Dismiss all the notifications
+                                 in the last notification's group
+          [-h|--no-history]      Dismiss w/o adding to history
+  restore                        Restore the most recently expired
+                                 notification from the history buffer
+  invoke [-n id] [action]        Invoke an action on the notification
+                                 with the given id, or the last
+                                 notification if none is given
+  menu [-n id] <prog> [arg ...]  Use <prog> [args ...] to select one
+                                 action to be invoked on the notification
+                                 with the given id, or the last
+                                 notification if none is given
+  list [-j]                      List notifications
+  history [-j]                   List history
+  reload                         Reload the configuration file
+  mode                           List modes
+  mode [-a mode]... [-r mode]... Add/remove modes
+  mode [-t mode]...              Toggle modes (add if not present, remove if present)
+  mode -s mode...                Set modes
+  help                           Show this help
+
+Development builds connect only to org.posthorn.Development.
+"#;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
     Dismiss { id: u32, all: bool, group: bool, history: bool },
@@ -36,7 +69,7 @@ fn parse_mako_id(raw:&str)->Result<u32,&'static str>{
 pub fn parse_command(args: &[String]) -> Result<Command, String> {
     let Some((command, rest)) = args.split_first() else {
         // makoctl with no command prints usage on stderr and exits nonzero.
-        return Err("Usage: posthornctl <command> [options...] (try 'help')".into());
+        return Err(USAGE.into());
     };
     match command.as_str() {
         "help" | "-h" | "--help" => Ok(Command::Help),
@@ -400,7 +433,7 @@ pub fn notification_text(map:&HashMap<String,OwnedValue>)->String{
 pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if command == Command::Help {
         // Upstream makoctl prints its usage to stderr, not stdout.
-        eprintln!("posthornctl (development, private D-Bus only)\n          dismiss [-n id] [-a|-g] [-h] | restore | invoke [-n id] [action]\n          list [-j] | history [-j] | menu [-n id] -- program [args...] | mode [-s|-a|-r|-t mode] | reload");
+        eprint!("{USAGE}");
         return Ok(());
     }
     let conn=Connection::session().await?;
@@ -465,8 +498,9 @@ mod tests {
     fn v(args:&[&str])->Vec<String> {args.iter().map(|s|s.to_string()).collect()}
     #[test]
     fn bare_makoctl_usage_is_failure_but_explicit_help_succeeds(){
-        assert!(parse_command(&[]).is_err(),
-            "makoctl with no command prints usage and returns exit code 1");
+        assert_eq!(parse_command(&[]).unwrap_err(),USAGE);
+        assert!(USAGE.contains("dismiss [-n id]"));
+        assert!(USAGE.contains("mode -s mode..."));
         for args in [vec!["help"],vec!["-h"],vec!["--help"]]{
             let words=args.into_iter().map(str::to_owned).collect::<Vec<_>>();
             assert_eq!(parse_command(&words).unwrap(),Command::Help);
