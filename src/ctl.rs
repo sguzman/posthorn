@@ -127,10 +127,20 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                         i+=1;
                         let mode=rest.get(i).ok_or_else(||
                             format!("missing value after {flag}"))?;
-                        if mode.starts_with('-'){
-                            return Err(format!("missing value after {flag}"));
-                        }
+                        // GNU getopt accepts a required option argument even
+                        // when its first character is '-'. Do not mistake a
+                        // valid mode name for another flag.
                         edits.push((op,mode.clone()));
+                        i+=1;
+                    }
+                    other if other.len()>2
+                        && other.starts_with('-')
+                        && matches!(other.as_bytes()[1],b'a'|b'r'|b't')=>
+                    {
+                        // getopt("a:r:t:s") permits compact -aquiet,
+                        // -rquiet and -tquiet forms as well.
+                        let op=other.as_bytes()[1] as char;
+                        edits.push((op,other[2..].to_owned()));
                         i+=1;
                     }
                     other if other.starts_with('-')=>
@@ -461,7 +471,11 @@ mod tests {
             Command::Modes{edit:vec![('s',"".into())]});
         assert!(parse_command(&v(&["mode","quiet"])).is_err());
         assert!(parse_command(&v(&["mode","-a"])).is_err());
-        assert!(parse_command(&v(&["mode","-a","-t"])).is_err());
+        assert_eq!(parse_command(&v(&["mode","-a","-t"])).unwrap(),
+            Command::Modes{edit:vec![('a',"-t".into())]});
+        assert_eq!(parse_command(&v(&["mode","-aquiet","-t-quiet"])).unwrap(),
+            Command::Modes{edit:vec![('a',"quiet".into()),('t',"-quiet".into())]});
+        assert!(parse_command(&v(&["mode","-aquiet","-s"])).is_err());
         assert!(parse_command(&v(&["mode","-s","-a","quiet"])).is_err());
         assert!(parse_command(&v(&["mode","-r","default","-s","quiet"])).is_err());
         assert!(parse_command(&v(&["mode","-t","quiet","-s"])).is_err());
