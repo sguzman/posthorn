@@ -6,7 +6,7 @@
 //! bindings; actual Hyprland activation behavior remains unverified.
 
 use std::io;
-use crate::grouping::active_group_ids;
+use crate::grouping::{active_group_ids,group_ordered,GroupSpec};
 use crate::hooks::NotifyBinding;
 use crate::notification::{CloseReason,Notification};
 use crate::runtime::SharedRuntime;
