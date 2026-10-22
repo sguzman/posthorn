@@ -44,26 +44,30 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
             } else { Err("usage: posthornctl list|history [-j]".into()) }
         }
         "menu" => {
-            let mut id=0;
+            // Mako uses GNU getopt("n:"), which permutes options ahead of
+            // positional program arguments until "--". -n after the
+            // program name still selects the notification.
+            let mut id=0u32;
+            let mut program=Vec::new();
+            let mut options=true;
             let mut i=0;
             while i<rest.len() {
-                if rest[i]=="-n" {
+                let arg=rest[i].as_str();
+                if options && arg=="--" {
+                    options=false;
+                } else if options && arg=="-n" {
                     i+=1;
                     id=rest.get(i).ok_or("missing notification ID")?
                         .parse().map_err(|_|"invalid notification ID")?;
-                    i+=1;
-                } else if let Some(value)=rest[i].strip_prefix("-n") {
-                    if value.is_empty() { break; }
-                    id=value.parse().map_err(|_|"invalid notification ID")?;
-                    i+=1;
-                } else if rest[i]=="--" {
-                    i+=1;
-                    break;
+                } else if options && arg.len()>2 && arg.starts_with("-n") {
+                    id=arg[2..].parse().map_err(|_|"invalid notification ID")?;
+                } else if options && arg.starts_with('-') && arg.len()>1 {
+                    return Err(format!("unknown menu option {arg}"));
                 } else {
-                    break;
+                    program.push(rest[i].clone());
                 }
+                i+=1;
             }
-            let program=rest[i..].to_vec();
             if program.is_empty(){return Err("missing menu command".into());}
             Ok(Command::Menu{id,program})
         }
@@ -548,6 +552,14 @@ mod tests {
         assert!(parse_command(&v(&["menu"])).is_err());
         assert_eq!(parse_command(&v(&["menu","-n34","cat"])).unwrap(),
             Command::Menu{id:34,program:vec!["cat".into()]});
+        // GNU getopt permutes -n options before the positional menu argv.
+        assert_eq!(parse_command(&v(&["menu","fuzzel","-n","27","--","-d"])).unwrap(),
+            Command::Menu{id:27,program:vec!["fuzzel".into(),"-d".into()]});
+        assert_eq!(parse_command(&v(&["menu","fuzzel","--","-n","27"])).unwrap(),
+            Command::Menu{id:0,program:vec!["fuzzel".into(),"-n".into(),"27".into()]});
+        assert_eq!(parse_command(&v(&["menu","fuzzel","-n27"])).unwrap(),
+            Command::Menu{id:27,program:vec!["fuzzel".into()]});
+        assert!(parse_command(&v(&["menu","fuzzel","-x"])).is_err());
     }
 
     #[test]
