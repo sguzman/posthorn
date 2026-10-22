@@ -5,7 +5,7 @@
 //! semantics (group dismissal or reload) are not implemented. The MVP gate is
 //! closed until the full interface and renderer are integrated.
 
-use std::collections::HashMap;
+use std::collections::{HashMap,HashSet};
 use std::sync::{Arc, Mutex};
 
 use zbus::{interface, zvariant::{OwnedValue, Value}, Connection};
@@ -99,8 +99,13 @@ impl MakoControl {
     }
 
     fn set_modes_impl(&self, modes: Vec<String>) -> zbus::fdo::Result<()> {
-        let mut active = self.modes.lock().map_err(|_| internal_error())?;
-        *active = modes;
+        // Mako's set_modes drops duplicates but preserves the first
+        // occurrence and allows an explicitly empty mode list.
+        let mut seen=HashSet::new();
+        let unique=modes.into_iter().filter(|m|seen.insert(m.clone()))
+            .collect();
+        let mut active=self.modes.lock().map_err(|_|internal_error())?;
+        *active=unique;
         Ok(())
     }
 
@@ -374,6 +379,19 @@ mod tests {
         let opts=[("group".into(),OwnedValue::from(true))].into();
         assert!(control.dismiss_impl(&opts).is_err());
         assert_eq!(runtime.store.lock().unwrap().active().len(),1);
+    }
+
+    #[test]
+    fn duplicate_mode_names_are_discarded_in_first_occurrence_order() {
+        let control=fixture();
+        control.set_modes_impl(vec![
+            "quiet".into(),"custom".into(),"quiet".into(),
+            "default".into(),"custom".into(),
+        ]).unwrap();
+        assert_eq!(control.list_modes().unwrap(),
+            vec!["quiet","custom","default"]);
+        control.set_modes_impl(Vec::new()).unwrap();
+        assert!(control.list_modes().unwrap().is_empty());
     }
 
     #[test]
