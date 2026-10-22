@@ -265,8 +265,10 @@ mod tests {
             vec![regular,warning]);
         assert_eq!(active_group_ids(&runtime,regular).unwrap(),vec![regular]);
         assert_eq!(active_group_ids(&runtime,unrelated).unwrap(),vec![unrelated]);
-        assert_eq!(active_group_index(&runtime,warning).unwrap(),1);
-        assert_eq!(active_group_index(&runtime,regular).unwrap(),1);
+        // Warning arrived before the ungrouped ordinary note; inserting
+        // an ordinary note does not retroactively run warning's grouping.
+        assert_eq!(active_group_index(&runtime,warning).unwrap(),-1);
+        assert_eq!(active_group_index(&runtime,regular).unwrap(),-1);
         assert_eq!(active_group_index(&runtime,unrelated).unwrap(),-1);
     }
 
