@@ -662,7 +662,10 @@ mod tests {
         let image=compose_mako_stack(&[red,blue],&margins,StackAlignment::Left)
             .unwrap().unwrap();
         assert_eq!((image.width,image.height),(2,4));
-        assert_eq!(&image.pixels[0..4],&[255,0,0,255]);
+        assert_eq!(&image.pixels[0..4],&[0,0,255,255],
+            "the second popup begins on row 1, leaving row 0 red");
+        assert_eq!(&image.pixels[image.stride as usize..image.stride as usize+4],
+            &[255,0,0,255],"the later drawn popup covers the overlap");
         assert_eq!(&image.pixels[image.stride as usize*3..image.stride as usize*3+4],
             &[255,0,0,255]);
     }
