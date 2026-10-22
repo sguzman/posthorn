@@ -104,4 +104,25 @@ if ! kill -0 "$posthorn_pid" 2>/dev/null; then
   exit 1
 fi
 busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s introspect org.posthorn.Development /fr/emersion/Mako >/dev/null
-echo 'Headless Sway + private Posthorn D-Bus + live layer-shell popup: OK'
+
+# A second message proves the notification category reaches the renderer.
+# 1 is the a{sv} length; the variant is (key='category', type=s, value=success).
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
+  /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
+  'susssasa{sv}i' 'Posthorn screenshot' 0 '' 'Success' '' 0 1 'category' 's' 'success' 7000 >/dev/null
+sleep 0.5
+grim "$root/popup.png"
+/usr/bin/python3 - "$root/popup.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+
+pixels = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+expected = (48, 87, 71)  # Sanitized Mako fixture category=success / #305747.
+assert pixels[expected] >= 300, (
+    "No success-category popup color visible in headless Sway screenshot; "
+    f"found {pixels[expected]} expected-color pixels"
+)
+print(f"Visual color smoke: {pixels[expected]} successful category pixels")
+PY
+echo 'Headless Sway + private D-Bus + layer-shell popup + screenshot color: OK'
