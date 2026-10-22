@@ -331,6 +331,73 @@ async fn removing_group_trigger_regroups_survivors_over_private_bus()
 }
 
 #[tokio::test]
+async fn id_and_tag_replacements_have_distinct_group_lifecycle_over_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let config=Config::parse(
+        "group-by=none\n[category=warning]\ngroup-by=app-name\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let ordinary:HashMap<String,OwnedValue>=HashMap::new();
+    let warning:HashMap<String,OwnedValue>=[
+        ("category".into(),
+         OwnedValue::try_from(zbus::zvariant::Value::from("warning"))?)
+    ].into();
+    let direct:u32=desktop.call("Notify",&(
+        "direct-app",0u32,"","Old","",Vec::<String>::new(),
+        ordinary.clone(),-1i32
+    )).await?;
+    let _:u32=desktop.call("Notify",&(
+        "direct-app",0u32,"","Grouping warning","",Vec::<String>::new(),
+        warning.clone(),-1i32
+    )).await?;
+    assert_eq!(runtime.store.lock().unwrap().active()
+        .iter().find(|n|n.id==direct).unwrap().group_index,1);
+    let replaced:u32=desktop.call("Notify",&(
+        "direct-app",direct,"","ID reset","",Vec::<String>::new(),
+        ordinary.clone(),-1i32
+    )).await?;
+    assert_eq!(replaced,direct);
+    let direct_note=runtime.store.lock().unwrap().active()
+        .iter().find(|n|n.id==direct).unwrap().clone();
+    assert_eq!(direct_note.group_index,1,
+        "reset_notification on an existing ID retains its group index");
+    assert_eq!(direct_note.summary,"ID reset");
+
+    let tagged:HashMap<String,OwnedValue>=[(
+        "x-dunst-stack-tag".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("progress"))?
+    )].into();
+    let old:u32=desktop.call("Notify",&(
+        "tag-app",0u32,"","Old tag","",Vec::<String>::new(),
+        tagged.clone(),-1i32
+    )).await?;
+    let _:u32=desktop.call("Notify",&(
+        "tag-app",0u32,"","Grouping warning","",Vec::<String>::new(),
+        warning,-1i32
+    )).await?;
+    assert_eq!(runtime.store.lock().unwrap().active()
+        .iter().find(|n|n.id==old).unwrap().group_index,1);
+    let tag_replacement:u32=desktop.call("Notify",&(
+        "tag-app",0u32,"","New tag object","",Vec::<String>::new(),
+        tagged,-1i32
+    )).await?;
+    assert_eq!(tag_replacement,old);
+    let tag_note=runtime.store.lock().unwrap().active()
+        .iter().find(|n|n.id==old).unwrap().clone();
+    assert_eq!((tag_note.group_index,tag_note.group_count),(-1,1),
+        "tag replacement is a fresh notification occupying the old slot");
+    assert_eq!(tag_note.summary,"New tag object");
+    let listed:Vec<HashMap<String,OwnedValue>>=
+        ctl.call("ListNotifications",&()).await?;
+    assert_eq!(listed.iter().filter(|m|
+        m.get("id").and_then(|v|u32::try_from(v).ok())==Some(old)).count(),1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn grouped_history_follows_arrival_and_dismissal_over_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
