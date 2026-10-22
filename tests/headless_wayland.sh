@@ -53,7 +53,7 @@ default-timeout=7000
 background-color=#305747
 EOF
 
-./target/debug/posthorn --experimental-private-desktop "$root/mako.conf" >"$root/posthorn.log" 2>&1 &
+WAYLAND_DEBUG=client ./target/debug/posthorn --experimental-private-desktop "$root/mako.conf" >"$root/posthorn.log" 2>&1 &
 posthorn_pid=$!
 
 for _ in {1..60}; do
@@ -79,7 +79,24 @@ result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.pos
   /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
   'susssasa{sv}i' 'Posthorn Wayland smoke' 0 '' 'Hello' 'A real Wayland popup' 0 0 7000)"
 [[ "$result" == u\ * ]] || { echo "Invalid Notify result: $result"; exit 1; }
-sleep 0.5
+# Observe real Wayland protocol traffic, not merely D-Bus success
+# or an alive process. The compositor must configure the layer surface
+# and Posthorn must attach a real shared-memory notification buffer.
+painted=0
+for _ in {1..30}; do
+  if grep -Eq 'zwlr_layer_surface_v1@.*configure' "$root/posthorn.log" &&
+     grep -Eq 'wl_surface@.*attach' "$root/posthorn.log"; then
+    painted=1
+    break
+  fi
+  sleep 0.2
+done
+if [[ "$painted" != 1 ]]; then
+  echo 'No configured layer-shell popup with attached buffer'
+  cat "$root/posthorn.log"
+  cat "$root/sway.log"
+  exit 1
+fi
 if ! kill -0 "$posthorn_pid" 2>/dev/null; then
   echo 'Posthorn terminated while rendering the notification'
   cat "$root/posthorn.log"
