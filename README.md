@@ -20,7 +20,7 @@ and Clear All, channels, SQLite persistence, and a general local message broker.
 > internal popup margins, directional padding and corner radii, HiDPI theme-aware icon selection and icon border-radius clipping, shrink-wrapped Cairo/Pango text and icons, configured
 > post-grouping on-notify hooks, basic mouse/touch bindings, XDG activation
 > tokens, sender action invocation even when actions=0, and category-aware history,
-> scoped group-by projection, grouped count formatting, overrideable secondary-member visibility, accurate overflow placeholders, and partial posthornctl.
+> scoped group-by projection, grouped count formatting, overrideable secondary-member visibility, accurate overflow placeholders, Mako's unknown urgency state, and partial posthornctl.
 > **It does not claim the desktop notifications D-Bus name.** Inline
 > Freedesktop image-data hints, Chromium numeric urgency variants, typed known-hint validation, progress fills and transactional config reload
 > are implemented in the private development daemon. Exact Pango layout,
