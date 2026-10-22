@@ -1008,7 +1008,8 @@ mod tests {
             Some(PopupMargins{top:1,right:2,bottom:3,left:4}));
         assert_eq!(PopupMargins::parse_mako("-2"),
             Some(PopupMargins::uniform(-2)));
-        assert!(PopupMargins::parse_mako("1,2,3,4,5").is_none());
+        assert_eq!(PopupMargins::parse_mako("1,2,3,4,5"),
+            Some(PopupMargins{top:1,right:2,bottom:3,left:4}));
     }
 
     #[test]
