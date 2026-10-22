@@ -364,7 +364,7 @@ mod tests {
     #[test]
     fn activation_token_requests_follow_live_action_style() {
         let runtime=SharedRuntime::new(Config::parse(
-            "[category=warning]\\nactions=FALSE\\n"
+            "[category=warning]\nactions=FALSE\n"
         ).unwrap());
         let disabled=runtime.store.lock().unwrap().push(Request{
             category:"warning".into(),
