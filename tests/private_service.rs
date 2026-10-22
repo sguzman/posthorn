@@ -235,6 +235,35 @@ async fn scoped_group_dismissal_uses_selected_notification_criteria_over_dbus()
 }
 
 #[tokio::test]
+async fn grouped_history_follows_arrival_and_dismissal_over_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let cfg=Config::parse("group-by=app-name\n[grouped]\nhistory=0\n")?;
+    let (conn,_runtime)=open_private_service(cfg).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let first:u32=desktop.call("Notify",&(
+        "sender-app",0u32,"","First","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let second:u32=desktop.call("Notify",&(
+        "sender-app",0u32,"","Second","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let opts:HashMap<String,OwnedValue>=[("id".into(),OwnedValue::from(second))].into();
+    let _:()=ctl.call("DismissNotifications",&(opts,)).await?;
+    let history:Vec<HashMap<String,OwnedValue>>=ctl.call("ListHistory",&()).await?;
+    assert!(history.is_empty(),
+        "grouped notification must honor its scoped history=0");
+    let opts:HashMap<String,OwnedValue>=[("id".into(),OwnedValue::from(first))].into();
+    let _:()=ctl.call("DismissNotifications",&(opts,)).await?;
+    let history:Vec<HashMap<String,OwnedValue>>=ctl.call("ListHistory",&()).await?;
+    assert_eq!(history.len(),1);
+    assert_eq!(u32::try_from(history[0].get("id").unwrap())?,first);
+    Ok(())
+}
+
+#[tokio::test]
 async fn mode_dbus_reapplies_history_of_existing_notifications()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
