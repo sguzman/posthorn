@@ -175,6 +175,66 @@ async fn makoctl_mode_set_positional_arguments_reach_private_bus()
 }
 
 #[tokio::test]
+async fn scoped_group_dismissal_uses_selected_notification_criteria_over_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::hooks::NotifyBinding;
+    use posthorn::input::dispatch_binding;
+
+    let config=Config::parse(
+        "group-by=none\n[category=warning]\ngroup-by=app-name\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let notify=|app:&'static str, category:&'static str| {
+        let mut hints=HashMap::<String,OwnedValue>::new();
+        hints.insert("category".into(),OwnedValue::try_from(zbus::zvariant::Value::from(category)).unwrap());
+        (app,hints)
+    };
+    let (app,hints)=notify("sample-app","success");
+    let ordinary:u32=desktop.call("Notify",&(
+        app,0u32,"","ordinary","",Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let (app,hints)=notify("independent","success");
+    let unrelated:u32=desktop.call("Notify",&(
+        app,0u32,"","independent","",Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let (app,hints)=notify("sample-app","warning");
+    let warning:u32=desktop.call("Notify",&(
+        app,0u32,"","warning","",Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let opts:HashMap<String,OwnedValue>=[
+        ("group".into(),OwnedValue::from(true)),
+    ].into();
+    let _:()=ctl.call("DismissNotifications",&(opts,)).await?;
+    let active:Vec<HashMap<String,OwnedValue>>=
+        ctl.call("ListNotifications",&()).await?;
+    assert_eq!(active.len(),1);
+    assert_eq!(u32::try_from(active[0].get("id").unwrap())?,unrelated);
+    let archived:Vec<HashMap<String,OwnedValue>>=
+        ctl.call("ListHistory",&()).await?;
+    assert!(archived.iter().any(|m|u32::try_from(m.get("id").unwrap()).ok()==Some(ordinary)));
+    assert!(archived.iter().any(|m|u32::try_from(m.get("id").unwrap()).ok()==Some(warning)));
+
+    let (app,hints)=notify("sample-app","success");
+    let ordinary:u32=desktop.call("Notify",&(
+        app,0u32,"","ordinary again","",Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let (app,hints)=notify("sample-app","warning");
+    let warning:u32=desktop.call("Notify",&(
+        app,0u32,"","warning again","",Vec::<String>::new(),hints,-1i32
+    )).await?;
+    dispatch_binding(&conn,&runtime,warning,NotifyBinding::DismissGroup,None).await?;
+    let active:Vec<HashMap<String,OwnedValue>>=
+        ctl.call("ListNotifications",&()).await?;
+    assert_eq!(active.len(),1);
+    assert_eq!(u32::try_from(active[0].get("id").unwrap())?,unrelated);
+    assert!(runtime.store.lock().unwrap().active().iter().all(|n|n.id!=ordinary));
+    Ok(())
+}
+
+#[tokio::test]
 async fn control_reload_swaps_styles_and_preserves_last_good_file()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
