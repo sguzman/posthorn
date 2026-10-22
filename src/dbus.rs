@@ -158,6 +158,17 @@ impl FreedesktopNotifications {
         let id = self.apply_notify(
             app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout,
         )?;
+        if let Some(runtime)=&self.runtime {
+            let binding=runtime.on_notify_binding(id)
+                .map_err(|e|zbus::fdo::Error::Failed(e.into()))?;
+            // Exec is already launched by SharedRuntime::schedule, and None
+            // is deliberately inert. All other Mako bindings run once here.
+            if !matches!(binding,crate::hooks::NotifyBinding::None |
+                crate::hooks::NotifyBinding::Exec(_)){
+                crate::input::dispatch_binding(conn,runtime,id,binding,None).await
+                    .map_err(|e|zbus::fdo::Error::Failed(e.to_string()))?;
+            }
+        }
         crate::signals::invalidate(conn, "Notifications").await
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         Ok(id)

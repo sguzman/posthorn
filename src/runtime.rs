@@ -143,6 +143,30 @@ impl SharedRuntime {
         Ok(())
     }
 
+    /// Select Mako's on-notify binding after group placement. Returning this
+    /// from the runtime leaves all D-Bus signal emission on the async thread.
+    pub fn on_notify_binding(&self,id:u32)->Result<NotifyBinding,&'static str>{
+        let config=self.config();
+        let (note,index)={
+            let store=self.store.lock().map_err(|_|"notification state lock poisoned")?;
+            let note=store.active().iter().find(|n|n.id==id)
+                .ok_or("notification is not active")?.clone();
+            let raw=config.global.get("group-by")
+                .map(String::as_str).unwrap_or("none");
+            let spec=crate::grouping::GroupSpec::parse(raw)
+                .map_err(|_|"invalid runtime group-by")?;
+            let index=crate::grouping::group_ordered(store.active(),&spec).iter()
+                .find(|group|group.ids.contains(&id))
+                .and_then(|group|group.index_of(id)).unwrap_or(-1);
+            (note,index)
+        };
+        let modes=self.modes.lock().map_err(|_|"mode state lock poisoned")?
+            .clone();
+        let style=crate::desktop::style_for_note_index(self,&note,&modes,index);
+        let raw=style.get("on-notify").map(String::as_str).unwrap_or("none");
+        NotifyBinding::parse(raw).map_err(|_|"invalid on-notify binding")
+    }
+
     pub fn close(&self, id: u32, reason: CloseReason, save_history: bool)
         -> Result<bool, &'static str>
     {

@@ -114,8 +114,18 @@ pub async fn dispatch_click_with_activation(
     activation_token:Option<&str>,
 ) -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
-    let config=runtime.config();
     let Some((id,binding))=hit_test(runtime,click)? else {return Ok(())};
+    dispatch_binding(conn,runtime,id,binding,activation_token).await
+}
+
+/// Execute one already-matched Mako binding. This is shared between pointer
+/// clicks and the on-notify hook, keeping close reasons and action signals
+/// identical in both paths.
+pub async fn dispatch_binding(
+    conn:&Connection,runtime:&SharedRuntime,id:u32,binding:NotifyBinding,
+    activation_token:Option<&str>,
+)->Result<(),Box<dyn std::error::Error+Send+Sync>>{
+    let config=runtime.config();
     match binding {
         NotifyBinding::None=>{}
         NotifyBinding::Exec(cmd)=>NotifyBinding::Exec(cmd).run_exec(id)?,
