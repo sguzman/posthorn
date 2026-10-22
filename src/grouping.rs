@@ -120,7 +120,8 @@ pub fn active_group_ids(
     let (notifications,modes)={
         let store=runtime.store.lock()
             .map_err(|_|"notification store lock poisoned")?;
-        let modes=runtime.modes().lock()
+        let mode_state=runtime.modes();
+        let modes=mode_state.lock()
             .map_err(|_|"mode state lock poisoned")?;
         (store.active().iter().cloned().collect::<Vec<_>>(),modes.clone())
     };
