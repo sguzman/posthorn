@@ -57,7 +57,7 @@ EOF
 posthorn_pid=$!
 
 for _ in {1..60}; do
-  if busctl --user --timeout=2s introspect org.posthorn.Development /org/freedesktop/Notifications >/dev/null 2>&1; then
+  if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=2s introspect org.posthorn.Development /org/freedesktop/Notifications >/dev/null 2>&1; then
     break
   fi
   if ! kill -0 "$posthorn_pid" 2>/dev/null; then
@@ -68,8 +68,14 @@ for _ in {1..60}; do
   fi
   sleep 0.2
 done
+if ! busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=2s introspect org.posthorn.Development /org/freedesktop/Notifications >/dev/null 2>&1; then
+  echo 'Private D-Bus notification service did not become available'
+  cat "$root/posthorn.log"
+  cat "$root/sway.log"
+  exit 1
+fi
 
-result="$(busctl --user --timeout=5s call org.posthorn.Development \
+result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
   /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
   'susssasa{sv}i' 'Posthorn Wayland smoke' 0 '' 'Hello' 'A real Wayland popup' 0 0 7000)"
 [[ "$result" == u\ * ]] || { echo "Invalid Notify result: $result"; exit 1; }
@@ -80,5 +86,5 @@ if ! kill -0 "$posthorn_pid" 2>/dev/null; then
   cat "$root/sway.log"
   exit 1
 fi
-busctl --user --timeout=5s introspect org.posthorn.Development /fr/emersion/Mako >/dev/null
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s introspect org.posthorn.Development /fr/emersion/Mako >/dev/null
 echo 'Headless Sway + private Posthorn D-Bus + live layer-shell popup: OK'
