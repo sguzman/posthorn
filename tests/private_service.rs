@@ -335,3 +335,40 @@ async fn grouped_on_notify_exec_runs_after_grouping_but_not_on_restore()
     assert!(!marker.exists(),"restoring must not launch the grouped hook again");
     Ok(())
 }
+
+#[tokio::test]
+async fn quiet_mode_silences_category_sound_hooks_over_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let dir=tempfile::tempdir()?;
+    let marker=dir.path().join("success-audio");
+    let cfg=Config::parse(&format!(
+        "[category=success]\nbackground-color=#305747\n         on-notify=exec touch '{}'\n         [mode=quiet]\non-notify=none\n",
+        marker.display()
+    ))?;
+    let (conn,runtime)=open_private_service(cfg).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let hints=||->Result<HashMap<String,OwnedValue>,zbus::zvariant::Error>{
+        Ok([("category".to_owned(),
+            OwnedValue::try_from(zbus::zvariant::Value::from("success"))?)].into())
+    };
+    *runtime.modes().lock().unwrap()=vec!["quiet".into()];
+    let _:u32=desktop.call("Notify",&(
+        "audio-fixture",0u32,"","Quiet success","",
+        Vec::<String>::new(),hints()?,-1i32
+    )).await?;
+    assert!(!marker.exists());
+    assert_eq!(runtime.store.lock().unwrap().active().len(),1);
+    *runtime.modes().lock().unwrap()=vec!["default".into()];
+    let _:u32=desktop.call("Notify",&(
+        "audio-fixture",0u32,"","Audible success","",
+        Vec::<String>::new(),hints()?,-1i32
+    )).await?;
+    tokio::time::timeout(std::time::Duration::from_secs(3),async{
+        while !marker.exists(){
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),2);
+    Ok(())
+}
