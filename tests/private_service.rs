@@ -187,8 +187,14 @@ async fn control_reload_swaps_styles_and_preserves_last_good_file()
     let initial=runtime.config();
     assert_eq!(initial.global["background-color"],"#305747");
     std::fs::write(&path,"background-color=#nothex\n")?;
-    let failed:Result<(),_>=ctl.call("Reload",&()).await;
-    assert!(failed.is_err(),"invalid reload must be rejected");
+    let failed:Result<(),zbus::Error>=ctl.call("Reload",&()).await;
+    match failed {
+        Err(zbus::Error::MethodError(name,message,_))=>{
+            assert_eq!(name.as_str(),"fr.emersion.Mako.InvalidConfig");
+            assert_eq!(message.as_deref(),Some("Unable to parse configuration file"));
+        }
+        other=>panic!("invalid reload used the wrong D-Bus error: {other:?}"),
+    }
     assert_eq!(runtime.config().global["background-color"],"#305747");
     assert_eq!(runtime.revision(),0);
     std::fs::write(&path,"background-color=#684148\nmax-history=2\n")?;

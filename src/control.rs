@@ -18,6 +18,17 @@ use crate::grouping::{GroupSpec, group_ordered};
 pub const CONTROL_INTERFACE: &str = "fr.emersion.Mako";
 pub const CONTROL_PATH: &str = "/fr/emersion/Mako";
 
+/// Upstream Mako v1.11 uses a named control-interface error for a rejected
+/// reload, not org.freedesktop.DBus.Error.Failed. A failure must leave the
+/// currently installed configuration intact.
+#[derive(Debug, zbus::DBusError)]
+#[zbus(prefix = "fr.emersion.Mako")]
+pub enum ReloadError {
+    #[zbus(error)]
+    ZBus(zbus::Error),
+    InvalidConfig(String),
+}
+
 #[derive(Clone, Debug)]
 pub struct MakoControl {
     store: Arc<Mutex<NotificationStore>>,
@@ -282,13 +293,14 @@ impl MakoControl {
     #[zbus(name = "Reload")]
     async fn reload(
         &self, #[zbus(connection)] conn:&Connection
-    ) -> zbus::fdo::Result<()> {
-        let runtime=self.runtime.as_ref().ok_or_else(||zbus::fdo::Error::NotSupported(
-            "no file-backed runtime is attached".into()
-        ))?;
-        runtime.reload().map_err(|e|zbus::fdo::Error::Failed(e))?;
-        crate::signals::invalidate(conn,"Notifications").await
-            .map_err(|e|zbus::fdo::Error::Failed(e.to_string()))?;
+    ) -> Result<(),ReloadError> {
+        let runtime=self.runtime.as_ref().ok_or_else(||
+            ReloadError::InvalidConfig("Unable to parse configuration file".into())
+        )?;
+        runtime.reload().map_err(|_|
+            ReloadError::InvalidConfig("Unable to parse configuration file".into())
+        )?;
+        crate::signals::invalidate(conn,"Notifications").await?;
         Ok(())
     }
 }
