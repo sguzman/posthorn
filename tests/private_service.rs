@@ -584,7 +584,7 @@ async fn quiet_mode_silences_category_sound_hooks_over_dbus()
 }
 
 #[tokio::test]
-async fn capabilities_reflect_mako_root_style_over_dbus()
+async fn capabilities_union_root_and_scoped_styles_over_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
     let cfg=Config::parse(
@@ -594,9 +594,9 @@ async fn capabilities_reflect_mako_root_style_over_dbus()
     let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
     let capabilities:Vec<String>=desktop.call("GetCapabilities",&()).await?;
     assert_eq!(capabilities,vec![
-        "x-canonical-private-synchronous",
-        "x-dunst-stack-tag",
-    ],"category-level overrides must not change the advertised root capabilities");
+        "body-markup","actions","icon-static",
+        "x-canonical-private-synchronous","x-dunst-stack-tag",
+    ],"Mako's superstyle includes capabilities enabled by scoped rules");
     Ok(())
 }
 
