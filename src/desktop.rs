@@ -359,14 +359,14 @@ mod tests {
         let pixels=snapshot_frame(&runtime).unwrap().unwrap();
         assert_eq!(pixels.width,108);
         assert!(pixels.height<88);
-        let first_height=(pixels.height-8)/2;
+        let first_height=(pixels.height-12)/2;
         let idx=((4+first_height/2) as usize*pixels.stride as usize)+94*4;
         assert_eq!(&pixels.pixels[idx..idx+4],&[0x48,0x41,0x68,0xff]);
         let idx=((8+first_height+first_height/2) as usize*pixels.stride as usize)+94*4;
         assert_eq!(&pixels.pixels[idx..idx+4],&[0x47,0x57,0x30,0xff]);
         runtime.close(a,CloseReason::Dismissed,false).unwrap();
         let after=snapshot_frame(&runtime).unwrap().unwrap();
-        assert_eq!(after.height,first_height+4);
+        assert_eq!(after.height,first_height+8);
     }
 
     #[test]
