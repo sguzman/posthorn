@@ -29,6 +29,7 @@ default = []
 dbus-integration = []
 
 [dev-dependencies]
+futures-util = "0.3"
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "time"] }
 
 [lints.rust]

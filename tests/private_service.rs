@@ -202,3 +202,46 @@ async fn dbus_inline_image_and_progress_reach_rendered_pixels()
         "the D-Bus value hint must render a green progress fill");
     Ok(())
 }
+
+#[tokio::test]
+async fn click_activation_signal_precedes_action_and_close()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use futures_util::StreamExt;
+    use posthorn::input::dispatch_click_with_activation;
+    use posthorn::wayland::PointerClick;
+    let config=Config::parse(
+        "width=160\nheight=90\nmargin=6\n         on-button-left=invoke-default-action\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let mut signals=desktop.receive_all_signals().await?;
+    let id:u32=desktop.call("Notify",&(
+        "token-fixture",0u32,"","Action","Visible",
+        vec!["default".to_string(),"Open".to_string()],
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    dispatch_click_with_activation(
+        &conn,&runtime,PointerClick{x:30.0,y:20.0,button:272,serial:42},
+        Some("fixture-compositor-token")
+    ).await?;
+    let mut names=Vec::new();
+    for _ in 0..3 {
+        let message=tokio::time::timeout(
+            std::time::Duration::from_secs(3),signals.next()
+        ).await?.ok_or("expected next notification signal")?;
+        let name=message.header().member().ok_or("signal without a member")?
+            .as_str().to_string();
+        if name=="ActivationToken" {
+            let (target,token):(u32,String)=message.body().deserialize()?;
+            assert_eq!(target,id);
+            assert_eq!(token,"fixture-compositor-token");
+        }
+        names.push(name);
+    }
+    assert_eq!(names,vec![
+        "ActivationToken","ActionInvoked","NotificationClosed",
+    ]);
+    assert!(runtime.store.lock().unwrap().active().is_empty());
+    Ok(())
+}
