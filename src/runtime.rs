@@ -218,7 +218,17 @@ impl SharedRuntime {
         let mut policies=self.history_policies.lock()
             .map_err(|_| "history policy lock poisoned")?;
         let history_enabled=policies.get(&id).copied().unwrap_or(true);
-        let closed=store.close(id, reason, save_history, history_enabled).is_some();
+        let removed=store.close(id, reason, save_history, history_enabled);
+        if let Some(note)=removed.as_ref(){
+            let modes=self.modes.lock()
+                .map_err(|_|"mode state lock poisoned")?.clone();
+            let style=crate::desktop::style_for_note_index(self,note,&modes,-1);
+            let spec=crate::grouping::GroupSpec::parse(
+                style.get("group-by").map(String::as_str).unwrap_or("none")
+            ).map_err(|_|"invalid group-by style")?;
+            store.regroup_after_close(note,&spec);
+        }
+        let closed=removed.is_some();
         if closed {
             self.timers.lock().map_err(|_| "expiration scheduler lock poisoned")?
                 .cancel(id);
@@ -246,7 +256,14 @@ impl SharedRuntime {
         let mut closed=Vec::new();
         for id in expired {
             let allow_history=policies.remove(&id).unwrap_or(true);
-            if store.close(id,CloseReason::Expired,true,allow_history).is_some() {
+            if let Some(note)=store.close(id,CloseReason::Expired,true,allow_history) {
+                let modes=self.modes.lock()
+                    .map_err(|_|"mode state lock poisoned")?.clone();
+                let style=crate::desktop::style_for_note_index(self,&note,&modes,-1);
+                let spec=crate::grouping::GroupSpec::parse(
+                    style.get("group-by").map(String::as_str).unwrap_or("none")
+                ).map_err(|_|"invalid group-by style")?;
+                store.regroup_after_close(&note,&spec);
                 closed.push(id);
             }
         }

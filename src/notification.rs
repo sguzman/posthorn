@@ -195,12 +195,27 @@ impl NotificationStore {
     pub fn regroup_new_notification(
         &mut self,target_id:u32,spec:&crate::grouping::GroupSpec
     ){
+        if let Some(target)=self.active.iter().find(|n|n.id==target_id).cloned(){
+            self.regroup_matching(&target,spec);
+        }
+    }
+
+    /// Closing a Mako group member re-runs the removed notification's
+    /// grouping criteria against the remaining active list.
+    pub fn regroup_after_close(
+        &mut self,closed:&Notification,spec:&crate::grouping::GroupSpec
+    ){
+        self.regroup_matching(closed,spec);
+    }
+
+    fn regroup_matching(
+        &mut self,target:&Notification,spec:&crate::grouping::GroupSpec
+    ){
         if spec.disabled{return;}
-        let matches=crate::grouping::group_ordered(self.active.iter(),spec)
-            .into_iter().find(|g|g.ids.contains(&target_id))
-            .map(|g|g.ids).unwrap_or_default();
-        if matches.len()<2{return;}
-        let selected:HashSet<u32>=matches.into_iter().collect();
+        let selected:HashSet<u32>=self.active.iter()
+            .filter(|note|crate::grouping::same_group(note,target,spec))
+            .map(|note|note.id).collect();
+        if selected.len()<2{return;}
         let mut matched=VecDeque::new();
         let mut others=VecDeque::new();
         let mut before_first=0usize;
@@ -278,6 +293,23 @@ mod tests {
             assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
                 if time_ascending{vec![a,c,b]}else{vec![c,a,b]});
         }
+    }
+
+    #[test]
+    fn closing_notification_regroups_matching_remaining_members() {
+        let mut store=NotificationStore::new(8);
+        let req=|app|Request{app_name:app.into(),..Request::default()};
+        let first=store.push(req("same"));
+        let middle=store.push(req("other"));
+        let third=store.push(req("same"));
+        let latest=store.push(req("same"));
+        assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![latest,third,middle,first]);
+        let closed=store.close(latest,CloseReason::Dismissed,false,true).unwrap();
+        store.regroup_after_close(&closed,
+            &crate::grouping::GroupSpec::parse("app-name").unwrap());
+        assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![third,first,middle]);
     }
 
     #[test]

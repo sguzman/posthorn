@@ -67,6 +67,11 @@ impl Group {
     }
 }
 
+/// Match the target's incoming group-by criteria against an active note.
+pub fn same_group(note:&Notification,target:&Notification,spec:&GroupSpec)->bool{
+    !spec.disabled && key(note,spec)==key(target,spec)
+}
+
 fn key(note: &Notification, spec: &GroupSpec) -> Vec<String> {
     spec.fields.iter().map(|f| match f {
         GroupField::AppName => note.app_name.clone(),
