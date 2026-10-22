@@ -135,7 +135,7 @@ async fn control_action_dictionary_preserves_raw_wire_order_with_duplicate_keys(
     };
     let reply=ctl.call_method("ListNotifications",&()).await?;
     let body=reply.body();
-    assert_eq!(body.signature().as_str(),"aa{sv}");
+    assert_eq!(body.signature().to_string(),"aa{sv}");
     check(body.data().bytes());
     let records:Vec<HashMap<String,OwnedValue>>=body.deserialize()?;
     assert_eq!(records.len(),1);
@@ -147,14 +147,14 @@ async fn control_action_dictionary_preserves_raw_wire_order_with_duplicate_keys(
     let props=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,
         "org.freedesktop.DBus.Properties").await?;
     let reply=props.call_method("Get",&(CONTROL_INTERFACE,"Notifications")).await?;
-    assert_eq!(reply.body().signature().as_str(),"v");
+    assert_eq!(reply.body().signature().to_string(),"v");
 
     let options:HashMap<String,OwnedValue>=[
         ("id".into(),OwnedValue::from(id))
     ].into();
     let _:()=ctl.call("DismissNotifications",&(options,)).await?;
     let history=ctl.call_method("ListHistory",&()).await?;
-    assert_eq!(history.body().signature().as_str(),"aa{sv}");
+    assert_eq!(history.body().signature().to_string(),"aa{sv}");
     check(history.body().data().bytes());
     Ok(())
 }
