@@ -576,6 +576,23 @@ impl LivePresenter {
         &mut self, frame: Option<&PixelFrame>, corner: ScreenCorner,
         margins: PopupMargins, selected_layer: PopupLayer, output_name:&str,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        self.update_frame_on_output_impl(frame,corner,margins,selected_layer,output_name,false)
+    }
+
+    /// Accept a frame already rasterized at the compositor's integer scale.
+    /// Unlike scale_frame(), this preserves HiDPI Pango glyph edges.
+    pub fn update_native_frame_on_output(
+        &mut self,frame:Option<&PixelFrame>,corner:ScreenCorner,
+        margins:PopupMargins,selected_layer:PopupLayer,output_name:&str,
+    ) -> Result<(),Box<dyn std::error::Error>> {
+        self.update_frame_on_output_impl(frame,corner,margins,selected_layer,output_name,true)
+    }
+
+    fn update_frame_on_output_impl(
+        &mut self, frame: Option<&PixelFrame>, corner: ScreenCorner,
+        margins: PopupMargins, selected_layer: PopupLayer, output_name:&str,
+        native:bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(frame) = frame { validate_frame(frame)?; }
         self.reclaim_released();
         // Clearing a popup never requires a valid output. In particular, the
@@ -594,12 +611,18 @@ impl LivePresenter {
                 .0.clone())
         };
         let scale=self.output_scale(output_name);
+        let (logical_w,logical_h)=if native {
+            if frame.width%scale!=0 || frame.height%scale!=0 {
+                return Err("HiDPI frame must have dimensions divisible by output scale".into());
+            }
+            (frame.width/scale,frame.height/scale)
+        }else{(frame.width,frame.height)};
         let spec=PopupSurfaceSpec {
-            width:frame.width,height:frame.height,corner,margins,
+            width:logical_w,height:logical_h,corner,margins,
             layer:selected_layer,output_name:output_name.into(),scale,
         };
         if self.active.as_ref().is_some_and(|live|live.spec==spec){
-            return self.redraw_active(frame);
+            return self.redraw_active(frame,native);
         }
         // Geometry changes recreate the layer. They must obey the same
         // outstanding-buffer bound as same-size redraws.
@@ -621,7 +644,7 @@ impl LivePresenter {
             "posthorn-private-preview".into(), &self.qh, (),
         );
         layer.set_anchor(corner.anchors());
-        layer.set_size(frame.width, frame.height);
+        layer.set_size(logical_w, logical_h);
         layer.set_keyboard_interactivity(KeyboardInteractivity::None);
         layer.set_exclusive_zone(0);
         // Mako sends all four outer-margin values to layer shell regardless
@@ -633,10 +656,10 @@ impl LivePresenter {
         }
         if self.state.closed {return Err("layer-shell compositor closed the popup".into());}
         let (cw,ch) = self.state.size.ok_or("no layer-shell configure")?;
-        if (cw != 0 && cw != frame.width) || (ch != 0 && ch != frame.height) {
+        if (cw != 0 && cw != logical_w) || (ch != 0 && ch != logical_h) {
             return Err("compositor supplied an unexpected popup size".into());
         }
-        let physical=scale_frame(frame,scale)?;
+        let physical=if native {frame.clone()} else {scale_frame(frame,scale)?};
         let mut backing = tempfile::tempfile()?;
         backing.write_all(&physical.pixels)?;
         let pool = self.shm.create_pool(
@@ -662,7 +685,7 @@ impl LivePresenter {
     /// re-entering the layer-shell handshake. In particular, this preserves
     /// compositor focus and avoids a visible surface teardown/flicker on
     /// ordinary message replacement.
-    fn redraw_active(&mut self,frame:&PixelFrame)
+    fn redraw_active(&mut self,frame:&PixelFrame,native:bool)
         -> Result<(),Box<dyn std::error::Error>>
     {
         if self.retired.len() >= 32 {
@@ -671,7 +694,7 @@ impl LivePresenter {
         let Some(live)=self.active.as_mut() else {
             return Err("cannot redraw an unmapped Wayland notification".into());
         };
-        let physical=scale_frame(frame,live.spec.scale)?;
+        let physical=if native {frame.clone()} else {scale_frame(frame,live.spec.scale)?};
         let mut backing=tempfile::tempfile()?;
         backing.write_all(&physical.pixels)?;
         let pool=self.shm.create_pool(backing.as_fd(),
@@ -865,6 +888,14 @@ mod tests {
             x: state.pointer_x, y: state.pointer_y, button: 272, serial: 5,
         });
         assert_eq!(state.clicks.remove(0).button, 272);
+    }
+
+    #[test]
+    fn native_hidpi_frames_keep_logical_layer_geometry() {
+        let logical=PixelFrame{width:2,height:3,stride:8,pixels:vec![0;24]};
+        let native=scale_frame(&logical,2).unwrap();
+        assert_eq!((native.width/2,native.height/2),(logical.width,logical.height));
+        assert_ne!((native.width,native.height),(logical.width,logical.height));
     }
 
     #[test]

@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::config::{Options, Traits};
 use crate::grouping::{GroupSpec,group_ordered};
 use crate::notification::{Notification, Urgency};
-use crate::render::{compose_mako_stack, render_notification_group, render_hidden_placeholder, PixelFrame,StackAlignment};
+use crate::render::{compose_mako_stack,render_notification_group_scaled,render_hidden_placeholder_scaled,PixelFrame,StackAlignment};
 use crate::runtime::SharedRuntime;
 use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins,PointerClick};
 
@@ -180,6 +180,24 @@ pub fn displayable_groups(runtime:&SharedRuntime)->io::Result<usize>{
 /// Render the active, ordered messages at the present instant, including
 /// configured category colors. Returns None for an empty notification list.
 pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> {
+    snapshot_frame_scaled(runtime,1)
+}
+
+/// All child frames and their spacing use the compositor's physical pixel
+/// scale; the corresponding layer-shell geometry is still logical.
+pub fn snapshot_frame_scaled(runtime:&SharedRuntime,pixel_scale:u32)
+    -> io::Result<Option<PixelFrame>>
+{
+    if !(1..=8).contains(&pixel_scale) {
+        return Err(other("unsupported compositor pixel scale"));
+    }
+    let scale=pixel_scale as i32;
+    let scale_margin=|raw:&String| {
+        PopupMargins::parse_mako(raw).map(|m|PopupMargins{
+            top:m.top.saturating_mul(scale),right:m.right.saturating_mul(scale),
+            bottom:m.bottom.saturating_mul(scale),left:m.left.saturating_mul(scale),
+        })
+    };
     let config=runtime.config();
     let projection=visible_projection(runtime)?;
     let notes=projection.members;
@@ -192,10 +210,10 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
         let note=&entry.notification;
         let style=style_for_note_index(runtime,note,&modes,entry.group_index);
         margins.push(style.get("margin")
-            .and_then(|s|PopupMargins::parse_mako(s))
-            .unwrap_or(PopupMargins::uniform(10)));
-        frames.push(render_notification_group(
-            note,&style,if entry.group_count>=2{entry.group_count}else{0}
+            .and_then(scale_margin)
+            .unwrap_or(PopupMargins::uniform(10*scale)));
+        frames.push(render_notification_group_scaled(
+            note,&style,if entry.group_count>=2{entry.group_count}else{0},pixel_scale
         ).map_err(other)?);
     }
     if hidden>0 {
@@ -211,10 +229,11 @@ pub fn snapshot_frame(runtime:&SharedRuntime) -> io::Result<Option<PixelFrame>> 
         };
         let style=config.style_for(&traits);
         if !style.get("invisible").is_some_and(|x|x=="1"||x=="true"){
-            frames.push(render_hidden_placeholder(hidden,total,&style).map_err(other)?);
+            frames.push(render_hidden_placeholder_scaled(hidden,total,&style,pixel_scale)
+                .map_err(other)?);
             margins.push(style.get("margin")
-                .and_then(|s|PopupMargins::parse_mako(s))
-                .unwrap_or(PopupMargins::uniform(10)));
+                .and_then(scale_margin)
+                .unwrap_or(PopupMargins::uniform(10*scale)));
         }
     }
     let align=stack_alignment(config.global.get("anchor")
@@ -247,7 +266,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
         if notes!=previous || modes!=previous_modes ||
             revision!=previous_revision || scale!=previous_scale {
 
-            let frame=snapshot_frame(&runtime)?;
+            let frame=snapshot_frame_scaled(&runtime,scale)?;
             let corner=config.global.get("anchor")
                 .and_then(|s|ScreenCorner::from_mako(s))
                 .unwrap_or(ScreenCorner::TopRight);
@@ -257,7 +276,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
                 .unwrap_or(PopupLayer::Top);
             let output=config.global.get("output").map(String::as_str).unwrap_or("");
             if frame.is_none()||!viewer.buffer_backpressure(){
-                viewer.update_frame_on_output(frame.as_ref(),corner,margins,layer,output)
+                viewer.update_native_frame_on_output(frame.as_ref(),corner,margins,layer,output)
                     .map_err(other)?;
                 previous=notes;
                 previous_modes=modes;
@@ -569,6 +588,20 @@ mod tests {
         assert_eq!(visible.len(),2);
         assert_eq!(visible.iter().map(|n|n.id).collect::<Vec<_>>(),vec![newer,separate]);
         assert!(!visible.iter().any(|n|n.id==older));
+    }
+
+    #[test]
+    fn physical_snapshot_scales_geometry_and_spacing() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=120\nheight=45\nborder-size=0\nmargin=4,6,8,10\n"
+        ).unwrap());
+        runtime.store.lock().unwrap().push(Request {
+            summary:"Readable Pango text".into(),..Request::default()
+        });
+        let one=snapshot_frame_scaled(&runtime,1).unwrap().unwrap();
+        let two=snapshot_frame_scaled(&runtime,2).unwrap().unwrap();
+        assert_eq!((two.width,two.height),(one.width*2,one.height*2));
+        assert!(snapshot_frame_scaled(&runtime,0).is_err());
     }
 
     #[test]

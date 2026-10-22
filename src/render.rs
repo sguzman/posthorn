@@ -231,6 +231,17 @@ pub fn render_notification(note: &Notification, style: &Options) -> Result<Pixel
 pub fn render_notification_group(
     note:&Notification,style:&Options,group_count:usize,
 ) -> Result<PixelFrame,String> {
+    render_notification_group_scaled(note,style,group_count,1)
+}
+
+/// Draw directly at physical resolution rather than enlarging low-resolution
+/// Pango glyph bitmaps. All Mako geometry remains in logical coordinates.
+pub fn render_notification_group_scaled(
+    note:&Notification,style:&Options,group_count:usize,pixel_scale:u32,
+) -> Result<PixelFrame,String> {
+    if !(1..=8).contains(&pixel_scale) {
+        return Err("unsupported notification pixel scale".into());
+    }
     let width = integer_option(style, "width", 300);
     // One decode per frame. Both text measurement and painting consume the
     // same icon, avoiding redundant filesystem reads and image decoding.
@@ -241,7 +252,13 @@ pub fn render_notification_group(
     {
         return Err("invalid or oversized notification surface".into());
     }
-    let (w, h) = (width as i32, height as i32);
+    let physical_width=width.checked_mul(pixel_scale).ok_or("physical width overflow")?;
+    let physical_height=height.checked_mul(pixel_scale).ok_or("physical height overflow")?;
+    if physical_width>4096 || physical_height>4096 ||
+        u64::from(physical_width)*u64::from(physical_height)*4>64*1024*1024 {
+        return Err("HiDPI notification exceeds safe buffer bounds".into());
+    }
+    let (w, h) = (physical_width as i32, physical_height as i32);
     let border = integer_option(style, "border-size", 2).min(width/2).min(height/2) as f64;
     let radius=CornerRadii::parse(style);
     let pad=Padding::parse(style);
@@ -255,6 +272,7 @@ pub fn render_notification_group(
     let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, w, h)
         .map_err(|e| e.to_string())?;
     let context = cairo::Context::new(&surface).map_err(|e| e.to_string())?;
+    context.scale(f64::from(pixel_scale),f64::from(pixel_scale));
     context.set_operator(cairo::Operator::Source);
     set_color(&context, border_color);
     rounded(&context, 0.0, 0.0, f64::from(width), f64::from(height), radius);
@@ -386,7 +404,7 @@ pub fn render_notification_group(
     let mut pixels = Vec::new();
     surface.with_data(|data| pixels.extend_from_slice(data))
         .map_err(|e| e.to_string())?;
-    Ok(PixelFrame {width, height, stride, pixels})
+    Ok(PixelFrame {width:physical_width,height:physical_height,stride,pixels})
 }
 
 
@@ -398,6 +416,12 @@ pub fn render_notification_group(
 /// in notification history or exposed as a real D-Bus notification.
 pub fn render_hidden_placeholder(
     hidden:usize,total:usize,style:&Options,
+) -> Result<PixelFrame,String> {
+    render_hidden_placeholder_scaled(hidden,total,style,1)
+}
+
+pub fn render_hidden_placeholder_scaled(
+    hidden:usize,total:usize,style:&Options,pixel_scale:u32,
 ) -> Result<PixelFrame,String> {
     let raw=style.get("format").map(String::as_str).unwrap_or("(%h more)");
     let decoded=decode_format(raw).map_err(|e|e.to_string())?;
@@ -411,7 +435,7 @@ pub fn render_hidden_placeholder(
     let mut store=crate::notification::NotificationStore::new(0);
     store.push(crate::notification::Request::default());
     let note=store.active().front().ok_or("failed to create hidden placeholder")?;
-    render_notification(note,&prepared)
+    render_notification_group_scaled(note,&prepared,0,pixel_scale)
 }
 
 /// Exact rectangle coordinates for the positive-margin subset of Mako's
@@ -932,6 +956,23 @@ mod tests {
         assert!(compose_stack(&[],10).unwrap().is_none());
         let huge=PixelFrame{width:1,height:4096,stride:4,pixels:vec![0;16384]};
         assert!(compose_stack(&[huge.clone(),huge],4).is_err());
+    }
+
+    #[test]
+    fn native_scale_draws_pango_at_physical_resolution() {
+        let note=fixture();
+        let style=crate::config::Config::default().global;
+        let logical=render_notification_group_scaled(&note,&style,0,1).unwrap();
+        let native=render_notification_group_scaled(&note,&style,0,2).unwrap();
+        assert_eq!(native.width,logical.width*2);
+        assert_eq!(native.height,logical.height*2);
+        assert_eq!(native.stride,native.width as i32*4);
+        let stretched=crate::wayland::scale_frame(&logical,2).unwrap();
+        // Glyph edges rendered directly at 2x must not be pixel copies of
+        // the existing 1x antialiasing pattern.
+        assert_ne!(native.pixels,stretched.pixels);
+        assert!(render_notification_group_scaled(&note,&style,0,0).is_err());
+        assert!(render_notification_group_scaled(&note,&style,0,9).is_err());
     }
 
     #[test]
