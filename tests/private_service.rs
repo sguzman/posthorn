@@ -110,6 +110,47 @@ async fn private_control_menu_invokes_existing_action_without_shell()
 }
 
 #[tokio::test]
+async fn action_dictionary_order_and_duplicates_survive_dbus_roundtrip()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use zbus::zvariant::Value;
+    let (conn,_runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let id:u32=desktop.call("Notify",&(
+        "ordered-actions",0u32,"","Menu items","",
+        vec![
+            "open".to_string(),"Open early".to_string(),
+            "dismiss".to_string(),"Ignore".to_string(),
+            "open".to_string(),"Open late".to_string(),
+        ],
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let notes:Vec<HashMap<String,OwnedValue>>=
+        control.call("ListNotifications",&()).await?;
+    assert_eq!(notes.len(),1);
+    assert_eq!(u32::try_from(notes[0].get("id").unwrap())?,id);
+    let actions=notes[0].get("actions").unwrap();
+    let Value::Dict(dict)=&**actions else {panic!("expected action dictionary")};
+    let actual:Vec<_>=dict.iter().map(|(key,label)|{
+        let (Value::Str(key),Value::Str(label))=(key,label) else{
+            panic!("malformed action entry")
+        };
+        (key.as_str().to_owned(),label.as_str().to_owned())
+    }).collect();
+    assert_eq!(actual,vec![
+        ("open".into(),"Open late".into()),
+        ("dismiss".into(),"Ignore".into()),
+        ("open".into(),"Open early".into()),
+    ]);
+    let text=posthorn::ctl::notification_text(&notes[0]);
+    assert!(text.contains(
+        "  Actions:\n    open: Open late\n    dismiss: Ignore\n    open: Open early\n"
+    ),"{text}");
+    Ok(())
+}
+
+#[tokio::test]
 async fn pointer_button_bindings_dispatch_through_private_desktop_bus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
