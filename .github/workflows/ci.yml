@@ -16,3 +16,13 @@ jobs:
       - run: dbus-run-session -- cargo test --tests --features dbus-integration -- --test-threads=1
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
       - run: python3 tools/render_roadmap.py && git diff --exit-code -- docs/ROADMAP.md
+
+  headless-wayland:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sway libpango1.0-dev libcairo2-dev libgdk-pixbuf-2.0-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --bin posthorn
+      - name: Verify private popup on headless wlroots compositor
+        run: dbus-run-session -- bash tests/headless_wayland.sh
