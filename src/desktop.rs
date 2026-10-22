@@ -497,6 +497,39 @@ mod tests {
     }
 
     #[test]
+    fn absorbed_scoped_group_member_uses_group_index_style() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=none\nmax-visible=4\n[category=warning]\ngroup-by=app-name\n"
+        ).unwrap());
+        let old=runtime.store.lock().unwrap().push(Request{
+            app_name:"sender".into(),category:"success".into(),
+            ..Request::default()
+        });
+        let warning=runtime.store.lock().unwrap().push(Request{
+            app_name:"sender".into(),category:"warning".into(),
+            ..Request::default()
+        });
+        let visible=visible_members_indexed(&runtime).unwrap();
+        assert_eq!(visible.len(),1);
+        assert_eq!(visible[0].notification.id,warning);
+        assert_eq!(crate::grouping::active_group_index(&runtime,old).unwrap(),1);
+        let with_unhide=SharedRuntime::new(Config::parse(
+            "group-by=none\nmax-visible=4\n[category=warning]\ngroup-by=app-name\n[group-index=1]\ninvisible=0\n"
+        ).unwrap());
+        let old=with_unhide.store.lock().unwrap().push(Request{
+            app_name:"sender".into(),category:"success".into(),
+            ..Request::default()
+        });
+        let warning=with_unhide.store.lock().unwrap().push(Request{
+            app_name:"sender".into(),category:"warning".into(),
+            ..Request::default()
+        });
+        let visible=visible_members_indexed(&with_unhide).unwrap();
+        assert_eq!(visible.iter().map(|m|(m.notification.id,m.group_index))
+            .collect::<Vec<_>>(),vec![(warning,0),(old,1)]);
+    }
+
+    #[test]
     fn grouped_secondary_member_can_be_made_visible_by_user_rule() {
         let runtime=SharedRuntime::new(Config::parse(
             "group-by=app-name\nmax-visible=4\n[grouped]\ninvisible=0\n"
