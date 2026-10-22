@@ -5,7 +5,7 @@ Progress is the average of documented atomic task percentages. A task at 100%
 requires acceptance evidence; partial work stays below 100%. Future ideas
 do not count toward Mako MVP. No runtime parity is claimed yet.
 
-## 📯 M0 — Mako parity and MVP inauguration — `████████░░ 77%`
+## 📯 M0 — Mako parity and MVP inauguration — `████████░░ 78%`
 **Acceptance gate:** Full upstream parity + Hyprland end-to-end QA
 
 ### 🧭 P0 — Source baseline and safeguards — `██████████ 99%`
@@ -31,10 +31,10 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `█████████░ 88%`
 - 🔤 T205 — Pango markup/escaping, format specifiers and actions — `███████░░░ 72%`
 
-### 🚌 P3 — D-Bus protocol and control surface — `███████░░░ 74%`
+### 🚌 P3 — D-Bus protocol and control surface — `████████░░ 76%`
 
 - 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `█████████░ 91%`
-- 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `████████░░ 75%`
+- 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `████████░░ 79%`
 - 🔄 T303 — Correct startup, bus ownership and config reload behavior — `██████░░░░ 57%`
 
 ### 🪟 P4 — Wayland protocol and rendering — `█████████░ 86%`
@@ -43,18 +43,18 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `██████████ 96%`
 - 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `███████░░░ 74%`
 
-### 🎛️ P5 — CLI and exact workstation parity — `███░░░░░░░ 33%`
+### 🎛️ P5 — CLI and exact workstation parity — `████░░░░░░ 38%`
 
-- ⌨️ T501 — Port makoctl operations with compatibility tests — `███████░░░ 70%`
-- 🔔 T502 — Reproduce category colors, per-category sounds and quiet mode — `█████░░░░░ 51%`
-- 🧪 T503 — End-to-end on Hyprland, notify-send and Edge activation — `█░░░░░░░░░ 12%`
+- ⌨️ T501 — Port makoctl operations with compatibility tests — `███████░░░ 71%`
+- 🔔 T502 — Reproduce category colors, per-category sounds and quiet mode — `██████░░░░ 58%`
+- 🧪 T503 — End-to-end on Hyprland, notify-send and Edge activation — `███░░░░░░░ 25%`
 - 🚀 T504 — MVP inauguration and opt-in reversible Mako switch — `░░░░░░░░░░ 0%`
 
 **Feature inventory** (separate from task-based milestone percentage):
 
-- 🔔 Desktop notification parity — `████████░░ 77%`
-- 🎨 Mako category coloring and sound parity — `█████░░░░░ 52%`
-- 📜 Mako history/control API parity — `████████░░ 79%`
+- 🔔 Desktop notification parity — `████████░░ 80%`
+- 🎨 Mako category coloring and sound parity — `██████░░░░ 60%`
+- 📜 Mako history/control API parity — `████████░░ 80%`
 
 ## 📑 M1 — Post-MVP TOML configuration — `░░░░░░░░░░ 0%`
 

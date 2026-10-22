@@ -98,9 +98,10 @@ CI runs `tests/headless_wayland.sh` inside a new `dbus-run-session` and an
 isolated headless Sway compositor (wlroots). It launches the private
 `org.posthorn.Development` desktop service, calls Freedesktop `Notify`,
 observes layer-shell `configure` and `wl_surface.attach` protocol traffic,
-and checks that the renderer remains alive. This proves basic compositor
-integration, **not** pixel-perfect appearance, Hyprland parity, fractional
-HiDPI, or production service ownership. The installed Mako daemon is never
+then uses wlroots screencopy to capture the headless output and verify
+that the success-category background color actually appears. This proves
+basic compositor rendering and category color propagation, **not** pixel-perfect
+Hyprland parity, fractional HiDPI, or production service ownership. The installed Mako daemon is never
 involved.
 
 ## License
