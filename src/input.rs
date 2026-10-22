@@ -210,6 +210,35 @@ mod tests {
         PointerClick{x,y,button,serial:3}
     }
     #[test]
+    fn overlapping_negative_margins_follow_mako_first_hotspot_rule() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=140\nheight=90\nmargin=0,0,-15,0\n             [category=older]\nmargin=-15,0,0,0\n"
+        ).unwrap());
+        let older=runtime.store.lock().unwrap().push(Request{
+            category:"older".into(),summary:"Older".into(),
+            ..Request::default()
+        });
+        let newer=runtime.store.lock().unwrap().push(Request{
+            category:"newer".into(),summary:"Newer".into(),
+            ..Request::default()
+        });
+        let notes=visible_members_indexed(&runtime).unwrap();
+        let first=&notes[0];
+        let style=style_for_note_index(&runtime,&first.notification,
+            &["default".into()],first.group_index);
+        let height=crate::render::measure_notification_height_group(
+            &first.notification,&style,0
+        ).unwrap();
+        assert!(height>20);
+        // The second popup begins at first.height - 15, so this point
+        // overlaps both hotspots. Mako scans its active list first.
+        assert_eq!(hit_test(&runtime,click(12.0,f64::from(height)-10.0,273))
+            .unwrap().unwrap().0,newer);
+        assert_eq!(hit_test(&runtime,click(12.0,f64::from(height)+2.0,273))
+            .unwrap().unwrap().0,older);
+    }
+
+    #[test]
     fn dispatch_targets_only_rectangles_and_correct_mouse_binding() {
         let cfg=Config::parse(
             "width=100\nheight=40\nmargin=5\non-button-left=invoke-default-action\n             on-button-right=dismiss\n[category=warning]\non-button-left=none\n"
