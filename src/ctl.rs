@@ -39,19 +39,27 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
     };
     match command.as_str() {
         "help" | "-h" | "--help" => Ok(Command::Help),
-        "restore" if rest.is_empty() => Ok(Command::Restore),
-        "reload" if rest.is_empty() => Ok(Command::Reload),
+        // Mako invokes these two methods without parsing any options.
+        "restore" => Ok(Command::Restore),
+        "reload" => Ok(Command::Reload),
         "list" | "history" => {
-            // Upstream makoctl uses getopt("j"), accepting repeated -j
-            // switches and clustered -jj as equivalent to one -j.
-            let flags=rest.split(|token|token=="--").next().unwrap_or(&[]);
-            let valid=flags.iter().all(|token|token.len()>=2
-                && token.starts_with('-')
-                && token[1..].bytes().all(|b|b==b'j'));
-            if valid {
-                Ok(Command::List { history: command == "history",
-                    json: !flags.is_empty() })
-            } else { Err("usage: posthornctl list|history [-j]".into()) }
+            // getopt("j") permutes options past ignored positional arguments.
+            // Repeated and clustered -j switches enable JSON. Anything after
+            // "--" is positional, including text that begins with '-'.
+            let mut json=false;
+            let mut options=true;
+            for arg in rest {
+                if !options { continue; }
+                if arg=="--" {
+                    options=false;
+                } else if arg.starts_with('-') && arg.len()>1 {
+                    if !arg[1..].bytes().all(|b|b==b'j') {
+                        return Err("usage: posthornctl list|history [-j]".into());
+                    }
+                    json=true;
+                }
+            }
+            Ok(Command::List {history:command=="history",json})
         }
         "menu" => {
             // Mako uses GNU getopt("n:"), which permutes options ahead of
@@ -645,6 +653,16 @@ mod tests {
             Command::List{history:true,json:true});
         assert_eq!(parse_command(&v(&["list","--","-j"])).unwrap(),
             Command::List{history:false,json:false});
+        assert_eq!(parse_command(&v(&["list","extra","-jj"])).unwrap(),
+            Command::List{history:false,json:true});
+        assert_eq!(parse_command(&v(&["history","extra"])).unwrap(),
+            Command::List{history:true,json:false});
+        assert_eq!(parse_command(&v(&["history","extra","--","-j"])).unwrap(),
+            Command::List{history:true,json:false});
+        assert_eq!(parse_command(&v(&["restore","ignored","--bad"])).unwrap(),
+            Command::Restore);
+        assert_eq!(parse_command(&v(&["reload","ignored"])).unwrap(),
+            Command::Reload);
         assert!(parse_command(&v(&["list","-q"])).is_err());
         assert_eq!(parse_command(&v(&["invoke"])).unwrap(),
             Command::Invoke{id:0,action:"default".into()});
