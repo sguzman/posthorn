@@ -45,7 +45,9 @@ struct OrderedNotificationWire {
 
 impl Serialize for OrderedNotificationWire {
     fn serialize<S:Serializer>(&self,serializer:S)->Result<S::Ok,S::Error>{
-        let mut map=serializer.serialize_map(Some(self.fields.len()))?;
+        // The ordered actions variant is an additional a{sv} entry. Fields
+        // deliberately exclude it so no lossy temporary Dict is constructed.
+        let mut map=serializer.serialize_map(Some(self.fields.len()+1))?;
         for (key,value) in &self.fields {
             if key!="actions" {
                 map.serialize_entry(key,value)?;
