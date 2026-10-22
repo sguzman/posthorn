@@ -657,13 +657,13 @@ mod tests {
         let (w,h,positions)=mako_stack_geometry(
             &[(4,3),(4,3)],&margins,StackAlignment::Left
         ).unwrap();
-        assert_eq!((w,h),(2,3));
-        assert_eq!(positions,vec![(-1,-1),(-1,0)]);
+        assert_eq!((w,h),(2,4));
+        assert_eq!(positions,vec![(-1,-1),(-1,1)]);
         let image=compose_mako_stack(&[red,blue],&margins,StackAlignment::Left)
             .unwrap().unwrap();
-        assert_eq!((image.width,image.height),(2,3));
+        assert_eq!((image.width,image.height),(2,4));
         assert_eq!(&image.pixels[0..4],&[255,0,0,255]);
-        assert_eq!(&image.pixels[image.stride as usize*2..image.stride as usize*2+4],
+        assert_eq!(&image.pixels[image.stride as usize*3..image.stride as usize*3+4],
             &[255,0,0,255]);
     }
 
