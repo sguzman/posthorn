@@ -719,7 +719,7 @@ mod tests {
         assert_eq!(style["height"],"100",
             "REG_NEWLINE was not set: ^ cannot match after a newline");
 
-        let literal=Config::parse("[summary~=^Line\\.One$]\nwidth=442\n").unwrap();
+        let literal=Config::parse("[summary~=^Line\\\\.One$]\nwidth=442\n").unwrap();
         fields.summary="Line\nOne";
         assert_eq!(literal.style_for(&fields)["width"],"300",
             "escaped dot remains literal under POSIX ERE");
