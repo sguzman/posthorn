@@ -130,8 +130,8 @@ async fn control_action_dictionary_preserves_raw_wire_order_with_duplicate_keys(
     let check=|bytes:&[u8]|{
         let at=|needle:&[u8]|bytes.windows(needle.len()).position(|entry|entry==needle)
             .expect("action label missing from a{ss} wire data");
-        assert!(at(b"Latest-option-3\\0")<at(b"Middle-option-2\\0"));
-        assert!(at(b"Middle-option-2\\0")<at(b"Earliest-option-1\\0"));
+        assert!(at(b"Latest-option-3\0")<at(b"Middle-option-2\0"));
+        assert!(at(b"Middle-option-2\0")<at(b"Earliest-option-1\0"));
     };
     let reply=ctl.call_method("ListNotifications",&()).await?;
     let body=reply.body();
