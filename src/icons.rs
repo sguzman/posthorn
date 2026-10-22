@@ -278,7 +278,7 @@ mod tests {
     fn icon_theme_lookup_uses_mako_signed_numeric_parser(){
         let mut style=Options::new();
         assert_eq!(max_icon_size(&style),64);
-        style.insert("max-icon-size".into()," \\t+16".into());
+        style.insert("max-icon-size".into()," \t+16".into());
         assert_eq!(max_icon_size(&style),16);
         style.insert("max-icon-size".into(),"48".into());
         assert_eq!(max_icon_size(&style),48);
