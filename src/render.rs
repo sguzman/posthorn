@@ -815,6 +815,26 @@ mod tests {
     }
 
     #[test]
+    fn progress_source_blend_uses_mako_color_even_with_ignored_suffix(){
+        let mut note=fixture();
+        note.progress=100;
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","120"),("height","90"),("border-size","0"),
+            ("background-color","#000000"),
+            ("progress-color","SoUrCe #FF000080 extra"),
+        ]{style.insert(key.into(),value.into());}
+        let source=render_notification(&note,&style).unwrap();
+        let at=(source.height as usize-3)*source.stride as usize+10*4;
+        assert_eq!(&source.pixels[at..at+4],&[0,0,128,128],
+            "SOURCE must replace alpha, not blend over opaque background");
+        style.insert("progress-color".into(),"OVER #FF000080 ignored".into());
+        let over=render_notification(&note,&style).unwrap();
+        assert_eq!(&over.pixels[at..at+4],&[0,0,128,255],
+            "OVER must retain the existing opaque background alpha");
+    }
+
+    #[test]
     fn group_count_substitutions_affect_pango_measurement_and_rendering() {
         let mut note=fixture();
         note.summary="Task".into();
