@@ -99,48 +99,73 @@ fn icon_files(dir:&Path,name:&str)->Vec<PathBuf>{
     }).collect()
 }
 
-/// Mako searches the selected icon theme before falling back to pixmaps.
-/// Filenames are validated so names can't navigate out of a theme directory.
-pub fn resolve_icon(name:&str,path_spec:&str,max_size:u32)->Option<PathBuf>{
+/// Mako's theme glob is root/*/*/name.*. Either level may encode the
+/// directory's nominal icon size; @2 is the scale encoded by the path.
+fn nominal_size(component:&str)->Option<u32>{
+    let digits:String=component.chars().take_while(char::is_ascii_digit).collect();
+    let size=digits.parse::<u32>().ok()?;
+    (size>0).then_some(size)
+}
+fn theme_icon_size(first:&str,second:&str)->Option<(u32,u32)>{
+    let nominal=nominal_size(first).or_else(||nominal_size(second))?;
+    let scale=first.split('@').nth(1)
+        .or_else(||second.split('@').nth(1))
+        .and_then(nominal_size).unwrap_or(1);
+    Some((nominal,scale))
+}
+
+/// Resolve the icon using the same two-tier theme lookup as Mako. The output
+/// scale selects sharper assets without changing the logical icon dimensions.
+pub fn resolve_icon_scaled(
+    name:&str,path_spec:&str,max_size:u32,output_scale:u32
+)->Option<PathBuf>{
     if name.starts_with('/') {return Some(PathBuf::from(name));}
     if let Some(uri)=name.strip_prefix("file://"){
         let path=url_decode(uri)?;
         return path.starts_with('/').then_some(PathBuf::from(path));
     }
     if !valid_icon_name(name){return None;}
+    let max_scale=output_scale.max(1);
+    let physical_cap=max_size.saturating_mul(max_scale);
     let themes=path_spec.split(':')
         .filter(|x|!x.is_empty())
         .map(PathBuf::from)
         .chain(std::iter::once(PathBuf::from("/usr/share/icons/hicolor")));
     for root in themes {
-        let Ok(sizes)=fs::read_dir(root) else {continue};
-        let mut choices=Vec::new();
-        for folder in sizes.flatten() {
-            let size_dir=folder.path();
-            if !size_dir.is_dir(){continue;}
-            let size_str=folder.file_name().to_string_lossy().into_owned();
-            let Some(size)=size_str.split(|c:char|!c.is_ascii_digit())
-                .next().and_then(|s|s.parse::<u32>().ok()) else{continue};
-            let Ok(categories)=fs::read_dir(&size_dir) else{continue};
-            for cat in categories.flatten(){
-                let category=cat.path();
-                if category.is_dir(){
-                    for path in icon_files(&category,name){
-                        choices.push((size,path));
+        let Ok(first_levels)=fs::read_dir(&root) else{continue};
+        let mut exact=Vec::new();
+        let mut smaller=Vec::new();
+        for first in first_levels.flatten(){
+            if !first.path().is_dir(){continue;}
+            let first_name=first.file_name().to_string_lossy().into_owned();
+            let Ok(second_levels)=fs::read_dir(first.path()) else{continue};
+            for second in second_levels.flatten(){
+                let path=second.path();
+                if !path.is_dir(){continue;}
+                let second_name=second.file_name().to_string_lossy().into_owned();
+                let Some((size,scale))=theme_icon_size(&first_name,&second_name)
+                    else{continue};
+                for file in icon_files(&path,name){
+                    if size==max_size && scale==max_scale {
+                        exact.push(file);
+                    }else if size<physical_cap {
+                        smaller.push((size,file));
                     }
                 }
             }
         }
-        // Prefer exact size, otherwise largest <= size; fallback to nearest.
-        choices.sort_by(|(a,pa),(b,pb)|{
-            let rank=|v:u32| if v==max_size{(0,0)}
-                else if v<max_size{(1,max_size-v)}
-                else{(2,v-max_size)};
-            rank(*a).cmp(&rank(*b)).then_with(||pa.cmp(pb))
-        });
-        if let Some((_,path))=choices.into_iter().next(){return Some(path);}
+        exact.sort();
+        if let Some(path)=exact.into_iter().next(){return Some(path);}
+        // Mako accepts an undersized candidate, not an arbitrary oversized
+        // nearest match. Preserve deterministic ordering for equal sizes.
+        smaller.sort_by(|(a,pa),(b,pb)|b.cmp(a).then_with(||pa.cmp(pb)));
+        if let Some((_,path))=smaller.into_iter().next(){return Some(path);}
     }
     icon_files(Path::new("/usr/share/pixmaps"),name).into_iter().next()
+}
+
+pub fn resolve_icon(name:&str,path_spec:&str,max_size:u32)->Option<PathBuf>{
+    resolve_icon_scaled(name,path_spec,max_size,1)
 }
 
 /// Read a GdkPixbuf into a bounded, Cairo-compatible ARGB32 buffer.
@@ -174,6 +199,12 @@ pub fn decode_icon(path:&Path)->Option<IconPixels>{
 }
 
 pub fn load_note_icon(note:&Notification,style:&Options)->Option<IconPixels>{
+    load_note_icon_scaled(note,style,1)
+}
+
+pub fn load_note_icon_scaled(
+    note:&Notification,style:&Options,output_scale:u32
+)->Option<IconPixels>{
     if style.get("icons").is_some_and(|v|v=="0"||v.eq_ignore_ascii_case("false")){
         return None;
     }
@@ -181,8 +212,9 @@ pub fn load_note_icon(note:&Notification,style:&Options)->Option<IconPixels>{
     if let Some(image)=&note.image_data {return Some(image.clone());}
     if note.app_icon.is_empty(){return None;}
     let max_size=style.get("max-icon-size").and_then(|s|s.parse().ok()).unwrap_or(64);
-    let path=resolve_icon(&note.app_icon,
-        style.get("icon-path").map(String::as_str).unwrap_or(""),max_size)?;
+    let path=resolve_icon_scaled(&note.app_icon,
+        style.get("icon-path").map(String::as_str).unwrap_or(""),
+        max_size,output_scale)?;
     decode_icon(&path)
 }
 
@@ -248,6 +280,28 @@ mod tests {
             Some(root.path().join("48x48/apps/posthorn.png")));
         assert_eq!(resolve_icon("posthorn",root.path().to_str().unwrap(),16),
             Some(root.path().join("16x16/apps/posthorn.png")));
+    }
+
+    #[test]
+    fn scaled_icon_lookup_prefers_exact_hidpi_and_supports_reverse_layout() {
+        let root=tempfile::tempdir().unwrap();
+        for rel in ["48x48/apps","64x64/apps","64x64@2/apps",
+                    "apps/96x96","apps/128x128"] {
+            let dir=root.path().join(rel);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("posthorn.png"),b"fixture").unwrap();
+        }
+        let root=root.path().to_str().unwrap();
+        assert_eq!(resolve_icon_scaled("posthorn",root,64,2),
+            Some(Path::new(root).join("64x64@2/apps/posthorn.png")));
+        assert_eq!(resolve_icon_scaled("posthorn",root,64,1),
+            Some(Path::new(root).join("64x64/apps/posthorn.png")));
+        let reversed=tempfile::tempdir().unwrap();
+        let folder=reversed.path().join("apps/96x96");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("posthorn.png"),b"fixture").unwrap();
+        assert_eq!(resolve_icon_scaled("posthorn",reversed.path().to_str().unwrap(),64,2),
+            Some(folder.join("posthorn.png")));
     }
 
     #[test]

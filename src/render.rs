@@ -9,7 +9,7 @@ use crate::config::Options;
 use crate::format::{decode_format, escape_markup, render_notification_format, FormatNotification};
 use crate::notification::Notification;
 use crate::raster::Color;
-use crate::icons::{IconPixels,load_note_icon};
+use crate::icons::{IconPixels,load_note_icon,load_note_icon_scaled};
 
 #[derive(Clone, Debug)]
 pub struct PixelFrame {
@@ -245,7 +245,7 @@ pub fn render_notification_group_scaled(
     let width = integer_option(style, "width", 300);
     // One decode per frame. Both text measurement and painting consume the
     // same icon, avoiding redundant filesystem reads and image decoding.
-    let icon=load_note_icon(note,style);
+    let icon=load_note_icon_scaled(note,style,pixel_scale);
     let height = measure_height_with_icon(note,style,icon.as_ref(),group_count)?;
     if width == 0 || height == 0 || width > 4096 || height > 4096
         || u64::from(width) * u64::from(height) * 4 > 64 * 1024 * 1024
