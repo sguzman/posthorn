@@ -360,6 +360,35 @@ async fn grouped_history_follows_arrival_and_dismissal_over_dbus()
 }
 
 #[tokio::test]
+async fn mode_reapplication_regroups_live_dbus_notification_list()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::desktop::visible_members_indexed;
+    let config=Config::parse(
+        "group-by=none\n[mode=quiet]\ngroup-by=app-name\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let send=|app:&str|(app.to_owned(),0u32,"","Notify","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32);
+    let older:u32=desktop.call("Notify",&send("same")).await?;
+    let other:u32=desktop.call("Notify",&send("different")).await?;
+    let newer:u32=desktop.call("Notify",&send("same")).await?;
+    let _:()=ctl.call("SetMode",&("quiet",)).await?;
+    let listed:Vec<HashMap<String,OwnedValue>>=ctl.call("ListNotifications",&()).await?;
+    assert_eq!(listed.iter().map(|m|u32::try_from(m.get("id").unwrap()).unwrap())
+        .collect::<Vec<_>>(),vec![newer,older,other]);
+    assert_eq!(visible_members_indexed(&runtime)?.iter().map(|m|
+        (m.notification.id,m.group_count)).collect::<Vec<_>>(),
+        vec![(newer,2),(other,1)]);
+    let _:()=ctl.call("SetMode",&("default",)).await?;
+    assert_eq!(visible_members_indexed(&runtime)?.len(),3,
+        "unsetting the grouped mode restores independent visibility");
+    Ok(())
+}
+
+#[tokio::test]
 async fn mode_dbus_reapplies_history_of_existing_notifications()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
