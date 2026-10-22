@@ -132,6 +132,18 @@ async fn control_action_dictionary_preserves_raw_wire_order_with_duplicate_keys(
             .expect("action label missing from a{ss} wire data");
         assert!(at(b"Latest-option-3\0")<at(b"Middle-option-2\0"));
         assert!(at(b"Middle-option-2\0")<at(b"Earliest-option-1\0"));
+        // Mako's outer a{sv} fields also have a fixed source-level order.
+        let mut previous=None;
+        for name in ["app-name","app-icon","category","desktop-entry",
+                     "summary","body","id","urgency","actions"] {
+            let mut needle=name.as_bytes().to_vec();
+            needle.push(0);
+            let position=at(&needle);
+            if let Some(earlier)=previous{
+                assert!(earlier<position,"wire field {name} was out of Mako order");
+            }
+            previous=Some(position);
+        }
     };
     let reply=ctl.call_method("ListNotifications",&()).await?;
     let body=reply.body();
