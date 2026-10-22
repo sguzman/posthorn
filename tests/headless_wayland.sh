@@ -20,7 +20,12 @@ export WLR_HEADLESS_OUTPUTS=1
 export WLR_RENDERER=pixman
 export XDG_CURRENT_DESKTOP=sway
 
-printf 'output * resolution 1280x720\n' > "$root/sway.conf"
+# Exercise the same D-Bus / compositor acceptance at 1x and 2x.
+# The larger 2x output keeps four notifications visible at once.
+test_scale="${POSTHORN_TEST_SCALE:-1}"
+case "$test_scale" in 1) resolution="1280x720";; 2) resolution="1920x1080";;
+  *) echo "Unsupported acceptance test scale: $test_scale"; exit 1;; esac
+printf 'output * resolution %s scale %s\n' "$resolution" "$test_scale" > "$root/sway.conf"
 sway --unsupported-gpu -c "$root/sway.conf" >"$root/sway.log" 2>&1 &
 sway_pid=$!
 
@@ -190,4 +195,4 @@ if [[ "$dismiss_repainted" != 1 ]]; then
   cat "$root/posthorn.log"
   exit 1
 fi
-echo 'Headless Sway + private D-Bus + layer-shell screenshot colors/order + close/repaint: OK'
+echo "Headless Sway ${test_scale}x + private D-Bus + layer-shell screenshot colors/order + close/repaint: OK"
