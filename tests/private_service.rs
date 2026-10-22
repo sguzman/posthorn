@@ -140,11 +140,11 @@ async fn action_dictionary_wire_conversion_has_deterministic_keys()
     }).collect();
     assert_eq!(actual,vec![
         ("dismiss".into(),"Ignore".into()),
-        ("open".into(),"Open late".into()),
+        ("open".into(),"Open early".into()),
     ]);
     let text=posthorn::ctl::notification_text(&notes[0]);
     assert!(text.contains(
-        "  Actions:\n    dismiss: Ignore\n    open: Open late\n"
+        "  Actions:\n    dismiss: Ignore\n    open: Open early\n"
     ),"{text}");
     Ok(())
 }
