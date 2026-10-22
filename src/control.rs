@@ -413,6 +413,9 @@ mod tests {
             ..Request::default()
         });
         let notes=ctl.ordered_snapshot(false).unwrap();
+        assert!(!notes[0].fields.contains_key("actions"),
+            "ordered method reply must not create a lossy temporary Dict");
+        assert_eq!(notes[0].actions.0.len(),3);
         let wire=zbus::zvariant::to_bytes(Context::new_dbus(LE,0),&notes).unwrap();
         let bytes=wire.bytes();
         let find=|needle:&[u8]|bytes.windows(needle.len())
