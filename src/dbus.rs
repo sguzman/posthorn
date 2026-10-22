@@ -161,12 +161,20 @@ impl FreedesktopNotifications {
         if let Some(runtime)=&self.runtime {
             let binding=runtime.on_notify_binding(id)
                 .map_err(|e|zbus::fdo::Error::Failed(e.into()))?;
-            // Exec is already launched by SharedRuntime::schedule, and None
-            // is deliberately inert. All other Mako bindings run once here.
-            if !matches!(binding,crate::hooks::NotifyBinding::None |
-                crate::hooks::NotifyBinding::Exec(_)){
-                crate::input::dispatch_binding(conn,runtime,id,binding,None).await
-                    .map_err(|e|zbus::fdo::Error::Failed(e.to_string()))?;
+            // Mako invokes every on-notify binding after assigning groups.
+            // Shell hooks are still limited to trusted configuration strings;
+            // no sender-provided content enters the shell.
+            match binding {
+                crate::hooks::NotifyBinding::None=>{},
+                crate::hooks::NotifyBinding::Exec(command)=>{
+                    if let Err(err)=crate::hooks::NotifyBinding::Exec(command)
+                        .run_exec(id) {
+                        eprintln!("posthorn on-notify hook failed: {err}");
+                    }
+                }
+                other=>crate::input::dispatch_binding(
+                    conn,runtime,id,other,None
+                ).await.map_err(|e|zbus::fdo::Error::Failed(e.to_string()))?,
             }
         }
         crate::signals::invalidate(conn, "Notifications").await

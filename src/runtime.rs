@@ -94,7 +94,7 @@ impl SharedRuntime {
         self.schedule_impl(id, now, false)
     }
 
-    fn schedule_impl(&self, id: u32, now: Instant, run_hook: bool) -> Result<(), &'static str> {
+    fn schedule_impl(&self, id: u32, now: Instant, _run_hook: bool) -> Result<(), &'static str> {
         let config=self.config();
         let store = self.store.lock().map_err(|_| "notification store lock poisoned")?;
         let note = store.active().iter().find(|n| n.id == id)
@@ -127,19 +127,9 @@ impl SharedRuntime {
             .is_none_or(|v|v=="1"||v.eq_ignore_ascii_case("true"));
         self.history_policies.lock().map_err(|_| "history policy lock poisoned")?
             .insert(id,history);
-        // Only configured commands are executable, never message fields.
-        // Match Mako's quiet-mode on-notify=none override without suppressing
-        // the notification or changing its category color.
-        let binding = style.get("on-notify")
-            .and_then(|s| NotifyBinding::parse(s).ok());
-        drop(modes);
-        drop(store);
-        if let (true, Some(NotifyBinding::Exec(command))) = (run_hook, binding) {
-            if let Err(error) = NotifyBinding::Exec(command).run_exec(id) {
-                eprintln!("posthorn on-notify hook failed: {error}");
-            }
-        }
-        // Non-exec notify bindings are not integrated with D-Bus signals yet.
+        // Mako executes on-notify AFTER grouping. The Freedesktop D-Bus
+        // adapter performs that step after calling this timer/history setup,
+        // so all binding kinds observe the same final group-index style.
         Ok(())
     }
 
