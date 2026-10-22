@@ -99,7 +99,7 @@ impl MakoControl {
         let store=self.store.lock().map_err(|_|internal_error())?;
         let notifications=if history {store.history()}else{store.active()};
         notifications.iter().map(|note|Ok(OrderedNotificationWire{
-            fields:wire_notification(note)?,
+            fields:wire_notification_fields(note)?,
             actions:OrderedActionDict(note.actions.clone()),
         })).collect()
     }
@@ -202,7 +202,7 @@ fn string_value(value: &str) -> zbus::fdo::Result<OwnedValue> {
         .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
 }
 
-fn wire_notification(note: &Notification) -> zbus::fdo::Result<HashMap<String, OwnedValue>> {
+fn wire_notification_fields(note: &Notification) -> zbus::fdo::Result<HashMap<String, OwnedValue>> {
     let mut obj = HashMap::new();
     for (key, value) in [
         ("app-name", note.app_name.as_str()),
@@ -221,10 +221,14 @@ fn wire_notification(note: &Notification) -> zbus::fdo::Result<HashMap<String, O
         Urgency::Normal => 1,
         Urgency::Critical => 2,
     }));
-    // zvariant::Dict gives deterministic key ordering, unlike HashMap.
-    // The current zvariant representation is a BTreeMap: duplicate keys
-    // collapse to their last value. Exact Mako action-list order is still
-    // an unresolved parity gap, tracked in docs/SOURCE_BASELINE.md.
+    Ok(obj)
+}
+
+fn wire_notification(note:&Notification)->zbus::fdo::Result<HashMap<String,OwnedValue>>{
+    let mut obj=wire_notification_fields(note)?;
+    // The Notifications property still uses zvariant::Dict, whose BTreeMap
+    // collapses duplicate keys and sorts entries. ListNotifications and
+    // ListHistory instead serialize the original ordered action list directly.
     let mut actions=Dict::new(&Signature::Str,&Signature::Str);
     for action in &note.actions {
         actions.append(
