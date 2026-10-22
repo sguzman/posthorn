@@ -451,6 +451,17 @@ mod tests {
     }
 
     #[test]
+    fn unknown_urgency_has_null_json_and_no_human_label(){
+        let fields=HashMap::from([
+            ("id".to_owned(),OwnedValue::from(12u32)),
+            ("urgency".to_owned(),OwnedValue::from(255u8)),
+        ]);
+        let json=notification_json_text(&fields);
+        assert!(json.contains("\"urgency\": null"),"{json}");
+        assert!(!notification_text(&fields).contains("Urgency:"));
+    }
+
+    #[test]
     fn human_readable_listing_follows_upstream_makoctl_structure(){
         use zbus::zvariant::Value;
         let mut fields=HashMap::new();

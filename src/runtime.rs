@@ -130,8 +130,9 @@ impl SharedRuntime {
             .map_err(|_|"group history style reapplication failed")
     }
 
-    /// Restore already-seen notifications without replaying the on-notify
-    /// sound or any configured external hook.
+    /// Schedule an already-inserted notification without emitting any hook.
+    /// This is a test/lifecycle utility, not the history restore operation:
+    /// upstream Mako restores historical notifications without new timers.
     pub fn schedule_without_hook(&self, id: u32, now: Instant) -> Result<(), &'static str> {
         self.schedule_impl(id, now, false)?;
         self.reapply_active_history_policies()
