@@ -175,6 +175,13 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                         edits.push((op,mode.clone()));
                         i+=1;
                     }
+                    other if other.len()>2 && other.starts_with('-')
+                        && other[1..].bytes().all(|ch|ch==b's')=>{
+                        // getopt("a:r:t:s") accepts clustered -ss and -sss
+                        // as repeated no-argument -s options.
+                        set=true;
+                        i+=1;
+                    }
                     other if other.len()>2
                         && other.starts_with('-')
                         && matches!(other.as_bytes()[1],b'a'|b'r'|b't')=>
@@ -521,6 +528,10 @@ mod tests {
         assert_eq!(update_modes(vec!["default".into()],&[('s',"".into())]),
             Vec::<String>::new());
         assert_eq!(parse_command(&v(&["mode","-s"])).unwrap(),
+            Command::Modes{edit:vec![('s',"".into())]});
+        assert_eq!(parse_command(&v(&["mode","-sss","quiet"])).unwrap(),
+            Command::Modes{edit:vec![('s',"".into()),('S',"quiet".into())]});
+        assert_eq!(parse_command(&v(&["mode","-ss"])).unwrap(),
             Command::Modes{edit:vec![('s',"".into())]});
         assert!(parse_command(&v(&["mode","quiet"])).is_err());
         assert!(parse_command(&v(&["mode","-a"])).is_err());
