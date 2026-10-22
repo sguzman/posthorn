@@ -124,6 +124,7 @@ impl SharedRuntime {
     /// Lock order is store -> scheduler everywhere to avoid deadlocks.
     pub fn schedule(&self, id: u32, now: Instant) -> Result<(), &'static str> {
         self.schedule_impl(id, now, true)?;
+        self.regroup_after_notify(id)?;
         // A newly inserted note may group existing notes; history rules
         // depending on [grouped] / [group-index] must be evaluated afterwards.
         self.reapply_active_history_policies()
@@ -135,8 +136,23 @@ impl SharedRuntime {
     /// upstream Mako restores historical notifications without new timers.
     pub fn schedule_without_hook(&self, id: u32, now: Instant) -> Result<(), &'static str> {
         self.schedule_impl(id, now, false)?;
+        self.regroup_after_notify(id)?;
         self.reapply_active_history_policies()
             .map_err(|_|"group history style reapplication failed")
+    }
+
+    fn regroup_after_notify(&self,id:u32)->Result<(), &'static str>{
+        let note=self.store.lock().map_err(|_|"notification store lock poisoned")?
+            .active().iter().find(|n|n.id==id)
+            .ok_or("notification is not active")?.clone();
+        let modes=self.modes.lock().map_err(|_|"mode state lock poisoned")?.clone();
+        let style=crate::desktop::style_for_note_index(self,&note,&modes,-1);
+        let spec=crate::grouping::GroupSpec::parse(
+            style.get("group-by").map(String::as_str).unwrap_or("none")
+        ).map_err(|_|"invalid group-by style")?;
+        self.store.lock().map_err(|_|"notification store lock poisoned")?
+            .regroup_new_notification(id,&spec);
+        Ok(())
     }
 
     fn schedule_impl(&self, id: u32, now: Instant, _run_hook: bool) -> Result<(), &'static str> {
@@ -289,6 +305,35 @@ mod tests {
         assert_eq!(runtime.next_deadline().unwrap(), None);
         assert!(runtime.close(id, CloseReason::Dismissed, true).unwrap());
         assert!(runtime.expire(now + Duration::from_secs(20)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn scoped_group_by_moves_active_store_in_mako_sorted_order() {
+        for asc in [true,false] {
+            let config=Config::parse(&format!(
+                "sort={}time\ngroup-by=none\n[category=warning]\ngroup-by=app-name\n",
+                if asc{"+"}else{"-"}
+            )).unwrap();
+            let runtime=SharedRuntime::new(config);
+            let now=Instant::now();
+            let old=runtime.store.lock().unwrap().push(Request{
+                app_name:"same".into(),..Request::default()
+            });
+            runtime.schedule(old,now).unwrap();
+            let unrelated=runtime.store.lock().unwrap().push(Request{
+                app_name:"other".into(),..Request::default()
+            });
+            runtime.schedule(unrelated,now).unwrap();
+            let warning=runtime.store.lock().unwrap().push(Request{
+                app_name:"same".into(),category:"warning".into(),
+                ..Request::default()
+            });
+            runtime.schedule(warning,now).unwrap();
+            assert_eq!(runtime.store.lock().unwrap().active().iter()
+                .map(|n|n.id).collect::<Vec<_>>(),
+                if asc{vec![old,warning,unrelated]}
+                else{vec![warning,old,unrelated]});
+        }
     }
 
     #[test]

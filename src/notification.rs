@@ -2,7 +2,7 @@
 //!
 //! No SQLite, channels, or other post-MVP behavior belongs in this module.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet,VecDeque};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Urgency { Unknown, Low, Normal, Critical }
@@ -188,6 +188,36 @@ impl NotificationStore {
         id
     }
 
+    /// Match Mako's group_notifications side effect: move the members
+    /// matching the newly received notification next to the first match,
+    /// while preserving relative sort order among matching and nonmatching
+    /// notifications. This is observable through ListNotifications.
+    pub fn regroup_new_notification(
+        &mut self,target_id:u32,spec:&crate::grouping::GroupSpec
+    ){
+        if spec.disabled{return;}
+        let matches=crate::grouping::group_ordered(self.active.iter(),spec)
+            .into_iter().find(|g|g.ids.contains(&target_id))
+            .map(|g|g.ids).unwrap_or_default();
+        if matches.len()<2{return;}
+        let selected:HashSet<u32>=matches.into_iter().collect();
+        let mut matched=VecDeque::new();
+        let mut others=VecDeque::new();
+        let mut before_first=0usize;
+        for notification in self.active.drain(..) {
+            if selected.contains(&notification.id){
+                matched.push_back(notification);
+            }else{
+                if matched.is_empty(){before_first+=1;}
+                others.push_back(notification);
+            }
+        }
+        for (offset,notification) in matched.into_iter().enumerate(){
+            others.insert(before_first+offset,notification);
+        }
+        self.active=others;
+    }
+
     fn allocate_id(&mut self) -> u32 {
         // D-Bus notification IDs must never be zero; avoid collisions at wraparound.
         loop {
@@ -233,6 +263,23 @@ mod tests {
     fn req(app: &str, text: &str) -> Request {
         Request { app_name: app.into(), summary: text.into(), ..Request::default() }
     }
+    #[test]
+    fn regroup_reorders_list_but_never_reverses_matching_members() {
+        for time_ascending in [true,false] {
+            let mut store=NotificationStore::new(8);
+            store.set_sort_policy(SortPolicy{
+                by_priority:false,priority_ascending:false,time_ascending
+            });
+            let a=store.push(Request{app_name:"same".into(),..Request::default()});
+            let b=store.push(Request{app_name:"different".into(),..Request::default()});
+            let c=store.push(Request{app_name:"same".into(),..Request::default()});
+            store.regroup_new_notification(c,
+                &crate::grouping::GroupSpec::parse("app-name").unwrap());
+            assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+                if time_ascending{vec![a,c,b]}else{vec![c,a,b]});
+        }
+    }
+
     #[test]
     fn missing_urgency_is_distinct_from_explicit_normal() {
         let mut store=NotificationStore::new(4);
