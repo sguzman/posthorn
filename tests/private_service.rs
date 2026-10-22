@@ -331,6 +331,54 @@ async fn removing_group_trigger_regroups_survivors_over_private_bus()
 }
 
 #[tokio::test]
+async fn category_exec_hook_and_quiet_mode_are_isolated_over_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let dir=tempfile::tempdir()?;
+    let output=dir.path().join("category-hook-events");
+    let config=Config::parse(&format!(
+        "[category=warning]\non-notify=exec printf '%s,' \"$id\" >> '{}'\n[mode=quiet]\non-notify=none\n",
+        output.display()
+    ))?;
+    let (conn,_runtime)=open_private_service(config).await?;
+    let dest=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let send=|category:&str|{
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from(category)).unwrap()
+        )].into();
+        ("category-hook-fixture",0u32,"","Category","",
+         Vec::<String>::new(),hints,-1i32)
+    };
+    let _:u32=dest.call("Notify",&send("success")).await?;
+    assert!(!output.exists(),"ordinary category unexpectedly ran warning hook");
+    let warning:u32=dest.call("Notify",&send("warning")).await?;
+    tokio::time::timeout(std::time::Duration::from_secs(3),async{
+        loop{
+            if std::fs::read_to_string(&output).unwrap_or_default()
+                ==format!("{warning},"){break;}
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }).await?;
+    let _:()=ctl.call("SetMode",&("quiet",)).await?;
+    let _:u32=dest.call("Notify",&send("warning")).await?;
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert_eq!(std::fs::read_to_string(&output)?,format!("{warning},"),
+        "quiet mode must override the category exec hook");
+    let _:()=ctl.call("SetMode",&("default",)).await?;
+    let again:u32=dest.call("Notify",&send("warning")).await?;
+    tokio::time::timeout(std::time::Duration::from_secs(3),async{
+        loop {
+            if std::fs::read_to_string(&output).unwrap_or_default()
+                ==format!("{warning},{again},"){break;}
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }).await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn id_and_tag_replacements_have_distinct_group_lifecycle_over_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
