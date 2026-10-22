@@ -4,9 +4,11 @@
 //! full D-Bus error behavior before treating this as makoctl parity.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::io::Write;
 use std::process::{Command as ProcessCommand, Stdio};
-use zbus::{zvariant::{OwnedValue,Value}, Connection, Proxy};
+use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
+use zbus::{zvariant::{DeserializeValue, OwnedValue, Value}, Connection, Proxy};
 
 use crate::control::{CONTROL_INTERFACE, CONTROL_PATH};
 use crate::service::PRIVATE_BUS_NAME;
@@ -297,6 +299,65 @@ pub fn update_modes(mut current: Vec<String>, edits: &[(char, String)]) -> Vec<S
     current
 }
 
+
+#[derive(Debug,zbus::zvariant::Type)]
+#[zvariant(signature = "a{ss}")]
+struct OrderedActionPairs(Vec<(String,String)>);
+
+impl<'de> Deserialize<'de> for OrderedActionPairs {
+    fn deserialize<D:Deserializer<'de>>(deserializer:D)->Result<Self,D::Error>{
+        struct Entries;
+        impl<'de> Visitor<'de> for Entries {
+            type Value=OrderedActionPairs;
+            fn expecting(&self,f:&mut fmt::Formatter)->fmt::Result{
+                write!(f,"ordered D-Bus a{{ss}} action entries")
+            }
+            fn visit_map<A:MapAccess<'de>>(self,mut map:A)->Result<Self::Value,A::Error>{
+                let mut pairs=Vec::new();
+                while let Some((key,label))=map.next_entry::<String,String>()? {
+                    pairs.push((key,label));
+                }
+                Ok(OrderedActionPairs(pairs))
+            }
+        }
+        deserializer.deserialize_map(Entries)
+    }
+}
+
+#[derive(Debug,zbus::zvariant::Type)]
+#[zvariant(signature = "a{sv}")]
+struct OrderedControlRecord {
+    fields:HashMap<String,OwnedValue>,
+    actions:Vec<(String,String)>,
+}
+
+impl<'de> Deserialize<'de> for OrderedControlRecord {
+    fn deserialize<D:Deserializer<'de>>(deserializer:D)->Result<Self,D::Error>{
+        struct Record;
+        impl<'de> Visitor<'de> for Record {
+            type Value=OrderedControlRecord;
+            fn expecting(&self,f:&mut fmt::Formatter)->fmt::Result{
+                write!(f,"Mako a{{sv}} control record with ordered actions")
+            }
+            fn visit_map<A:MapAccess<'de>>(self,mut map:A)->Result<Self::Value,A::Error>{
+                let mut fields=HashMap::new();
+                let mut actions=Vec::new();
+                while let Some(key)=map.next_key::<String>()?{
+                    if key=="actions" {
+                        let value:DeserializeValue<'de,OrderedActionPairs>=
+                            map.next_value()?;
+                        actions=value.0.0;
+                    }else{
+                        fields.insert(key,map.next_value()?);
+                    }
+                }
+                Ok(OrderedControlRecord{fields,actions})
+            }
+        }
+        deserializer.deserialize_map(Record)
+    }
+}
+
 /// Read a{ss} entries deterministically without converting to a HashMap.
 /// The current zvariant representation sorts keys and collapses duplicates.
 /// Mako's original action-list order remains an explicitly tracked parity gap.
@@ -361,6 +422,12 @@ fn json_field(map:&HashMap<String,OwnedValue>,key:&str)->String{
 /// JSON consumers need not rely on key order, but scripts often diff makoctl
 /// output as text, so preserve the upstream CLI representation as well.
 pub fn notification_json_text(map:&HashMap<String,OwnedValue>)->String{
+    notification_json_text_with_actions(map,&action_pairs(map))
+}
+
+fn notification_json_text_with_actions(
+    map:&HashMap<String,OwnedValue>,actions:&[(String,String)]
+)->String{
     let id=map.get("id").and_then(|v|u32::try_from(v).ok()).unwrap_or(0);
     let mut result=format!("  {{\n    \"id\": {id},\n");
     for (wire,json_key) in [
@@ -378,7 +445,6 @@ pub fn notification_json_text(map:&HashMap<String,OwnedValue>)->String{
     result.push_str(&format!("    \"urgency\": {},\n",
         urgency.map(json_quoted).unwrap_or_else(||"null".into())));
     result.push_str("    \"actions\": {");
-    let actions=action_pairs(map);
     for (index,(key,label)) in actions.iter().enumerate(){
         if index>0{result.push_str(", ");}
         result.push_str(&json_quoted(key));
@@ -403,6 +469,11 @@ pub fn notification_list_json_text(records:&[HashMap<String,OwnedValue>])->Strin
 /// Match makoctl's human-readable list/history layout. The app icon and
 /// message body are intentionally omitted, as in upstream v1.11.0.
 pub fn notification_text(map:&HashMap<String,OwnedValue>)->String{
+    notification_text_with_actions(map,&action_pairs(map))
+}
+fn notification_text_with_actions(
+    map:&HashMap<String,OwnedValue>,actions:&[(String,String)]
+)->String{
     let id=map.get("id").and_then(|v|u32::try_from(v).ok()).unwrap_or(0);
     let summary=value_string(map,"summary").unwrap_or_default();
     let mut result=format!("Notification {id}:{title}\n",
@@ -424,7 +495,6 @@ pub fn notification_text(map:&HashMap<String,OwnedValue>)->String{
     if let Some(urgency)=urgency {
         result.push_str(&format!("  Urgency: {urgency}\n"));
     }
-    let actions=action_pairs(map);
     if !actions.is_empty(){
         result.push_str("  Actions:\n");
         for (key,label) in actions {
@@ -458,26 +528,35 @@ pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error +
         }
         Command::List {history,json} => {
             let method=if history {"ListHistory"} else {"ListNotifications"};
-            let records: Vec<HashMap<String,OwnedValue>>=proxy.call(method,&()).await?;
+            let records:Vec<OrderedControlRecord>=proxy.call(method,&()).await?;
             if json {
-                print!("{}",notification_list_json_text(&records));
+                let mut out=String::from("[");
+                for (i,record) in records.iter().enumerate(){
+                    if i>0{out.push(',');}
+                    out.push('\n');
+                    out.push_str(&notification_json_text_with_actions(
+                        &record.fields,&record.actions));
+                }
+                out.push_str("\n]\n");
+                print!("{out}");
             } else {
-                for record in &records{
-                    print!("{}",notification_text(record));
+                for record in &records {
+                    print!("{}",notification_text_with_actions(
+                        &record.fields,&record.actions));
                 }
             }
         }
         Command::Menu {id,program} => {
-            let records:Vec<HashMap<String,OwnedValue>>=
+            let records:Vec<OrderedControlRecord>=
                 proxy.call("ListNotifications",&()).await?;
             let note=records.iter().find(|record| {
-                id==0 || record.get("id").and_then(|v|u32::try_from(v).ok())==Some(id)
+                id==0 || record.fields.get("id")
+                    .and_then(|v|u32::try_from(v).ok())==Some(id)
             }).ok_or("notification not found")?;
-            let notification_id=note.get("id")
+            let notification_id=note.fields.get("id")
                 .and_then(|v|u32::try_from(v).ok()).ok_or("missing notification ID")?;
-            let actions=action_pairs(note);
-            if actions.is_empty(){return Err("notification has no actions".into());}
-            let action=choose_from_menu(&program,&actions)?;
+            if note.actions.is_empty(){return Err("notification has no actions".into());}
+            let action=choose_from_menu(&program,&note.actions)?;
             let _: ()=proxy.call("InvokeAction",&(notification_id,action)).await?;
         }
         Command::Reload => {let _: ()=proxy.call("Reload",&()).await?;}
