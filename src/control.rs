@@ -221,9 +221,13 @@ impl MakoControl {
         &self, #[zbus(connection)] conn: &Connection,
     ) -> zbus::fdo::Result<()> {
         let restored = self.store.lock().map_err(|_| internal_error())?.restore();
-        if let (Some(runtime), Some(id)) = (&self.runtime, restored) {
-            runtime.schedule_without_hook(id, std::time::Instant::now())
-                .map_err(|e| zbus::fdo::Error::Failed(e.into()))?;
+        if let (Some(runtime), Some(_id)) = (&self.runtime, restored) {
+            // Upstream Mako inserts a restored notification directly into
+            // the active list: it never creates another expiration timer.
+            // Reapply current history style without replaying notification
+            // hooks or scheduling a replacement timeout.
+            runtime.reapply_active_history_policies()
+                .map_err(zbus::fdo::Error::Failed)?;
         }
         if restored.is_some() {
             crate::signals::invalidate(conn, "Notifications").await

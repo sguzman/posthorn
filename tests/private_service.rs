@@ -45,8 +45,8 @@ async fn private_service_expires_and_archives_a_notification() -> Result<(), Box
     let restored: Vec<HashMap<String, OwnedValue>> =
         control.call("ListNotifications", &()).await?;
     assert_eq!(restored.len(), 1);
-    assert!(runtime.next_deadline()?.is_some(),
-        "restored notification must be rescheduled");
+    assert!(runtime.next_deadline()?.is_none(),
+        "upstream Mako restores notifications without new expiration timers");
     execute(Command::Dismiss {
         id, all: false, group: false, history: false
     }).await?;

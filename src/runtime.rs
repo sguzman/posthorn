@@ -318,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn restored_note_rearms_its_deadline_without_replaying_sound() {
+    fn restored_note_stays_active_without_a_new_deadline() {
         let runtime = SharedRuntime::new(Config::parse(
             "default-timeout=500\n"
         ).unwrap());
@@ -328,11 +328,10 @@ mod tests {
         assert!(runtime.close(id, CloseReason::Dismissed, true).unwrap());
         assert!(runtime.next_deadline().unwrap().is_none());
         assert_eq!(runtime.store.lock().unwrap().restore(), Some(id));
-        runtime.schedule_without_hook(id, first + Duration::from_millis(200)).unwrap();
-        assert_eq!(runtime.next_deadline().unwrap(),
-            Some(first + Duration::from_millis(700)));
-        assert!(runtime.expire(first + Duration::from_millis(499)).unwrap().is_empty());
-        assert_eq!(runtime.expire(first + Duration::from_millis(700)).unwrap(),vec![id]);
+        runtime.reapply_active_history_policies().unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),None);
+        assert!(runtime.expire(first + Duration::from_secs(60)).unwrap().is_empty());
+        assert_eq!(runtime.store.lock().unwrap().active()[0].id,id);
     }
 
     #[test]
