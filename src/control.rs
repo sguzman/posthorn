@@ -421,9 +421,10 @@ mod tests {
         for (index,key) in ["app-name","app-icon","category","desktop-entry",
                           "summary","body","id","urgency","actions"]
             .iter().enumerate(){
-            let needle=format!("{key}\\0");
+            let mut needle=key.as_bytes().to_vec();
+            needle.push(0);
             let at=bytes.windows(needle.len())
-                .position(|part|part==needle.as_bytes()).unwrap();
+                .position(|part|part==needle.as_slice()).unwrap();
             if index>0{assert!(at>previous,"field {key} was out of Mako order");}
             previous=at;
         }
