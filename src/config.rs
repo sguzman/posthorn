@@ -257,8 +257,11 @@ impl Config {
     fn append(&mut self, text: &str, source: &str, path: Option<&Path>, depth: usize,
               seen: &mut HashSet<PathBuf>) -> Result<(), ConfigError> {
         let mut current: Option<usize> = None;
-        for (lineno, raw) in text.lines().enumerate() {
-            let line = raw.trim();
+        // getline() in pinned Mako strips leading/trailing ASCII spaces
+        // and tabs only. Rust lines() and trim() also discard CRLF and
+        // Unicode whitespace, silently accepting files Mako rejects.
+        for (lineno, raw) in text.split('\n').enumerate() {
+            let line = raw.trim_matches([' ', '\t']);
             if line.is_empty() || line.starts_with('#') { continue; }
             let location = format!("{source}:{}", lineno + 1);
             if line.starts_with('[') && line.ends_with(']') {
@@ -572,6 +575,20 @@ mod tests {
         assert_eq!(root.global["margin"],"10");
         assert!(Config::parse("margin=1 ,2\n").is_err());
         assert!(Config::parse("margin=1,nope,3\n").is_err());
+    }
+
+    #[test]
+    fn config_line_whitespace_matches_mako_ascii_only() {
+        let parsed=Config::parse("\twidth=215  \n\t[category=warning] \n\tbackground-color=#715536 \n").unwrap();
+        assert_eq!(parsed.global["width"],"215");
+        assert_eq!(parsed.rules.len(),1);
+        assert_eq!(parsed.rules[0].options["background-color"],"#715536");
+        assert!(Config::parse("width=215\r\n").is_err(),
+            "Mako getline does not remove the carriage return");
+        assert!(Config::parse("\u{a0}width=215\n").is_err(),
+            "Unicode NBSP is not a Mako leading whitespace character");
+        assert!(Config::parse("width=215\u{a0}\n").is_err(),
+            "Unicode NBSP is not stripped from Mako values");
     }
 
     #[test]
