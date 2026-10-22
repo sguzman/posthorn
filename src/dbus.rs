@@ -60,7 +60,34 @@ impl FreedesktopNotifications {
             })
             .collect();
 
-        // A hint that isn't a string is simply not the requested hint.
+        // Upstream Mako reads known hint variants with their exact wire type.
+        // Reject mismatches *before* mutating a live or replaced notification.
+        // Unknown extension hints are ignored, as in the C implementation.
+        for (name,value) in &hints {
+            let valid=match name.as_str(){
+                "category"|"desktop-entry"|"image-path"|"image_path"
+                    |"x-dunst-stack-tag"|"x-canonical-private-synchronous"=>
+                    String::try_from(value.clone()).is_ok(),
+                "value"=>i32::try_from(value).is_ok(),
+                "urgency"=>u8::try_from(value).is_ok()
+                    ||u32::try_from(value).is_ok()
+                    ||i32::try_from(value).is_ok(),
+                "image-data"|"image_data"|"icon_data"=>{
+                    let tuple:Option<(i32,i32,i32,bool,i32,i32,Vec<u8>)>=
+                        value.try_clone().ok()
+                            .and_then(|v|v.try_into().ok());
+                    tuple.is_some()
+                }
+                _=>true,
+            };
+            if !valid{
+                return Err(zbus::fdo::Error::InvalidArgs(
+                    format!("notification hint '{name}' has incorrect D-Bus type")
+                ));
+            }
+        }
+
+        // Known string hint types have been checked above.
         let text_hint = |name: &str| {
             hints
                 .get(name)
@@ -352,6 +379,37 @@ mod tests {
         service.apply_notify("sender",id,"new-icon","Changed","",
             Vec::new(),HashMap::new(),-1).unwrap();
         assert!(service.store.lock().unwrap().active()[0].image_data.is_none());
+    }
+
+    #[test]
+    fn rejects_wrong_known_hint_types_without_mutating_notifications() {
+        let service=service();
+        let id=service.apply_notify(
+            "sender",0,"","Original","",Vec::new(),
+            HashMap::new(),-1
+        ).unwrap();
+        for (key,bad) in [
+            ("category",OwnedValue::from(42i32)),
+            ("desktop-entry",OwnedValue::from(true)),
+            ("urgency",OwnedValue::try_from(zbus::zvariant::Value::from("2")).unwrap()),
+            ("value",OwnedValue::from(90u32)),
+            ("image-path",OwnedValue::from(99u8)),
+            ("x-dunst-stack-tag",OwnedValue::from(false)),
+        ] {
+            let bad_hints=[(key.into(),bad)].into();
+            assert!(matches!(service.apply_notify(
+                "sender",id,"","Replaced","",Vec::new(),bad_hints,-1
+            ),Err(zbus::fdo::Error::InvalidArgs(_))),"accepted invalid {key} hint");
+            let store=service.store.lock().unwrap();
+            assert_eq!(store.active().len(),1);
+            assert_eq!(store.active()[0].id,id);
+            assert_eq!(store.active()[0].summary,"Original");
+        }
+        // Sender-defined hints remain extensible and may have any type.
+        let extension=[("third-party-custom-key".into(),OwnedValue::from(3i32))].into();
+        assert_eq!(service.apply_notify(
+            "sender",id,"","Updated","",Vec::new(),extension,-1
+        ).unwrap(),id);
     }
 
     #[test]
