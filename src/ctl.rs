@@ -744,6 +744,25 @@ mod tests {
     }
 
     #[test]
+    fn makoctl_text_and_json_keep_ordered_duplicate_action_keys(){
+        let mut fields=HashMap::new();
+        fields.insert("id".to_owned(),OwnedValue::from(17u32));
+        let actions=vec![
+            ("z".to_owned(),"Latest".to_owned()),
+            ("a".to_owned(),"Middle".to_owned()),
+            ("z".to_owned(),"Earliest".to_owned()),
+        ];
+        let human=notification_text_with_actions(&fields,&actions);
+        assert!(human.contains(
+            "  Actions:\n    z: Latest\n    a: Middle\n    z: Earliest\n"
+        ),"{human}");
+        let json=notification_json_text_with_actions(&fields,&actions);
+        assert!(json.contains(
+            r#""actions": {"z": "Latest", "a": "Middle", "z": "Earliest"}"#
+        ),"{json}");
+    }
+
+    #[test]
     fn menu_list_and_json_follow_stable_zvariant_dictionary_order(){
         use zbus::zvariant::{Dict,Signature};
         let mut dict=Dict::new(&Signature::Str,&Signature::Str);
