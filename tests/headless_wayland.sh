@@ -301,6 +301,9 @@ sed -i 's/background-color=not-a-color/background-color=#234C8F/' "$root/mako.co
 # restyle already-active popups without restarting the daemon. Exercise the
 # actual layer-shell pixels via the private development bus at both scales.
 printf '\n[mode=quiet]\nbackground-color=#6B488F\n' >> "$root/mako.conf"
+# The new rule must be installed before a mode change can activate it.
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
 busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako SetMode \
   's' quiet >/dev/null
