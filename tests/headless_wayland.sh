@@ -132,11 +132,24 @@ expected = {
     "failure": (104, 65, 72),
     "warning": (113, 85, 54),
 }
+top_rows = {}
+image = Image.open(sys.argv[1]).convert("RGB")
+width, _ = image.size
 for category, rgb in expected.items():
     assert pixels[rgb] >= 300, (
         f"No {category} category popup color visible on headless Sway; "
         f"found {pixels[rgb]} pixels of {rgb}"
     )
-    print(f"Visual color smoke: {category} = {pixels[rgb]} expected-color pixels")
+    hits = [divmod(index, width)
+            for index, value in enumerate(image.getdata()) if value == rgb]
+    top_rows[category] = min(row for row, _ in hits)
+    assert min(col for _, col in hits) > width // 2, (
+        f"{category} popup was not anchored near the right of the output"
+    )
+    print(f"Visual color smoke: {category} = {pixels[rgb]} pixels "
+          f"starting at y={top_rows[category]}")
+assert top_rows["warning"] < top_rows["failure"] < top_rows["success"], (
+    f"Mako newest-first stack order changed: {top_rows}"
+)
 PY
 echo 'Headless Sway + private D-Bus + layer-shell popup + screenshot color: OK'
