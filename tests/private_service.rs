@@ -235,6 +235,39 @@ async fn scoped_group_dismissal_uses_selected_notification_criteria_over_dbus()
 }
 
 #[tokio::test]
+async fn mode_dbus_reapplies_history_of_existing_notifications()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let config=Config::parse(
+        "history=1\n[mode=quiet]\nhistory=0\n"
+    )?;
+    let (conn,_runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let new_notification=||(
+        "history-mode-fixture",0u32,"","Still active","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    );
+    let first:u32=desktop.call("Notify",&new_notification()).await?;
+    let _:()=ctl.call("SetMode",&("quiet",)).await?;
+    let opts:HashMap<String,OwnedValue>=[("id".into(),OwnedValue::from(first))]
+        .into();
+    let _:()=ctl.call("DismissNotifications",&(opts,)).await?;
+    let history:Vec<HashMap<String,OwnedValue>>=ctl.call("ListHistory",&()).await?;
+    assert!(history.is_empty(),"mode change must affect active note history");
+
+    let second:u32=desktop.call("Notify",&new_notification()).await?;
+    let _:()=ctl.call("SetMode",&("default",)).await?;
+    let opts:HashMap<String,OwnedValue>=[("id".into(),OwnedValue::from(second))]
+        .into();
+    let _:()=ctl.call("DismissNotifications",&(opts,)).await?;
+    let history:Vec<HashMap<String,OwnedValue>>=ctl.call("ListHistory",&()).await?;
+    assert_eq!(history.len(),1);
+    assert_eq!(u32::try_from(history[0].get("id").unwrap())?,second);
+    Ok(())
+}
+
+#[tokio::test]
 async fn control_reload_swaps_styles_and_preserves_last_good_file()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
