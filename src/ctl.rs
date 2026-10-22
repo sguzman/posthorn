@@ -94,24 +94,31 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
             Ok(Command::Dismiss { id, all, group, history })
         }
         "invoke" => {
+            // GNU getopt("n:") permits -n before or after the positional
+            // action and honors --. Upstream makoctl chooses the first
+            // remaining positional argument, ignoring later ones.
             let mut id=0u32;
-            let mut action="default".to_owned();
+            let mut action=None;
+            let mut options=true;
             let mut i=0;
             while i<rest.len() {
-                if rest[i]=="-n" {
-                    i += 1;
-                    id = rest.get(i).ok_or("missing notification ID")?
-                        .parse().map_err(|_| "invalid notification ID")?;
-                } else if let Some(value)=rest[i].strip_prefix("-n") {
-                    id = value.parse().map_err(|_| "invalid notification ID")?;
-                } else if i == rest.len()-1 && action=="default" {
-                    action=rest[i].clone();
-                } else {
-                    return Err("usage: posthornctl invoke [-n id] [action]".into());
+                let arg=rest[i].as_str();
+                if options && arg=="--" {
+                    options=false;
+                } else if options && arg=="-n" {
+                    i+=1;
+                    id=rest.get(i).ok_or("missing notification ID")?
+                        .parse().map_err(|_|"invalid notification ID")?;
+                } else if options && arg.starts_with("-n") {
+                    id=arg[2..].parse().map_err(|_|"invalid notification ID")?;
+                } else if options && arg.starts_with('-') {
+                    return Err(format!("unknown invoke option {arg}"));
+                } else if action.is_none() {
+                    action=Some(arg.to_owned());
                 }
-                i += 1;
+                i+=1;
             }
-            Ok(Command::Invoke {id, action})
+            Ok(Command::Invoke{id,action:action.unwrap_or_else(||"default".into())})
         }
         "mode" => {
             // Upstream makoctl uses getopt("a:r:t:s"): -a/-r/-t take
@@ -537,6 +544,13 @@ mod tests {
         assert!(parse_command(&v(&["list","-q"])).is_err());
         assert_eq!(parse_command(&v(&["invoke"])).unwrap(),
             Command::Invoke{id:0,action:"default".into()});
+        assert_eq!(parse_command(&v(&["invoke","open","-n34"])).unwrap(),
+            Command::Invoke{id:34,action:"open".into()});
+        assert_eq!(parse_command(&v(&["invoke","--","-open","ignored"])).unwrap(),
+            Command::Invoke{id:0,action:"-open".into()});
+        assert_eq!(parse_command(&v(&["invoke","default","next","-n3"])).unwrap(),
+            Command::Invoke{id:3,action:"default".into()});
+        assert!(parse_command(&v(&["invoke","--bad"])).is_err());
         assert_eq!(parse_command(&v(&["invoke","-n34","default"])).unwrap(),
             Command::Invoke{id:34,action:"default".into()});
     }
