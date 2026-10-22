@@ -411,8 +411,8 @@ mod tests {
         let bytes=wire.bytes();
         let find=|needle:&[u8]|bytes.windows(needle.len())
             .position(|segment|segment==needle).unwrap();
-        assert!(find(b"Latest\\0")<find(b"Middle\\0"));
-        assert!(find(b"Middle\\0")<find(b"Earliest\\0"));
+        assert!(find(b"Latest\0")<find(b"Middle\0"));
+        assert!(find(b"Middle\0")<find(b"Earliest\0"));
         let (decoded,_):(Vec<HashMap<String,OwnedValue>>,_)=
             wire.deserialize().unwrap();
         assert_eq!(decoded.len(),1);
