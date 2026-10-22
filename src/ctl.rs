@@ -220,23 +220,59 @@ fn value_string(map: &HashMap<String,OwnedValue>, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-fn json_entry(map: &HashMap<String,OwnedValue>) -> serde_json::Value {
-    let urgency = map.get("urgency").and_then(|v| u8::try_from(v).ok());
-    let urgency = match urgency { Some(0)=>Some("low"),Some(1)=>Some("normal"),
-        Some(2)=>Some("critical"),_=>None };
-    let actions: HashMap<String,String> = map.get("actions")
-        .and_then(|v| HashMap::try_from(v.clone()).ok()).unwrap_or_default();
-    serde_json::json!({
-        "id": map.get("id").and_then(|v| u32::try_from(v).ok()),
-        "app_name": value_string(map,"app-name"),
-        "app_icon": value_string(map,"app-icon"),
-        "category": value_string(map,"category"),
-        "desktop_entry": value_string(map,"desktop-entry"),
-        "summary": value_string(map,"summary"),
-        "body": value_string(map,"body"),
-        "urgency": urgency,
-        "actions": actions
-    })
+fn json_quoted(raw:&str)->String {
+    serde_json::Value::String(raw.to_owned()).to_string()
+}
+
+fn json_field(map:&HashMap<String,OwnedValue>,key:&str)->String{
+    value_string(map,key).as_deref().map(json_quoted)
+        .unwrap_or_else(||"null".into())
+}
+
+/// Mako v1.11 prints a fixed key order and formats the actions object inline.
+/// JSON consumers need not rely on key order, but scripts often diff makoctl
+/// output as text, so preserve the upstream CLI representation as well.
+pub fn notification_json_text(map:&HashMap<String,OwnedValue>)->String{
+    let id=map.get("id").and_then(|v|u32::try_from(v).ok()).unwrap_or(0);
+    let mut result=format!("  {{\n    \\"id\\": {id},\n");
+    for (wire,json_key) in [
+        ("app-name","app_name"),("app-icon","app_icon"),
+        ("category","category"),("desktop-entry","desktop_entry"),
+        ("summary","summary"),("body","body"),
+    ]{
+        result.push_str(&format!("    \\"{json_key}\\": {},\n",json_field(map,wire)));
+    }
+    let urgency=map.get("urgency").and_then(|v|u8::try_from(v).ok());
+    let urgency=match urgency{
+        Some(0)=>Some("low"),Some(1)=>Some("normal"),
+        Some(2)=>Some("critical"),_=>None,
+    };
+    result.push_str(&format!("    \\"urgency\\": {},\n",
+        urgency.map(json_quoted).unwrap_or_else(||"null".into())));
+    result.push_str("    \\"actions\\": {");
+    let actions:HashMap<String,String>=map.get("actions")
+        .and_then(|v|HashMap::try_from(v.clone()).ok()).unwrap_or_default();
+    let mut actions:Vec<_>=actions.into_iter().collect();
+    actions.sort_by(|a,b|a.0.cmp(&b.0));
+    for (index,(key,label)) in actions.iter().enumerate(){
+        if index>0{result.push_str(", ");}
+        result.push_str(&json_quoted(key));
+        result.push_str(": ");
+        result.push_str(&json_quoted(label));
+    }
+    result.push_str("}\n  }");
+    result
+}
+
+pub fn notification_list_json_text(records:&[HashMap<String,OwnedValue>])->String{
+    let mut out=String::from("[");
+    for (index,record) in records.iter().enumerate(){
+        if index>0{out.push(',');}
+        out.push('\n');
+        out.push_str(&notification_json_text(record));
+    }
+    out.push_str("\n]\n");
+    out
 }
 
 /// Match makoctl's human-readable list/history layout. The app icon and
@@ -302,8 +338,7 @@ pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error +
             let method=if history {"ListHistory"} else {"ListNotifications"};
             let records: Vec<HashMap<String,OwnedValue>>=proxy.call(method,&()).await?;
             if json {
-                let values: Vec<_>=records.iter().map(json_entry).collect();
-                println!("{}",serde_json::to_string_pretty(&values)?);
+                print!("{}",notification_list_json_text(&records));
             } else {
                 for record in &records{
                     print!("{}",notification_text(record));
@@ -343,6 +378,28 @@ pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error +
 mod tests {
     use super::*;
     fn v(args:&[&str])->Vec<String> {args.iter().map(|s|s.to_string()).collect()}
+    #[test]
+    fn mako_json_listing_preserves_field_order_nulls_and_inline_actions(){
+        use zbus::zvariant::Value;
+        let mut fields=HashMap::new();
+        fields.insert("id".into(),OwnedValue::from(17u32));
+        fields.insert("summary".into(),OwnedValue::try_from(
+            Value::from("Quoted \\"text\\" & newline\n")).unwrap());
+        fields.insert("urgency".into(),OwnedValue::from(2u8));
+        fields.insert("actions".into(),OwnedValue::from(
+            HashMap::from([("open".to_owned(),"Open".to_owned())])
+        ));
+        let rendered=notification_list_json_text(&[fields]);
+        assert!(rendered.starts_with("[\n  {\n    \\"id\\": 17,\n"));
+        assert!(rendered.contains("    \\"app_name\\": null,\n"));
+        assert!(rendered.contains("    \\"urgency\\": \\"critical\\",\n"));
+        assert!(rendered.contains("    \\"actions\\": {\\"open\\": \\"Open\\"}\n  }"));
+        assert!(rendered.contains("\\\\"text\\\\"));
+        assert_eq!(notification_list_json_text(&[]),"[\n]\n");
+        let parsed:serde_json::Value=serde_json::from_str(&rendered).unwrap();
+        assert_eq!(parsed[0]["id"],17);
+    }
+
     #[test]
     fn human_readable_listing_follows_upstream_makoctl_structure(){
         use zbus::zvariant::Value;
