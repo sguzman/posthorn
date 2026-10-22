@@ -343,7 +343,7 @@ mod tests {
         });
         let notes=control.snapshot(false).unwrap();
         let value=&notes[0]["actions"];
-        let Value::Dict(dict)=&**value else {panic!("actions must be a{ss}")};
+        let Value::Dict(dict)=&**value else {panic!("actions must be a{{ss}}")};
         let pairs:Vec<_>=dict.iter().map(|(key,label)|{
             let (Value::Str(key),Value::Str(label))=(key,label) else{
                 panic!("expected string action key and label");
