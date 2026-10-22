@@ -60,13 +60,13 @@
               "id": "T103",
               "emoji": "🧰",
               "name": "Complete option validation, built-in grouping and escaping semantics",
-              "progress": 66
+              "progress": 68
             },
             {
               "id": "T104",
               "emoji": "📂",
               "name": "Include files with Mako-compatible path behavior",
-              "progress": 75
+              "progress": 79
             },
             {
               "id": "T105",
@@ -147,7 +147,7 @@
               "id": "T401",
               "emoji": "🧱",
               "name": "Layer-shell surfaces, anchors, output routing and scaling",
-              "progress": 92
+              "progress": 95
             },
             {
               "id": "T402",
@@ -184,7 +184,7 @@
               "id": "T503",
               "emoji": "🧪",
               "name": "End-to-end on Hyprland, notify-send and Edge activation",
-              "progress": 44
+              "progress": 47
             },
             {
               "id": "T504",
@@ -199,7 +199,7 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 87
+          "progress": 89
         },
         {
           "emoji": "🎨",

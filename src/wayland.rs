@@ -1,7 +1,7 @@
 //! Private Wayland layer-shell presenter and compositor protocol integration.
 //!
 //! Supports buffered rendering, release-aware SHM, click/touch events, named
-//! output integer scaling, and compositor-issued XDG activation tokens.
+//! dynamic output hotplug, native integer scaling, and compositor-issued XDG activation tokens.
 //! Live Hyprland acceptance is still required before replacing Mako.
 
 use wayland_client::{

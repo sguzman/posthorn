@@ -2,7 +2,7 @@
 //!
 //! Renders real Pango markup/text into a premultiplied ARGB32 buffer suitable
 //! for Wayland wl_shm on little-endian Linux. Icons, multi-notification layout,
-//! scaling and input events remain separate MVP tasks.
+//! Input/activation and exact upstream text metrics remain MVP parity tasks.
 
 use pangocairo::{cairo, pango};
 use crate::config::Options;

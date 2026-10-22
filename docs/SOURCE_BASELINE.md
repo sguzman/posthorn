@@ -28,7 +28,7 @@ change how they call the Freedesktop Notification protocol. Until parity:
 
 | Upstream source | Posthorn scope | State |
 | --- | --- | --- |
-| `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; stricter Mako selector validation (bare booleans only, anchor names, last repeated field wins), signed max-history disabling, format/group validation, progress-color operators, and transactional reload |
+| `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; stricter Mako selector validation (bare booleans only, anchor names, last repeated field wins, Mako numeric whitespace), legacy/XDG default configuration lookup, signed max-history disabling, format/group validation, progress-color operators, and transactional reload |
 | `notification.c` | IDs, replace, close, timeout, history, groups, format | Timers, dismiss/restore and per-notification history policy; indexed grouped visibility (including explicit secondary-member overrides), per-output/anchor visibility limits, count formatting and per-notification overflow placeholders tested; dynamic grouping remains partial |
 | `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Private development bus with image-data, image-path, progress, reload, conditional root-style GetCapabilities, ActivationToken ordering and on-notify action/dismiss signal tests; full protocol parity pending |
 | `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Private desktop has stacked SHM layer-shell surfaces with redraw reuse and release-aware SHM buffers, dynamic named-output registration/removal, native-resolution integer-scaled Cairo/Pango popups, XDG activation token requests, pointer/touch, anchors, and outer-margin placement; live compositor QA pending |
@@ -40,8 +40,8 @@ change how they call the Freedesktop Notification protocol. Until parity:
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
 It is not the workstation's default desktop notification service. The private desktop path
 renders and updates stacked Wayland popups, with basic mouse/touch bindings,
-with layer-shell configure/SHM attachment and success, failure, and warning screenshot colors, newest-first stacking, right-anchor placement, post-CloseNotification popup removal, and timed expiry/repaint verified under isolated 1x/2x headless Sway; it has not been visually exercised under Hyprland. Exact Mako Pango metrics,
-advanced grouping, output hotplug, fractional-scale behavior, compositor-driven XDG activation and touch QA,
+with layer-shell configure/SHM attachment and success, failure, and warning screenshot colors, newest-first stacking, right-anchor placement, post-CloseNotification popup removal, timed expiry/repaint under isolated 1x/2x headless Sway, and dynamically added/removed named output recovery under isolated 1x Sway; it has not been visually exercised under Hyprland. Exact Mako Pango metrics,
+advanced grouping, live Hyprland monitor hotplug, fractional-scale behavior, compositor-driven XDG activation and touch QA,
 exact reload semantics for existing active timeouts, and control formatting remain.
 Current parsing is a subset; POSIX vs Rust regex and many style options
 still need parity tests. The

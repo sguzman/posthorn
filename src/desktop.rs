@@ -1,7 +1,7 @@
 //! An opt-in, continuous Wayland display driven by Posthorn's private
 //! D-Bus test service. Never requests org.freedesktop.Notifications.
 //! The renderer uses one stacked layer-shell surface, input bindings and
-//! integer output scaling; multi-output and native HiDPI QA remain.
+//! native-resolution integer scaling; fractional scale and live Hyprland QA remain.
 
 use std::io;
 use std::time::Duration;
