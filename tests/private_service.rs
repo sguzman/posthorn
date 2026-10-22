@@ -304,6 +304,53 @@ async fn dbus_inline_image_and_progress_reach_rendered_pixels()
 }
 
 #[tokio::test]
+async fn actions_false_does_not_block_control_or_click_invocation()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use futures_util::StreamExt;
+    use posthorn::input::dispatch_click;
+    use posthorn::wayland::PointerClick;
+    let config=Config::parse(
+        "width=160\nheight=90\nmargin=6\n[category=warning]\nactions=FALSE\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let mut signals=desktop.receive_all_signals().await?;
+    let hints:HashMap<String,OwnedValue>=[(
+        "category".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("warning"))?,
+    )].into();
+    let id:u32=desktop.call("Notify",&(
+        "action-style-fixture",0u32,"","Visible","",
+        vec!["default".to_string(),"Open".to_string()],
+        hints,-1i32
+    )).await?;
+    let _:()=ctl.call("InvokeAction",&(id,"default")).await?;
+    let message=tokio::time::timeout(
+        std::time::Duration::from_secs(3),signals.next()
+    ).await?.ok_or("expected control action signal")?;
+    assert_eq!(message.header().member().unwrap().as_str(),"ActionInvoked");
+    let (target,key):(u32,String)=message.body().deserialize()?;
+    assert_eq!((target,key),(id,"default".to_owned()));
+    assert_eq!(runtime.store.lock().unwrap().active().len(),1,
+        "Mako control InvokeAction must not dismiss the notification");
+    dispatch_click(&conn,&runtime,PointerClick{
+        x:30.0,y:20.0,button:272,serial:15,
+    }).await?;
+    let action=tokio::time::timeout(
+        std::time::Duration::from_secs(3),signals.next()
+    ).await?.ok_or("expected click action signal")?;
+    assert_eq!(action.header().member().unwrap().as_str(),"ActionInvoked");
+    let closed=tokio::time::timeout(
+        std::time::Duration::from_secs(3),signals.next()
+    ).await?.ok_or("expected click close signal")?;
+    assert_eq!(closed.header().member().unwrap().as_str(),"NotificationClosed");
+    assert!(runtime.store.lock().unwrap().active().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
 async fn click_activation_signal_precedes_action_and_close()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
