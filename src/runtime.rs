@@ -127,7 +127,8 @@ impl SharedRuntime {
         }
         let mut updated=HashMap::new();
         for note in &notes {
-            let index=indices.get(&note.id).copied().unwrap_or(-1);
+            let index=if note.grouping_applied{note.group_index}
+                else{indices.get(&note.id).copied().unwrap_or(-1)};
             let style=crate::desktop::style_for_note_index(self,note,&modes,index);
             let history=style.get("history")
                 .is_none_or(|v|v=="1"||v.eq_ignore_ascii_case("true"));
@@ -473,6 +474,31 @@ mod tests {
         assert_eq!(runtime.next_deadline().unwrap(),None);
         assert!(runtime.expire(first + Duration::from_secs(60)).unwrap().is_empty());
         assert_eq!(runtime.store.lock().unwrap().active()[0].id,id);
+    }
+
+    #[test]
+    fn replaced_tag_keeps_old_leaders_grouped_history_policy() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=none\n[category=warning]\ngroup-by=app-name\n[grouped]\nhistory=0\n"
+        ).unwrap());
+        let now=Instant::now();
+        let old=runtime.store.lock().unwrap().push(Request{
+            app_name:"app".into(),tag:"same".into(),..Request::default()
+        });
+        runtime.schedule(old,now).unwrap();
+        let leader=runtime.store.lock().unwrap().push(Request{
+            app_name:"app".into(),category:"warning".into(),..Request::default()
+        });
+        runtime.schedule(leader,now).unwrap();
+        let tag=runtime.store.lock().unwrap().push(Request{
+            app_name:"app".into(),tag:"same".into(),..Request::default()
+        });
+        assert_eq!(tag,old);
+        runtime.schedule(tag,now).unwrap();
+        assert_eq!(crate::grouping::active_group_index(&runtime,leader).unwrap(),0);
+        assert!(runtime.close(leader,CloseReason::Dismissed,true).unwrap());
+        assert!(runtime.store.lock().unwrap().history().is_empty(),
+            "stale-but-recorded grouped leader keeps history=0");
     }
 
     #[test]
