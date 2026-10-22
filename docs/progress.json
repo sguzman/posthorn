@@ -72,7 +72,7 @@
               "id": "T105",
               "emoji": "📐",
               "name": "Type/layout/style parity for all Mako config settings",
-              "progress": 56
+              "progress": 60
             }
           ]
         },
@@ -147,13 +147,13 @@
               "id": "T401",
               "emoji": "🧱",
               "name": "Layer-shell surfaces, anchors, output routing and scaling",
-              "progress": 89
+              "progress": 90
             },
             {
               "id": "T402",
               "emoji": "🖌️",
               "name": "Text, icons, colors, borders, progress and layout",
-              "progress": 96
+              "progress": 97
             },
             {
               "id": "T403",
@@ -178,13 +178,13 @@
               "id": "T502",
               "emoji": "🔔",
               "name": "Reproduce category colors, per-category sounds and quiet mode",
-              "progress": 58
+              "progress": 68
             },
             {
               "id": "T503",
               "emoji": "🧪",
               "name": "End-to-end on Hyprland, notify-send and Edge activation",
-              "progress": 25
+              "progress": 37
             },
             {
               "id": "T504",
@@ -199,12 +199,12 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 80
+          "progress": 82
         },
         {
           "emoji": "🎨",
           "name": "Mako category coloring and sound parity",
-          "progress": 60
+          "progress": 70
         },
         {
           "emoji": "📜",
