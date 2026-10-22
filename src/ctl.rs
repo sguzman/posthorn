@@ -154,6 +154,12 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
     }
 }
 
+/// The control client prints the resulting modes even after modifying them,
+/// matching makoctl v1.11.0 rather than only printing on bare `mode`.
+pub fn modes_text(modes:&[String])->String {
+    modes.iter().map(|mode|format!("{mode}\n")).collect()
+}
+
 pub fn update_modes(mut current: Vec<String>, edits: &[(char, String)]) -> Vec<String> {
     // Mako's -s replaces *all* modes, including an explicit empty list.
     if edits.iter().any(|(op,_)|*op=='s'){
@@ -363,10 +369,11 @@ pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error +
         Command::Modes {edit} => {
             let modes: Vec<String>=proxy.call("ListModes",&()).await?;
             if edit.is_empty() {
-                for mode in modes {println!("{mode}");}
+                print!("{}",modes_text(&modes));
             } else {
                 let replacement=update_modes(modes,&edit);
                 let _: ()=proxy.call("SetModes",&(replacement,)).await?;
+                print!("{}",modes_text(&replacement));
             }
         }
         Command::Help => unreachable!()
@@ -465,6 +472,17 @@ mod tests {
         assert_eq!(update_modes(vec![],&[('a',"quiet".into()),('a',"quiet".into())]),
             vec!["quiet","quiet"]);
     }
+    #[test]
+    fn mode_stdout_matches_upstream_before_and_after_edits() {
+        let original=vec!["default".to_string()];
+        assert_eq!(modes_text(&original),"default\n");
+        let after=update_modes(original,&[('a',"quiet".into()),('a',"quiet".into())]);
+        // makoctl prints the local prospective list, even if SetModes itself
+        // deduplicates values on the server.
+        assert_eq!(modes_text(&after),"default\nquiet\nquiet\n");
+        assert_eq!(modes_text(&update_modes(after,&[('s',String::new())])),"");
+    }
+
     #[test]
     fn menu_parse_requires_command_and_supports_explicit_notification_id() {
         assert_eq!(parse_command(&v(&["menu","-n","34","--","cat"])).unwrap(),
