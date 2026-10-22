@@ -6,7 +6,7 @@
 //! bindings; actual Hyprland activation behavior remains unverified.
 
 use std::io;
-use crate::grouping::{active_group_ids,group_ordered,GroupSpec};
+use crate::grouping::{active_group_ids,active_group_index};
 use crate::hooks::NotifyBinding;
 use crate::notification::{CloseReason,Notification};
 use crate::runtime::SharedRuntime;
@@ -156,19 +156,10 @@ pub fn needs_activation_token(binding:&NotifyBinding)->bool{
 /// The Mako actions=0 option suppresses ActionInvoked, while the matching
 /// click binding may still dismiss the notification.
 pub fn can_invoke_action(runtime:&SharedRuntime,id:u32,key:&str)->io::Result<bool>{
-    let config=runtime.config();
-    let (note,group_index)={
-        let store=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?;
-        let note=store.active().iter().find(|n|n.id==id).cloned();
-        let grouping=config.global.get("group-by")
-            .map(String::as_str).unwrap_or("none");
-        let spec=GroupSpec::parse(grouping).map_err(error)?;
-        let index=group_ordered(store.active(),&spec).iter()
-            .find(|group|group.ids.contains(&id))
-            .and_then(|group|group.index_of(id)).unwrap_or(-1);
-        (note,index)
-    };
+    let note=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?
+        .active().iter().find(|n|n.id==id).cloned();
     let Some(note)=note else {return Ok(false)};
+    let group_index=active_group_index(runtime,id).map_err(error)?;
     let modes=runtime.modes().lock().map_err(|_|error("mode lock poisoned"))?
         .clone();
     let style=style_for_note_index(runtime,&note,&modes,group_index);

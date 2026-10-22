@@ -137,20 +137,11 @@ impl SharedRuntime {
     /// Select Mako's on-notify binding after group placement. Returning this
     /// from the runtime leaves all D-Bus signal emission on the async thread.
     pub fn on_notify_binding(&self,id:u32)->Result<NotifyBinding,&'static str>{
-        let config=self.config();
-        let (note,index)={
-            let store=self.store.lock().map_err(|_|"notification state lock poisoned")?;
-            let note=store.active().iter().find(|n|n.id==id)
-                .ok_or("notification is not active")?.clone();
-            let raw=config.global.get("group-by")
-                .map(String::as_str).unwrap_or("none");
-            let spec=crate::grouping::GroupSpec::parse(raw)
-                .map_err(|_|"invalid runtime group-by")?;
-            let index=crate::grouping::group_ordered(store.active(),&spec).iter()
-                .find(|group|group.ids.contains(&id))
-                .and_then(|group|group.index_of(id)).unwrap_or(-1);
-            (note,index)
-        };
+        let note=self.store.lock().map_err(|_|"notification state lock poisoned")?
+            .active().iter().find(|n|n.id==id)
+            .ok_or("notification is not active")?.clone();
+        let index=crate::grouping::active_group_index(self,id)
+            .map_err(|_|"invalid runtime group-by")?;
         let modes=self.modes.lock().map_err(|_|"mode state lock poisoned")?
             .clone();
         let style=crate::desktop::style_for_note_index(self,&note,&modes,index);
@@ -238,6 +229,25 @@ mod tests {
         assert_eq!(runtime.next_deadline().unwrap(), None);
         assert!(runtime.close(id, CloseReason::Dismissed, true).unwrap());
         assert!(runtime.expire(now + Duration::from_secs(20)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn scoped_group_by_controls_grouped_on_notify_binding() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=none\n[category=warning]\ngroup-by=app-name\n[grouped]\non-notify=dismiss\n"
+        ).unwrap());
+        let earlier=runtime.store.lock().unwrap().push(Request{
+            app_name:"sender".into(),category:"success".into(),
+            ..Request::default()
+        });
+        assert!(matches!(runtime.on_notify_binding(earlier).unwrap(),
+            crate::hooks::NotifyBinding::None));
+        let warning=runtime.store.lock().unwrap().push(Request{
+            app_name:"sender".into(),category:"warning".into(),
+            ..Request::default()
+        });
+        assert!(matches!(runtime.on_notify_binding(warning).unwrap(),
+            crate::hooks::NotifyBinding::Dismiss{save_history:true}));
     }
 
     #[test]

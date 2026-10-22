@@ -138,6 +138,17 @@ pub fn active_group_ids(
         .map(|g|g.ids).unwrap_or_default())
 }
 
+/// Resolve whether a notification is the grouped leader or another member
+/// using its own grouping criteria, as on Mako's notification insertion path.
+pub fn active_group_index(
+    runtime:&crate::runtime::SharedRuntime,target_id:u32
+)->Result<i32,String>{
+    let ids=active_group_ids(runtime,target_id)?;
+    if ids.len()<2{return Ok(-1);}
+    Ok(ids.iter().position(|&id|id==target_id)
+        .and_then(|index|i32::try_from(index).ok()).unwrap_or(-1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,6 +224,8 @@ mod tests {
             vec![regular,warning]);
         assert_eq!(active_group_ids(&runtime,regular).unwrap(),vec![regular]);
         assert_eq!(active_group_ids(&runtime,unrelated).unwrap(),vec![unrelated]);
+        assert_eq!(active_group_index(&runtime,warning).unwrap(),1);
+        assert_eq!(active_group_index(&runtime,regular).unwrap(),-1);
     }
 
     #[test]
