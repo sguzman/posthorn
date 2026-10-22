@@ -797,6 +797,41 @@ mod tests {
     }
 
     #[test]
+    fn icon_lookup_uses_maximum_monitor_scale_without_scaling_popup(){
+        let dir=tempfile::tempdir().unwrap();
+        for (name,rgba) in [
+            ("16x16/apps",0xFF0000FF),
+            ("16x16@2/apps",0x0000FFFF),
+        ] {
+            let path=dir.path().join(name).join("posthorn.png");
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let pixbuf=gdk_pixbuf::Pixbuf::new(
+                gdk_pixbuf::Colorspace::Rgb,true,8,12,12
+            ).unwrap();
+            pixbuf.fill(rgba);
+            pixbuf.savev(&path,"png",&[]).unwrap();
+        }
+        let mut note=fixture();
+        note.app_icon="posthorn".into();
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","160"),("height","70"),("padding","4"),
+            ("border-size","0"),("icon-location","left"),
+            ("max-icon-size","16"),("background-color","#305747"),
+        ] {style.insert(key.into(),value.into());}
+        style.insert("icon-path".into(),dir.path().to_string_lossy().into_owned());
+        let native=render_notification_group_with_icon_scale(&note,&style,0,1,1).unwrap();
+        let with_hidpi_monitor=
+            render_notification_group_with_icon_scale(&note,&style,0,1,2).unwrap();
+        assert_eq!((native.width,native.height,native.stride),
+            (with_hidpi_monitor.width,with_hidpi_monitor.height,
+                with_hidpi_monitor.stride),
+            "the other monitor must not enlarge this 1x popup");
+        assert_ne!(native.pixels,with_hidpi_monitor.pixels,
+            "max output scale must select a distinct HiDPI theme asset");
+    }
+
+    #[test]
     fn progress_fill_respects_value_and_uses_configured_color() {
         let mut note=fixture();
         note.progress=50;
