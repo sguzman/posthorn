@@ -116,7 +116,7 @@ impl MakoControl {
         *active=unique;
         drop(active);
         if let Some(runtime)=&self.runtime {
-            runtime.reapply_active_history_policies()
+            runtime.reapply_active_grouping()
                 .map_err(zbus::fdo::Error::Failed)?;
         }
         Ok(())

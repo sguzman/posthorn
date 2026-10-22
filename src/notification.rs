@@ -205,6 +205,14 @@ impl NotificationStore {
     /// matching the newly received notification next to the first match,
     /// while preserving relative sort order among matching and nonmatching
     /// notifications. This is observable through ListNotifications.
+    pub fn clear_recorded_grouping(&mut self){
+        for note in &mut self.active {
+            note.group_index=-1;
+            note.group_count=1;
+            note.grouping_applied=false;
+        }
+    }
+
     pub fn regroup_new_notification(
         &mut self,target_id:u32,spec:&crate::grouping::GroupSpec
     ){

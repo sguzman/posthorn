@@ -78,9 +78,32 @@ impl SharedRuntime {
         drop(store);
         // Upstream reapply_config rebuilds styles for existing notifications,
         // including the history option. Their original timers are retained.
-        self.reapply_active_history_policies()?;
+        self.reapply_active_grouping()?;
         self.revision.fetch_add(1,Ordering::Release);
         Ok(())
+    }
+
+    /// Match Mako reapply_config: clear prior group indices and rerun
+    /// all active notifications' group-by rules in current list order.
+    /// Existing notification deadlines are not restarted.
+    pub fn reapply_active_grouping(&self)->Result<(),String>{
+        let mut store=self.store.lock()
+            .map_err(|_|"notification store lock poisoned")?;
+        let modes=self.modes.lock()
+            .map_err(|_|"mode state lock poisoned")?.clone();
+        let ids:Vec<u32>=store.active().iter().map(|n|n.id).collect();
+        store.clear_recorded_grouping();
+        for id in ids {
+            let Some(note)=store.active().iter().find(|n|n.id==id).cloned()
+                else{continue};
+            let style=crate::desktop::style_for_note_index(self,&note,&modes,-1);
+            let spec=crate::grouping::GroupSpec::parse(
+                style.get("group-by").map(String::as_str).unwrap_or("none")
+            )?;
+            store.regroup_new_notification(id,&spec);
+        }
+        drop(store);
+        self.reapply_active_history_policies()
     }
 
     /// Recalculate active notification history eligibility after Mako-style
@@ -322,6 +345,39 @@ mod tests {
         assert_eq!(runtime.next_deadline().unwrap(), None);
         assert!(runtime.close(id, CloseReason::Dismissed, true).unwrap());
         assert!(runtime.expire(now + Duration::from_secs(20)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn mode_reapplication_regroups_existing_notifications_without_timers() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=none\n[mode=quiet]\ngroup-by=app-name\n"
+        ).unwrap());
+        let now=Instant::now();
+        let older=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),..Request::default()
+        });
+        runtime.schedule(older,now).unwrap();
+        let other=runtime.store.lock().unwrap().push(Request{
+            app_name:"other".into(),..Request::default()
+        });
+        runtime.schedule(other,now).unwrap();
+        let newest=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),..Request::default()
+        });
+        runtime.schedule(newest,now).unwrap();
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .map(|n|n.id).collect::<Vec<_>>(),vec![newest,other,older]);
+        assert_eq!(crate::grouping::active_group_index(&runtime,newest).unwrap(),-1);
+        *runtime.modes.lock().unwrap()=vec!["quiet".into()];
+        runtime.reapply_active_grouping().unwrap();
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .map(|n|n.id).collect::<Vec<_>>(),vec![newest,older,other]);
+        assert_eq!(crate::grouping::active_group_index(&runtime,older).unwrap(),1);
+        assert!(runtime.next_deadline().unwrap().is_none());
+        *runtime.modes.lock().unwrap()=vec!["default".into()];
+        runtime.reapply_active_grouping().unwrap();
+        assert!(runtime.store.lock().unwrap().active().iter()
+            .all(|n|n.group_index==-1));
     }
 
     #[test]
