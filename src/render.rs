@@ -95,8 +95,10 @@ impl Padding {
     }
 }
 
-fn paint_icon(cr:&cairo::Context,icon:&IconPixels,x:f64,y:f64,scale:f64)
-    -> Result<(),String>
+fn paint_icon(
+    cr:&cairo::Context,icon:&IconPixels,x:f64,y:f64,scale:f64,
+    border_radius:f64,
+)->Result<(),String>
 {
     let mut bitmap=cairo::ImageSurface::create(cairo::Format::ARgb32,
         icon.width as i32,icon.height as i32).map_err(|e|e.to_string())?;
@@ -115,6 +117,13 @@ fn paint_icon(cr:&cairo::Context,icon:&IconPixels,x:f64,y:f64,scale:f64)
     cr.save().map_err(|e|e.to_string())?;
     cr.translate(x,y);
     cr.scale(scale,scale);
+    // Upstream Mako clips the icon to icon-border-radius before painting.
+    // Radius is configured in rendered pixels, so translate it back through
+    // the icon's local scaling transform before constructing the clip path.
+    let r=(border_radius/scale).max(0.0);
+    rounded(cr,0.0,0.0,f64::from(icon.width),f64::from(icon.height),
+        CornerRadii{tl:r,tr:r,br:r,bl:r});
+    cr.clip();
     let result=(||{
         cr.set_source_surface(&bitmap,0.0,0.0).map_err(|e|e.to_string())?;
         cr.paint().map_err(|e|e.to_string())
@@ -341,7 +350,8 @@ pub fn render_notification_group(
                 "left"|"right"=>border+top+(interior_h-ih)/2.0,
                 _=>border+top,
             };
-            paint_icon(&context,&icon,x,y,scale)?;
+            let icon_radius=integer_option(style,"icon-border-radius",0) as f64;
+            paint_icon(&context,&icon,x,y,scale,icon_radius)?;
             match location {
                 "right"=>available_w=(available_w-iw-2.0*right).max(1.0),
                 "top"=>{text_y+=ih+2.0*top;available_h=(available_h-ih-2.0*top).max(1.0)},
@@ -671,6 +681,29 @@ mod tests {
         let second=render_notification(&multi,&style).unwrap();
         assert!(second.height>first.height);
         assert!(second.height<=140);
+    }
+
+    #[test]
+    fn icon_border_radius_clips_image_without_erasing_background() {
+        let mut note=fixture();
+        note.image_data=crate::icons::decode_raw_image(
+            12,12,48,true,8,4,&[255,0,0,255].repeat(144));
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","180"),("height","90"),("border-size","0"),
+            ("padding","4"),("icon-border-radius","6"),
+            ("background-color","#305747"),
+        ]{style.insert(key.into(),value.into());}
+        let rounded=render_notification(&note,&style).unwrap();
+        style.insert("icon-border-radius".into(),"0".into());
+        let square=render_notification(&note,&style).unwrap();
+        let icon_center_y=rounded.height as usize/2;
+        let icon_top=icon_center_y-6;
+        let corner=icon_top*rounded.stride as usize+4*4;
+        assert_eq!(&square.pixels[corner..corner+4],&[0,0,255,255]);
+        assert_ne!(&rounded.pixels[corner..corner+4],&[0,0,255,255]);
+        let interior=icon_center_y*rounded.stride as usize+10*4;
+        assert_eq!(&rounded.pixels[interior..interior+4],&[0,0,255,255]);
     }
 
     #[test]
