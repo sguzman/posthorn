@@ -389,3 +389,22 @@ async fn capabilities_reflect_mako_root_style_over_dbus()
     ],"category-level overrides must not change the advertised root capabilities");
     Ok(())
 }
+
+#[tokio::test]
+async fn dbus_set_modes_deduplicates_in_upstream_order()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,_runtime)=open_private_service(Config::default()).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let input=vec![
+        "quiet".to_string(),"normal".to_string(),"quiet".to_string(),
+        "custom".to_string(),"normal".to_string(),
+    ];
+    let _:()=control.call("SetModes",&(input,)).await?;
+    let listed:Vec<String>=control.call("ListModes",&()).await?;
+    assert_eq!(listed,vec!["quiet","normal","custom"]);
+    let _:()=control.call("SetModes",&(Vec::<String>::new(),)).await?;
+    let empty:Vec<String>=control.call("ListModes",&()).await?;
+    assert!(empty.is_empty(),"Mako permits explicitly empty mode sets");
+    Ok(())
+}
