@@ -372,3 +372,20 @@ async fn quiet_mode_silences_category_sound_hooks_over_dbus()
     assert_eq!(runtime.store.lock().unwrap().active().len(),2);
     Ok(())
 }
+
+#[tokio::test]
+async fn capabilities_reflect_mako_root_style_over_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let cfg=Config::parse(
+        "format=%s\nmarkup=0\nactions=0\nicons=0\n         [category=success]\nmarkup=1\nactions=1\nicons=1\n"
+    )?;
+    let (conn,_runtime)=open_private_service(cfg).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let capabilities:Vec<String>=desktop.call("GetCapabilities",&()).await?;
+    assert_eq!(capabilities,vec![
+        "x-canonical-private-synchronous",
+        "x-dunst-stack-tag",
+    ],"category-level overrides must not change the advertised root capabilities");
+    Ok(())
+}
