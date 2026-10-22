@@ -98,7 +98,9 @@ fn render(template: &str, mut subst: impl FnMut(char) -> String) -> String {
             None => output.push('%'),
         }
     }
-    output.trim().to_owned()
+    // Mako's trim_space uses C isspace on UTF-8 bytes. It strips ASCII
+    // whitespace, not Unicode NBSP/EM SPACE text supplied by applications.
+    output.trim_matches(|ch:char|ch.is_ascii_whitespace()).to_owned()
 }
 
 #[cfg(test)]
@@ -121,6 +123,17 @@ mod tests {
         assert_eq!(render_notification_format("%b",&n,false),"&lt;b&gt;Hello&lt;/b&gt;");
         assert_eq!(render_notification_format("%b",&n,true),"<b>Hello</b>");
     }
+    #[test]
+    fn preserves_unicode_spaces_that_mako_c_isspace_does_not_trim() {
+        let n=FormatNotification{
+            summary:"\u{a0}Hello\u{a0}",..FormatNotification::default()
+        };
+        assert_eq!(render_notification_format(" \t%s \n",&n,false),
+            "\u{a0}Hello\u{a0}");
+        assert_eq!(render_hidden_format(" \t(%h of %t)\n",2,5),
+            "(2 of 5)");
+    }
+
     #[test]
     fn hidden_and_total_placeholders() {
         assert_eq!(render_hidden_format("(%h more of %t)",3,8),"(3 more of 8)");
