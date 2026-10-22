@@ -871,6 +871,48 @@ async fn actions_false_suppresses_action_signals_but_click_still_dismisses()
 }
 
 #[tokio::test]
+async fn control_action_signals_follow_mode_styles_for_existing_notification()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use futures_util::StreamExt;
+    let config=Config::parse(
+        "[category=warning]\nactions=0\n[mode=allow-action]\nactions=1\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let mut signals=desktop.receive_all_signals().await?;
+    let hints:HashMap<String,OwnedValue>=[(
+        "category".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("warning"))?,
+    )].into();
+    let id:u32=desktop.call("Notify",&(
+        "mode-actions",0u32,"","Notice","",
+        vec!["default".to_string(),"Open".to_string()],hints,-1i32
+    )).await?;
+    let _:()=ctl.call("InvokeAction",&(id,"default")).await?;
+    assert!(tokio::time::timeout(
+        std::time::Duration::from_millis(100),signals.next()
+    ).await.is_err(),"disabled action emitted a signal");
+    let _:()=ctl.call("SetModes",&(vec!["allow-action".to_string()],)).await?;
+    let _:()=ctl.call("InvokeAction",&(id,"default")).await?;
+    let invoked=tokio::time::timeout(
+        std::time::Duration::from_secs(3),signals.next()
+    ).await?.ok_or("missing action after mode switch")?;
+    assert_eq!(invoked.header().member().unwrap().as_str(),"ActionInvoked");
+    let (target,key):(u32,String)=invoked.body().deserialize()?;
+    assert_eq!((target,key),(id,"default".into()));
+    let _:()=ctl.call("SetModes",&(vec!["default".to_string()],)).await?;
+    let _:()=ctl.call("InvokeAction",&(id,"default")).await?;
+    assert!(tokio::time::timeout(
+        std::time::Duration::from_millis(100),signals.next()
+    ).await.is_err(),"disabling actions again emitted a signal");
+    assert_eq!(runtime.store.lock().unwrap().active().len(),1,
+        "control InvokeAction must not close a notification");
+    Ok(())
+}
+
+#[tokio::test]
 async fn click_activation_signal_precedes_action_and_close()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
