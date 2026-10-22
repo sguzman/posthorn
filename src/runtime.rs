@@ -123,13 +123,19 @@ impl SharedRuntime {
     /// Schedule the latest snapshot, never an earlier replaced payload.
     /// Lock order is store -> scheduler everywhere to avoid deadlocks.
     pub fn schedule(&self, id: u32, now: Instant) -> Result<(), &'static str> {
-        self.schedule_impl(id, now, true)
+        self.schedule_impl(id, now, true)?;
+        // A newly inserted note may group existing notes; history rules
+        // depending on [grouped] / [group-index] must be evaluated afterwards.
+        self.reapply_active_history_policies()
+            .map_err(|_|"group history style reapplication failed")
     }
 
     /// Restore already-seen notifications without replaying the on-notify
     /// sound or any configured external hook.
     pub fn schedule_without_hook(&self, id: u32, now: Instant) -> Result<(), &'static str> {
-        self.schedule_impl(id, now, false)
+        self.schedule_impl(id, now, false)?;
+        self.reapply_active_history_policies()
+            .map_err(|_|"group history style reapplication failed")
     }
 
     fn schedule_impl(&self, id: u32, now: Instant, _run_hook: bool) -> Result<(), &'static str> {
@@ -201,6 +207,14 @@ impl SharedRuntime {
                 .cancel(id);
             policies.remove(&id);
         }
+        drop(policies);
+        drop(store);
+        if closed {
+            // A surviving member may become ungrouped after its neighbor
+            // closes, changing its effective history option.
+            self.reapply_active_history_policies()
+                .map_err(|_|"group history style reapplication failed")?;
+        }
         Ok(closed)
     }
 
@@ -218,6 +232,12 @@ impl SharedRuntime {
             if store.close(id,CloseReason::Expired,true,allow_history).is_some() {
                 closed.push(id);
             }
+        }
+        drop(policies);
+        drop(store);
+        if !closed.is_empty() {
+            self.reapply_active_history_policies()
+                .map_err(|_|"group history style reapplication failed")?;
         }
         Ok(closed)
     }
@@ -334,6 +354,28 @@ mod tests {
         assert_eq!(runtime.next_deadline().unwrap(),None);
         assert!(runtime.expire(first + Duration::from_secs(60)).unwrap().is_empty());
         assert_eq!(runtime.store.lock().unwrap().active()[0].id,id);
+    }
+
+    #[test]
+    fn grouped_history_style_updates_on_arrival_and_last_member_close() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=app-name\n[grouped]\nhistory=0\n"
+        ).unwrap());
+        let now=Instant::now();
+        let first=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),..Request::default()
+        });
+        runtime.schedule(first,now).unwrap();
+        let second=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),..Request::default()
+        });
+        runtime.schedule(second,now).unwrap();
+        assert!(runtime.close(second,CloseReason::Dismissed,true).unwrap());
+        assert!(runtime.store.lock().unwrap().history().is_empty(),
+            "the new group member must use [grouped] history=0");
+        assert!(runtime.close(first,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(runtime.store.lock().unwrap().history()[0].id,first,
+            "last remaining member becomes ungrouped and regains history=1");
     }
 
     #[test]
