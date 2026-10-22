@@ -46,10 +46,21 @@ impl MakoControl {
     }
 
     fn dismiss_impl(&self, options: &HashMap<String, OwnedValue>) -> zbus::fdo::Result<Vec<u32>> {
-        let all = options.get("all").and_then(|v| bool::try_from(v).ok()).unwrap_or(false);
-        let group = options.get("group").and_then(|v| bool::try_from(v).ok()).unwrap_or(false);
-        let history = options.get("history").and_then(|v| bool::try_from(v).ok()).unwrap_or(true);
-        let id = options.get("id").and_then(|v| u32::try_from(v).ok()).unwrap_or(0);
+        // Mako's sd_bus_message_read("v", expected_type) fails for a
+        // present field of the wrong type. Never silently fall back to id=0:
+        // that could dismiss the first unrelated notification.
+        let boolean = |key:&str,default:bool| -> zbus::fdo::Result<bool> {
+            options.get(key).map(|value|bool::try_from(value).map_err(|_| {
+                zbus::fdo::Error::InvalidArgs(format!(
+                    "{key} must be a D-Bus boolean"))
+            })).unwrap_or(Ok(default))
+        };
+        let all = boolean("all",false)?;
+        let group = boolean("group",false)?;
+        let history = boolean("history",true)?;
+        let id = options.get("id").map(|value|u32::try_from(value).map_err(|_| {
+            zbus::fdo::Error::InvalidArgs("id must be a D-Bus uint32".into())
+        })).unwrap_or(Ok(0))?;
 
         if (all && group) || (id != 0 && (all || group)) {
             return Err(zbus::fdo::Error::InvalidArgs(
@@ -327,6 +338,24 @@ mod tests {
                     ("group".into(), OwnedValue::from(true))].into();
         assert!(control.dismiss_impl(&opts).is_err());
         assert_eq!(control.store.lock().unwrap().active().len(), 1);
+    }
+
+    #[test]
+    fn malformed_dismiss_option_types_reject_without_dismissing() {
+        let control=fixture();
+        let id=control.store.lock().unwrap().push(Request::default());
+        for key in ["id","all","group","history"] {
+            // Wrong-typed keys are not treated as missing/default values.
+            let opts=[(key.to_string(),OwnedValue::from(-1i32))].into();
+            assert!(matches!(control.dismiss_impl(&opts),
+                Err(zbus::fdo::Error::InvalidArgs(_))),
+                "{key} accepted a D-Bus signed integer of the wrong type");
+            assert_eq!(control.store.lock().unwrap().active()[0].id,id);
+        }
+        // Unknown extension keys may be ignored, as in upstream Mako.
+        let opts=[("future-option".to_string(),OwnedValue::from(true)),
+                  ("id".into(),OwnedValue::from(id))].into();
+        assert_eq!(control.dismiss_impl(&opts).unwrap(),vec![id]);
     }
 
     #[test]
