@@ -28,3 +28,25 @@ fn notification_lifecycle_does_not_require_a_gui_or_database() {
     assert_eq!(store.history().len(),1);
     assert_eq!(store.restore(),Some(id));
 }
+
+#[test]
+fn posthornctl_usage_writes_stderr_with_mako_exit_semantics() {
+    use std::process::Command;
+
+    let binary=env!("CARGO_BIN_EXE_posthornctl");
+    let no_args=Command::new(binary).output().unwrap();
+    assert!(!no_args.status.success(),"bare invocation must exit nonzero");
+    assert!(no_args.stdout.is_empty(),"usage must not contaminate stdout");
+    assert!(String::from_utf8_lossy(&no_args.stderr).contains(
+        "Usage: posthornctl <command> [options...]"
+    ));
+
+    for flag in ["help","-h","--help"] {
+        let help=Command::new(binary).arg(flag).output().unwrap();
+        assert!(help.status.success(),"{flag} should exit successfully");
+        assert!(help.stdout.is_empty(),"{flag} must print usage to stderr");
+        assert!(String::from_utf8_lossy(&help.stderr).contains(
+            "Usage: posthornctl <command> [options...]"
+        ));
+    }
+}
