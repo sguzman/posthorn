@@ -160,6 +160,49 @@ async fn control_action_dictionary_preserves_raw_wire_order_with_duplicate_keys(
 }
 
 #[tokio::test]
+async fn action_dictionary_replacement_keeps_only_new_ordered_entries_in_history()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,_runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let id:u32=desktop.call("Notify",&(
+        "ordered-replacement",0u32,"","Original","",
+        vec![
+            "old-z".to_string(),"Original-first".to_string(),
+            "old-a".to_string(),"Original-last".to_string(),
+        ],
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let replacement:u32=desktop.call("Notify",&(
+        "ordered-replacement",id,"","Replaced","",
+        vec![
+            "new-z".to_string(),"Replacement-first".to_string(),
+            "new-a".to_string(),"Replacement-second".to_string(),
+            "new-z".to_string(),"Replacement-last".to_string(),
+        ],
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_eq!(replacement,id);
+    let assert_actions=|bytes:&[u8]|{
+        let find=|needle:&[u8]|bytes.windows(needle.len())
+            .position(|part|part==needle).expect("replacement action absent");
+        assert!(find(b"Replacement-last\0")<find(b"Replacement-second\0"));
+        assert!(find(b"Replacement-second\0")<find(b"Replacement-first\0"));
+        assert!(!bytes.windows(b"Original-first\0".len())
+            .any(|part|part==b"Original-first\0"),
+            "obsolete replaced action leaked into control wire");
+    };
+    let active=ctl.call_method("ListNotifications",&()).await?;
+    assert_actions(active.body().data().bytes());
+    let opts:HashMap<String,OwnedValue>=[("id".into(),OwnedValue::from(id))].into();
+    let _:()=ctl.call("DismissNotifications",&(opts,)).await?;
+    let history=ctl.call_method("ListHistory",&()).await?;
+    assert_actions(history.body().data().bytes());
+    Ok(())
+}
+
+#[tokio::test]
 async fn posthornctl_menu_uses_mako_sender_reversed_action_order()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
