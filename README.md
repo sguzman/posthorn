@@ -17,12 +17,12 @@ and Clear All, channels, SQLite persistence, and a general local message broker.
 > adapters on an isolated development bus, a continuously refreshed
 > Wayland layer-shell stack with release-aware SHM buffers and surface reuse,
 > dynamic named output routing with native-resolution integer-scaled buffers, distinct outer/window and
-> internal popup margins, directional padding and corner radii, icon border-radius clipping, shrink-wrapped Cairo/Pango text and icons, configured
+> internal popup margins, directional padding and corner radii, HiDPI theme-aware icon selection and icon border-radius clipping, shrink-wrapped Cairo/Pango text and icons, configured
 > post-grouping on-notify hooks, basic mouse/touch bindings, XDG activation
 > tokens, sender action invocation even when actions=0, and category-aware history,
 > scoped group-by projection, grouped count formatting, overrideable secondary-member visibility, accurate overflow placeholders, and partial posthornctl.
 > **It does not claim the desktop notifications D-Bus name.** Inline
-> Freedesktop image-data hints, progress fills and transactional config reload
+> Freedesktop image-data hints, Chromium numeric urgency variants, typed known-hint validation, progress fills and transactional config reload
 > are implemented in the private development daemon. Exact Pango layout,
 > fractional-scale behavior, full control parity, and live
 > Hyprland/XDG activation QA remain.
