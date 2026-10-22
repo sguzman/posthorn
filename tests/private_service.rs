@@ -160,6 +160,35 @@ async fn control_action_dictionary_preserves_raw_wire_order_with_duplicate_keys(
 }
 
 #[tokio::test]
+async fn posthornctl_menu_uses_mako_sender_reversed_action_order()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use futures_util::StreamExt;
+    use posthorn::ctl::{execute,Command};
+    let (conn,_runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let mut signals=desktop.receive_all_signals().await?;
+    let id:u32=desktop.call("Notify",&(
+        "menu-order",0u32,"","Menu order","",
+        vec![
+            "first".to_string(),"Early label".to_string(),
+            "middle".to_string(),"Middle label".to_string(),
+            "last".to_string(),"Latest label".to_string(),
+        ],
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    execute(Command::Menu{id,program:vec!["cat".into()]}).await?;
+    let received=tokio::time::timeout(
+        std::time::Duration::from_secs(3),signals.next()
+    ).await?.ok_or("menu action signal not emitted")?;
+    assert_eq!(received.header().member().unwrap().as_str(),"ActionInvoked");
+    let (actual_id,key):(u32,String)=received.body().deserialize()?;
+    assert_eq!((actual_id,key),(id,"last".to_string()),
+        "makoctl menu must select the first title in linked-list order");
+    Ok(())
+}
+
+#[tokio::test]
 async fn action_dictionary_wire_conversion_has_deterministic_keys()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
