@@ -87,13 +87,14 @@ impl SharedRuntime {
     /// mode/config reapplication. This does not reschedule timers or trigger
     /// on-notify bindings, which upstream also leaves alone.
     pub fn reapply_active_history_policies(&self)->Result<(),String>{
-        let (notes,modes)={
-            let store=self.store.lock()
-                .map_err(|_|"notification store lock poisoned")?;
-            let modes=self.modes.lock()
-                .map_err(|_|"mode state lock poisoned")?;
-            (store.active().iter().cloned().collect::<Vec<_>>(),modes.clone())
-        };
+        // Keep the store gate until the policy map has been replaced.
+        // Otherwise a concurrent Notify could insert its policy between our
+        // snapshot and update, only to have the newer ID silently erased.
+        let store=self.store.lock()
+            .map_err(|_|"notification store lock poisoned")?;
+        let modes=self.modes.lock()
+            .map_err(|_|"mode state lock poisoned")?.clone();
+        let notes=store.active().iter().cloned().collect::<Vec<_>>();
         let groups=crate::grouping::group_ordered_scoped(self,notes.iter(),&modes)?;
         let mut indices=HashMap::new();
         for group in groups {
