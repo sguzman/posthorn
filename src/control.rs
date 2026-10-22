@@ -6,7 +6,8 @@
 use std::collections::{HashMap,HashSet};
 use std::sync::{Arc, Mutex};
 
-use zbus::{interface, zvariant::{Dict, OwnedValue, Signature, Value}, Connection};
+use serde::ser::{Serialize, SerializeMap, Serializer};
+use zbus::{interface, zvariant::{Dict, OwnedValue, SerializeValue, Signature, Value}, Connection};
 
 use crate::dbus::{BUS_NAME, OBJECT_PATH};
 use crate::notification::{CloseReason, Notification, NotificationStore, Urgency};
@@ -14,6 +15,47 @@ use crate::runtime::SharedRuntime;
 
 pub const CONTROL_INTERFACE: &str = "fr.emersion.Mako";
 pub const CONTROL_PATH: &str = "/fr/emersion/Mako";
+    
+/// sd-bus emits the action a{ss} dictionary in linked-list order, including
+/// repeated keys. zvariant::Dict is backed by a BTreeMap and cannot represent
+/// either property; serialize the dictionary entries directly instead.
+#[derive(Clone,Debug,zbus::zvariant::Type)]
+#[zvariant(signature = "a{ss}")]
+struct OrderedActionDict(Vec<crate::notification::Action>);
+
+impl Serialize for OrderedActionDict {
+    fn serialize<S:Serializer>(&self, serializer:S)->Result<S::Ok,S::Error>{
+        let mut map=serializer.serialize_map(Some(self.0.len()))?;
+        for action in &self.0{
+            map.serialize_entry(&action.key,&action.label)?;
+        }
+        map.end()
+    }
+}
+
+/// Public Mako control records remain a{sv}. Only the nested actions variant
+/// gets custom ordered serialization. The legacy HashMap snapshot stays for
+/// internal callers; it is not an exact action-order wire representation.
+#[derive(Clone,Debug,zbus::zvariant::Type)]
+#[zvariant(signature = "a{sv}")]
+struct OrderedNotificationWire {
+    fields: HashMap<String,OwnedValue>,
+    actions: OrderedActionDict,
+}
+
+impl Serialize for OrderedNotificationWire {
+    fn serialize<S:Serializer>(&self,serializer:S)->Result<S::Ok,S::Error>{
+        let mut map=serializer.serialize_map(Some(self.fields.len()))?;
+        for (key,value) in &self.fields {
+            if key!="actions" {
+                map.serialize_entry(key,value)?;
+            }
+        }
+        map.serialize_entry("actions",&SerializeValue(&self.actions))?;
+        map.end()
+    }
+}
+
 
 /// Upstream Mako v1.11 uses a named control-interface error for a rejected
 /// reload, not org.freedesktop.DBus.Error.Failed. A failure must leave the
@@ -51,6 +93,15 @@ impl MakoControl {
         let store = self.store.lock().map_err(|_| internal_error())?;
         let notifications = if history { store.history() } else { store.active() };
         notifications.iter().map(wire_notification).collect()
+    }
+
+    fn ordered_snapshot(&self,history:bool)->zbus::fdo::Result<Vec<OrderedNotificationWire>>{
+        let store=self.store.lock().map_err(|_|internal_error())?;
+        let notifications=if history {store.history()}else{store.active()};
+        notifications.iter().map(|note|Ok(OrderedNotificationWire{
+            fields:wire_notification(note)?,
+            actions:OrderedActionDict(note.actions.clone()),
+        })).collect()
     }
 
     fn dismiss_impl(&self, options: &HashMap<String, OwnedValue>) -> zbus::fdo::Result<Vec<u32>> {
@@ -253,13 +304,13 @@ impl MakoControl {
     }
 
     #[zbus(name = "ListNotifications")]
-    fn list_notifications(&self) -> zbus::fdo::Result<Vec<HashMap<String, OwnedValue>>> {
-        self.snapshot(false)
+    fn list_notifications(&self) -> zbus::fdo::Result<Vec<OrderedNotificationWire>> {
+        self.ordered_snapshot(false)
     }
 
     #[zbus(name = "ListHistory")]
-    fn list_history(&self) -> zbus::fdo::Result<Vec<HashMap<String, OwnedValue>>> {
-        self.snapshot(true)
+    fn list_history(&self) -> zbus::fdo::Result<Vec<OrderedNotificationWire>> {
+        self.ordered_snapshot(true)
     }
 
     #[zbus(name = "SetMode")]
@@ -293,8 +344,8 @@ impl MakoControl {
     }
 
     #[zbus(property, name = "Notifications")]
-    fn notifications(&self) -> zbus::fdo::Result<Vec<HashMap<String, OwnedValue>>> {
-        self.snapshot(false)
+    fn notifications(&self) -> zbus::fdo::Result<Vec<OrderedNotificationWire>> {
+        self.ordered_snapshot(false)
     }
 
     #[zbus(name = "Reload")]
@@ -334,6 +385,34 @@ mod tests {
         assert_eq!(u8::try_from(list[0].get("urgency").unwrap()).unwrap(), 255);
         assert_eq!(u32::try_from(list[0].get("id").unwrap()).unwrap(), 1);
         assert!(list[0].contains_key("actions"));
+    }
+
+
+    #[test]
+    fn ordered_wire_retains_duplicate_keys_without_changing_dbus_signature(){
+        use zbus::zvariant::{serialized::Context,LE,Type};
+        assert_eq!(OrderedActionDict::SIGNATURE.to_string(),"a{ss}");
+        assert_eq!(OrderedNotificationWire::SIGNATURE.to_string(),"a{sv}");
+        let ctl=fixture();
+        ctl.store.lock().unwrap().push(Request{
+            actions:vec![
+                Action{key:"z".into(),label:"Latest".into()},
+                Action{key:"a".into(),label:"Middle".into()},
+                Action{key:"z".into(),label:"Earliest".into()},
+            ],
+            ..Request::default()
+        });
+        let notes=ctl.ordered_snapshot(false).unwrap();
+        let wire=zbus::zvariant::to_bytes(Context::new_dbus(LE,0),&notes).unwrap();
+        let bytes=wire.bytes();
+        let find=|needle:&[u8]|bytes.windows(needle.len())
+            .position(|segment|segment==needle).unwrap();
+        assert!(find(b"Latest\\0")<find(b"Middle\\0"));
+        assert!(find(b"Middle\\0")<find(b"Earliest\\0"));
+        let (decoded,_):(Vec<HashMap<String,OwnedValue>>,_)=
+            wire.deserialize().unwrap();
+        assert_eq!(decoded.len(),1);
+        assert!(decoded[0].contains_key("actions"));
     }
 
     #[test]
