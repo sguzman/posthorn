@@ -255,10 +255,16 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
         }
         viewer.poll_events().map_err(other)?;
         for click in viewer.take_clicks() {
-            // The Wayland thread owns compositor objects and must request the
-            // token. The async task owns emission of the D-Bus signals.
-            let activation_token=viewer.request_activation_token(click.serial)
-                .map_err(other)?;
+            // Request activation only for action bindings. Ordinary dismiss
+            // clicks must not incur a compositor token roundtrip.
+            let invokes_action=crate::input::hit_test(&runtime,click)
+                .map_err(other)?
+                .as_ref()
+                .is_some_and(|(_,binding)|
+                    crate::input::needs_activation_token(binding));
+            let activation_token=if invokes_action {
+                viewer.request_activation_token(click.serial).map_err(other)?
+            }else{None};
             if sender.send(DesktopClick{click,activation_token}).is_err() {
                 return Ok(());
             }

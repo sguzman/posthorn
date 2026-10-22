@@ -144,6 +144,12 @@ pub async fn dispatch_click_with_activation(
     Ok(())
 }
 
+/// A compositor token is useful only for action-invoking bindings. Avoid an
+/// expensive Wayland roundtrip on dismiss/none and external-command clicks.
+pub fn needs_activation_token(binding:&NotifyBinding)->bool{
+    matches!(binding,NotifyBinding::InvokeDefaultAction|NotifyBinding::InvokeAction(_))
+}
+
 /// The Mako actions=0 option suppresses ActionInvoked, while the matching
 /// click binding may still dismiss the notification.
 pub fn can_invoke_action(runtime:&SharedRuntime,id:u32,key:&str)->io::Result<bool>{
@@ -289,6 +295,16 @@ mod tests {
         let second=runtime.store.lock().unwrap().push(request());
         assert!(!can_invoke_action(&runtime,first,"default").unwrap());
         assert!(!can_invoke_action(&runtime,second,"default").unwrap());
+    }
+
+    #[test]
+    fn activation_roundtrip_is_reserved_for_action_bindings() {
+        assert!(needs_activation_token(&NotifyBinding::InvokeDefaultAction));
+        assert!(needs_activation_token(&NotifyBinding::InvokeAction("open".into())));
+        assert!(!needs_activation_token(&NotifyBinding::None));
+        assert!(!needs_activation_token(&NotifyBinding::Dismiss{save_history:true}));
+        assert!(!needs_activation_token(&NotifyBinding::DismissAll));
+        assert!(!needs_activation_token(&NotifyBinding::Exec("true".into())));
     }
 
     #[test]
