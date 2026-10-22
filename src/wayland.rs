@@ -104,9 +104,11 @@ impl PopupMargins {
     }
     /// Mako's one-to-four value CSS-style margin syntax.
     pub fn parse_mako(raw:&str)->Option<Self>{
-        let values:Vec<i32>=raw.split(',').map(|v|
-            v.trim_start_matches([' ','\t']).parse()
-        ).collect::<Result<_,_>>().ok()?;
+        // C Mako uses strtok_r: repeated separators produce no token,
+        // and parse_directional deliberately inspects only four values.
+        let values:Vec<i32>=raw.split(',').filter(|v|!v.is_empty())
+            .take(4).map(|v|v.trim_start_matches([' ','\t']).parse())
+            .collect::<Result<_,_>>().ok()?;
         match values.as_slice() {
             [a]=>Some(Self::uniform(*a)),
             [v,h]=>Some(Self{top:*v,right:*h,bottom:*v,left:*h}),
@@ -982,6 +984,17 @@ mod tests {
         assert_ne!(spec,PopupSurfaceSpec{output_name:"HDMI-A-1".into(),..spec.clone()});
         assert_ne!(spec,PopupSurfaceSpec{layer:PopupLayer::Overlay,..spec.clone()});
         assert_ne!(spec,PopupSurfaceSpec{scale:2,..spec.clone()});
+    }
+
+    #[test]
+    fn directional_margins_follow_mako_strtok_r_edge_cases() {
+        assert_eq!(PopupMargins::parse_mako("10,,20,30,40,garbage"),
+            Some(PopupMargins{top:10,right:20,bottom:30,left:40}));
+        assert_eq!(PopupMargins::parse_mako("5,,,"),
+            Some(PopupMargins::uniform(5)));
+        assert_eq!(PopupMargins::parse_mako("1,2,,3"),
+            Some(PopupMargins{top:1,right:2,bottom:3,left:2}));
+        assert_eq!(PopupMargins::parse_mako("5 ,6"),None);
     }
 
     #[test]

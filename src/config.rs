@@ -294,6 +294,12 @@ impl Config {
                 self.sort.push(value.into());
             } else {
                 validate_option(key, value).map_err(|e|err(&location,e))?;
+                // parse_directional() in upstream Mako accepts an empty
+                // strtok_r result without changing the inherited value.
+                if ["margin","outer-margin","padding","border-radius"].contains(&key)
+                    && value.split(',').all(str::is_empty) {
+                    continue;
+                }
                 match current {
                     Some(index) => { self.rules[index].options.insert(key.into(),value.into()); },
                     None => { self.global.insert(key.into(),value.into()); },
@@ -448,8 +454,13 @@ fn validate_option(key: &str, value: &str) -> Result<(), String> {
         }
     }
     else if DIRECTIONS.contains(&key) {
-        let items: Vec<_> = value.split(',').collect();
-        if (1..=4).contains(&items.len()) && items.iter().all(|x|parse_signed_mako(x).is_some()) { return Ok(()); }
+        // Mako uses strtok_r and reads at most four directional integers:
+        // repeated separators are ignored and extra values are unexamined.
+        let items:Vec<_>=value.split(',')
+            .filter(|item|!item.is_empty()).take(4).collect();
+        if items.iter().all(|item|parse_signed_mako(item).is_some()){
+            return Ok(());
+        }
     } else if COLORS.contains(&key) {
         let raw = value.strip_prefix('#');
         if let Some(raw) = raw {
@@ -534,6 +545,21 @@ mod tests {
             "over #11223","source #FFFFFF trailing"] {
             assert!(Config::parse(&format!("progress-color={value}\n")).is_err());
         }
+    }
+
+    #[test]
+    fn mako_directional_tokenization_ignores_empty_and_fifth_values() {
+        let c=Config::parse(
+            "margin=10,,20,30,40,unused\n"
+        ).unwrap();
+        assert_eq!(c.global["margin"],"10,,20,30,40,unused");
+        let no_change=Config::parse(
+            "margin=11,22\n[category=warning]\nmargin=,,,\n"
+        ).unwrap();
+        assert_eq!(no_change.global["margin"],"11,22");
+        assert!(!no_change.rules[0].options.contains_key("margin"));
+        assert!(Config::parse("margin=1 ,2\n").is_err());
+        assert!(Config::parse("margin=1,nope,3\n").is_err());
     }
 
     #[test]
