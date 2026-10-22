@@ -262,6 +262,13 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
         let config=runtime.config();
         let selected_output=config.global.get("output")
             .map(String::as_str).unwrap_or("");
+        // A configured monitor may be unplugged. Do not terminate the D-Bus
+        // service or keep a stale layer surface; retry after registry updates.
+        if !viewer.has_output(selected_output) {
+            viewer.clear();
+            std::thread::sleep(Duration::from_millis(45));
+            continue;
+        }
         let scale=viewer.output_scale(selected_output);
         let revision=runtime.revision();
         if notes!=previous || modes!=previous_modes ||

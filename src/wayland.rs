@@ -156,6 +156,7 @@ struct ConfigureState {
     pointer_x: f64,
     pointer_y: f64,
     clicks: Vec<PointerClick>,
+    output_globals: Vec<(u32,wl_output::WlOutput)>,
     output_names: Vec<(wl_output::WlOutput,String)>,
     output_scales: Vec<(wl_output::WlOutput,u32)>,
     entered_output: Option<wl_output::WlOutput>,
@@ -165,9 +166,35 @@ struct ConfigureState {
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for ConfigureState {
     fn event(
-        _: &mut Self, _: &wl_registry::WlRegistry, _: wl_registry::Event,
-        _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>,
-    ) {}
+        state: &mut Self,registry: &wl_registry::WlRegistry,
+        event: wl_registry::Event,
+        _: &GlobalListContents, _: &Connection, qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_registry::Event::Global{name,interface,version}
+                if interface=="wl_output" && version>=4 =>
+            {
+                if !state.output_globals.iter().any(|(id,_)|*id==name) {
+                    let output=registry.bind::<wl_output::WlOutput,_,_>(name,4,qh,());
+                    state.output_globals.push((name,output));
+                }
+            }
+            wl_registry::Event::GlobalRemove{name} => {
+                if let Some(index)=state.output_globals.iter()
+                    .position(|(id,_)|*id==name)
+                {
+                    let (_,output)=state.output_globals.swap_remove(index);
+                    state.output_names.retain(|(proxy,_)|proxy!=&output);
+                    state.output_scales.retain(|(proxy,_)|proxy!=&output);
+                    if state.entered_output.as_ref()==Some(&output) {
+                        state.entered_output=None;
+                    }
+                    output.release();
+                }
+            }
+            _=>{},
+        }
+    }
 }
 
 delegate_noop!(ConfigureState: ignore xdg_activation_v1::XdgActivationV1);
@@ -517,12 +544,13 @@ impl LivePresenter {
         // output instead of incorrectly selecting the first global.
         let named_outputs:Vec<_>=globals.contents().clone_list().into_iter()
             .filter(|g|g.interface=="wl_output"&&g.version>=4)
-            .map(|g|globals.registry().bind::<wl_output::WlOutput,_,_>(
+            .map(|g|(g.name,globals.registry().bind::<wl_output::WlOutput,_,_>(
                 g.name,4,&qh,()
-            ))
+            )))
             .collect();
         let mut state=ConfigureState::default();
-        if !named_outputs.is_empty() {
+        state.output_globals=named_outputs;
+        if !state.output_globals.is_empty() {
             queue.roundtrip(&mut state)?;
         }
         Ok(Self {
@@ -563,6 +591,13 @@ impl LivePresenter {
     /// notification store. The desktop loop must notice this and repaint.
     pub fn has_active_surface(&self)->bool {
         self.active.is_some()
+    }
+
+    /// Named output monitoring is dynamic: output globals can disappear and
+    /// later reappear with a new ID. Never present to a stale proxy.
+    pub fn has_output(&self,output_name:&str)->bool {
+        output_name.is_empty() || self.state.output_names.iter()
+            .any(|(_,name)|name==output_name)
     }
 
     pub fn output_scale(&self,output_name:&str)->u32{
