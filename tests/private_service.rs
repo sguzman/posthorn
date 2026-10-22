@@ -109,6 +109,54 @@ async fn private_control_menu_invokes_existing_action_without_shell()
     Ok(())
 }
 
+/// Mako's sd-bus a{ss} writer permits repeated keys in arrival order.
+/// Typed zvariant Dict readers collapse duplicates; inspect actual body bytes.
+#[tokio::test]
+async fn control_action_dictionary_preserves_raw_wire_order_with_duplicate_keys()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,_runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let id:u32=desktop.call("Notify",&(
+        "ordered-wire-test",0u32,"","Unique summary","",
+        vec![
+            "duplicate".to_string(),"Earliest-option-1".to_string(),
+            "middle".to_string(),"Middle-option-2".to_string(),
+            "duplicate".to_string(),"Latest-option-3".to_string(),
+        ],
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let check=|bytes:&[u8]|{
+        let at=|needle:&[u8]|bytes.windows(needle.len()).position(|entry|entry==needle)
+            .expect("action label missing from a{ss} wire data");
+        assert!(at(b"Latest-option-3\\0")<at(b"Middle-option-2\\0"));
+        assert!(at(b"Middle-option-2\\0")<at(b"Earliest-option-1\\0"));
+    };
+    let reply=ctl.call_method("ListNotifications",&()).await?;
+    let body=reply.body();
+    assert_eq!(body.signature().as_str(),"aa{sv}");
+    check(body.data().bytes());
+    let records:Vec<HashMap<String,OwnedValue>>=body.deserialize()?;
+    assert_eq!(records.len(),1);
+    assert_eq!(u32::try_from(records[0].get("id").unwrap())?,id);
+
+    let props=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,
+        "org.freedesktop.DBus.Properties").await?;
+    let reply=props.call_method("Get",&(CONTROL_INTERFACE,"Notifications")).await?;
+    assert_eq!(reply.body().signature().as_str(),"v");
+    check(reply.body().data().bytes());
+
+    let options:HashMap<String,OwnedValue>=[
+        ("id".into(),OwnedValue::from(id))
+    ].into();
+    let _:()=ctl.call("DismissNotifications",&(options,)).await?;
+    let history=ctl.call_method("ListHistory",&()).await?;
+    assert_eq!(history.body().signature().as_str(),"aa{sv}");
+    check(history.body().data().bytes());
+    Ok(())
+}
+
 #[tokio::test]
 async fn action_dictionary_wire_conversion_has_deterministic_keys()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
