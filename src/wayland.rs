@@ -104,7 +104,9 @@ impl PopupMargins {
     }
     /// Mako's one-to-four value CSS-style margin syntax.
     pub fn parse_mako(raw:&str)->Option<Self>{
-        let values:Vec<i32>=raw.split(',').map(|v|v.trim().parse()).collect::<Result<_,_>>().ok()?;
+        let values:Vec<i32>=raw.split(',').map(|v|
+            v.trim_start_matches([' ','\t']).parse()
+        ).collect::<Result<_,_>>().ok()?;
         match values.as_slice() {
             [a]=>Some(Self::uniform(*a)),
             [v,h]=>Some(Self{top:*v,right:*h,bottom:*v,left:*h}),

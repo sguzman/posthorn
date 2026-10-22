@@ -57,7 +57,7 @@ impl Selector {
         if key == "urgency" && !["low", "normal", "critical", "high"].contains(&value.to_ascii_lowercase().as_str()) {
             return Err(format!("invalid urgency '{value}'"));
         }
-        if key == "group-index" && value.parse::<i32>().is_err() {
+        if key == "group-index" && parse_signed_mako(value).is_none() {
             return Err(format!("invalid group-index '{value}'"));
         }
         if key == "anchor" && ![
@@ -93,7 +93,7 @@ impl Selector {
             "expiring" => return parse_bool(&self.value) == Some(n.requested_timeout_ms != 0),
             "grouped" => return parse_bool(&self.value) == Some(n.group_index >= 0),
             "hidden" => return parse_bool(&self.value) == Some(n.hidden),
-            "group-index" => return self.value.parse::<i32>().ok() == Some(n.group_index),
+            "group-index" => return parse_signed_mako(&self.value) == Some(n.group_index),
             _ => return false,
         };
         match &self.regex {
@@ -273,7 +273,8 @@ impl Config {
             }
             let (key, val) = line.split_once('=').ok_or_else(||err(&location,"expected key=value"))?;
             // Mako doesn't treat `#` after '=' as a comment: it is often a color.
-            let key = key.trim_end();
+            // Mako strips outer line whitespace, but NOT whitespace before
+            // '='. "width =400" is therefore an unknown option.
             let value = val.trim_end();
             if key == "include" && current.is_none() {
                 let path = resolve_include(value).map_err(|e|err(&location,e))?;
@@ -281,8 +282,8 @@ impl Config {
             } else if current.is_none() && key == "max-history" {
                 // Mako parses max-history as a signed int and treats
                 // zero or negative values as history disabled.
-                let signed=value.parse::<i32>()
-                    .map_err(|_|err(&location,"invalid max-history"))?;
+                let signed=parse_signed_mako(value)
+                    .ok_or_else(||err(&location,"invalid max-history"))?;
                 self.max_history=signed.max(0) as usize;
             } else if current.is_none() && key == "sort" {
                 if !["+priority", "-priority", "+time", "-time"].contains(&value) {
@@ -401,6 +402,13 @@ fn parse_selectors(text: &str) -> Result<Vec<Selector>, String> {
     Ok(selectors)
 }
 
+/// Upstream parse_int uses strtol: leading whitespace is accepted, but
+/// trailing nonnumeric characters are rejected. Keep i32 bounds safe.
+fn parse_signed_mako(text:&str)->Option<i32>{
+    let trimmed=text.trim_start_matches([' ','\t']);
+    trimmed.parse::<i32>().ok()
+}
+
 fn parse_bool(text: &str) -> Option<bool> {
     match text.to_ascii_lowercase().as_str() { "1" | "true" => Some(true), "0" | "false" => Some(false), _ => None }
 }
@@ -416,11 +424,11 @@ fn validate_option(key: &str, value: &str) -> Result<(), String> {
     if BOOL.contains(&key) {
         if parse_bool(value).is_some() { return Ok(()); }
     } else if NONNEG.contains(&key) {
-        if let Ok(number) = value.parse::<i32>() {
+        if let Some(number) = parse_signed_mako(value) {
             if number >= (if key=="width"||key=="height"||key=="max-icon-size" { 1 } else { 0 }) { return Ok(()); }
         }
     } else if key == "max-visible" {
-        if value.parse::<i32>().is_ok() { return Ok(()); }
+        if parse_signed_mako(value).is_some() { return Ok(()); }
     } else if key == "format" { return crate::format::decode_format(value).map(|_| ()).map_err(|e| e.to_string()); }
     else if STRINGS.contains(&key) { return Ok(()); }
     else if key == "group-by" {
@@ -441,7 +449,7 @@ fn validate_option(key: &str, value: &str) -> Result<(), String> {
     }
     else if DIRECTIONS.contains(&key) {
         let items: Vec<_> = value.split(',').collect();
-        if (1..=4).contains(&items.len()) && items.iter().all(|x|x.parse::<i32>().is_ok()) { return Ok(()); }
+        if (1..=4).contains(&items.len()) && items.iter().all(|x|parse_signed_mako(x).is_some()) { return Ok(()); }
     } else if COLORS.contains(&key) {
         let raw = value.strip_prefix('#');
         if let Some(raw) = raw {
@@ -526,6 +534,17 @@ mod tests {
             "over #11223","source #FFFFFF trailing"] {
             assert!(Config::parse(&format!("progress-color={value}\n")).is_err());
         }
+    }
+
+    #[test]
+    fn mako_numeric_values_allow_leading_space_but_option_keys_do_not() {
+        let c=Config::parse("width= 320\nheight= 75\nmax-history= 4\nmargin=2, 4, 6, 8\n").unwrap();
+        assert_eq!(c.global["width"]," 320");
+        assert_eq!(c.max_history,4);
+        assert_eq!(c.global["margin"],"2, 4, 6, 8");
+        assert!(Config::parse("width =320\n").is_err());
+        assert!(Config::parse("width=320 garbage\n").is_err());
+        assert!(Config::parse("max-history=4 garbage\n").is_err());
     }
 
     #[test]
