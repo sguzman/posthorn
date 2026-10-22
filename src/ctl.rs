@@ -234,22 +234,22 @@ fn json_field(map:&HashMap<String,OwnedValue>,key:&str)->String{
 /// output as text, so preserve the upstream CLI representation as well.
 pub fn notification_json_text(map:&HashMap<String,OwnedValue>)->String{
     let id=map.get("id").and_then(|v|u32::try_from(v).ok()).unwrap_or(0);
-    let mut result=format!("  {{\n    \\"id\\": {id},\n");
+    let mut result=format!("  {{\n    \"id\": {id},\n");
     for (wire,json_key) in [
         ("app-name","app_name"),("app-icon","app_icon"),
         ("category","category"),("desktop-entry","desktop_entry"),
         ("summary","summary"),("body","body"),
     ]{
-        result.push_str(&format!("    \\"{json_key}\\": {},\n",json_field(map,wire)));
+        result.push_str(&format!("    \"{json_key}\": {},\n",json_field(map,wire)));
     }
     let urgency=map.get("urgency").and_then(|v|u8::try_from(v).ok());
     let urgency=match urgency{
         Some(0)=>Some("low"),Some(1)=>Some("normal"),
         Some(2)=>Some("critical"),_=>None,
     };
-    result.push_str(&format!("    \\"urgency\\": {},\n",
+    result.push_str(&format!("    \"urgency\": {},\n",
         urgency.map(json_quoted).unwrap_or_else(||"null".into())));
-    result.push_str("    \\"actions\\": {");
+    result.push_str("    \"actions\": {");
     let actions:HashMap<String,String>=map.get("actions")
         .and_then(|v|HashMap::try_from(v.clone()).ok()).unwrap_or_default();
     let mut actions:Vec<_>=actions.into_iter().collect();
@@ -384,20 +384,21 @@ mod tests {
         let mut fields=HashMap::new();
         fields.insert("id".into(),OwnedValue::from(17u32));
         fields.insert("summary".into(),OwnedValue::try_from(
-            Value::from("Quoted \\"text\\" & newline\n")).unwrap());
+            Value::from("Quoted \"text\" & newline\n")).unwrap());
         fields.insert("urgency".into(),OwnedValue::from(2u8));
         fields.insert("actions".into(),OwnedValue::from(
             HashMap::from([("open".to_owned(),"Open".to_owned())])
         ));
         let rendered=notification_list_json_text(&[fields]);
-        assert!(rendered.starts_with("[\n  {\n    \\"id\\": 17,\n"));
-        assert!(rendered.contains("    \\"app_name\\": null,\n"));
-        assert!(rendered.contains("    \\"urgency\\": \\"critical\\",\n"));
-        assert!(rendered.contains("    \\"actions\\": {\\"open\\": \\"Open\\"}\n  }"));
-        assert!(rendered.contains("\\\\"text\\\\"));
+        assert!(rendered.starts_with("[\n  {\n    \"id\": 17,\n"));
+        assert!(rendered.contains("    \"app_name\": null,\n"));
+        assert!(rendered.contains("    \"urgency\": \"critical\",\n"));
+        assert!(rendered.contains("    \"actions\": {\"open\": \"Open\"}\n  }"));
+        assert!(rendered.contains("Quoted"));
         assert_eq!(notification_list_json_text(&[]),"[\n]\n");
         let parsed:serde_json::Value=serde_json::from_str(&rendered).unwrap();
         assert_eq!(parsed[0]["id"],17);
+        assert_eq!(parsed[0]["summary"],"Quoted \"text\" & newline\n");
     }
 
     #[test]
