@@ -294,10 +294,15 @@ impl Config {
                 self.sort.push(value.into());
             } else {
                 validate_option(key, value).map_err(|e|err(&location,e))?;
-                // parse_directional() in upstream Mako accepts an empty
-                // strtok_r result without changing the inherited value.
+                // An empty strtok_r result leaves the *current C style*
+                // unchanged. The root already has built-in values, whereas
+                // a newly created criteria section begins with zeroes.
                 if ["margin","outer-margin","padding","border-radius"].contains(&key)
                     && value.split(',').all(str::is_empty) {
+                    if let Some(index)=current {
+                        self.rules[index].options.entry(key.into())
+                            .or_insert_with(||"0".into());
+                    }
                     continue;
                 }
                 match current {
@@ -557,7 +562,14 @@ mod tests {
             "margin=11,22\n[category=warning]\nmargin=,,,\n"
         ).unwrap();
         assert_eq!(no_change.global["margin"],"11,22");
-        assert!(!no_change.rules[0].options.contains_key("margin"));
+        assert_eq!(no_change.rules[0].options.get("margin").map(String::as_str),
+            Some("0"),"empty section-local margin inherits empty style zero");
+        let earlier=Config::parse(
+            "[category=warning]\nmargin=7\nmargin=,,,\n"
+        ).unwrap();
+        assert_eq!(earlier.rules[0].options["margin"],"7");
+        let root=Config::parse("margin=,,\n").unwrap();
+        assert_eq!(root.global["margin"],"10");
         assert!(Config::parse("margin=1 ,2\n").is_err());
         assert!(Config::parse("margin=1,nope,3\n").is_err());
     }
