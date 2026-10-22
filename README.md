@@ -92,6 +92,17 @@ handlers are implemented but compositor interaction, output routing,
 activation and scaling now have headless protocol tests but are not yet
 verified on a real Hyprland session. Do not autostart it.
 
+## Automated compositor acceptance (development only)
+
+CI runs `tests/headless_wayland.sh` inside a new `dbus-run-session` and an
+isolated headless Sway compositor (wlroots). It launches the private
+`org.posthorn.Development` desktop service, calls Freedesktop `Notify`,
+observes layer-shell `configure` and `wl_surface.attach` protocol traffic,
+and checks that the renderer remains alive. This proves basic compositor
+integration, **not** pixel-perfect appearance, Hyprland parity, fractional
+HiDPI, or production service ownership. The installed Mako daemon is never
+involved.
+
 ## License
 
 MIT. Mako's original authors are credited in [the source baseline](docs/SOURCE_BASELINE.md).

@@ -72,7 +72,7 @@
               "id": "T105",
               "emoji": "📐",
               "name": "Type/layout/style parity for all Mako config settings",
-              "progress": 49
+              "progress": 56
             }
           ]
         },
@@ -122,7 +122,7 @@
               "id": "T301",
               "emoji": "📬",
               "name": "Implement org.freedesktop.Notifications methods and signals",
-              "progress": 88
+              "progress": 91
             },
             {
               "id": "T302",
@@ -147,19 +147,19 @@
               "id": "T401",
               "emoji": "🧱",
               "name": "Layer-shell surfaces, anchors, output routing and scaling",
-              "progress": 88
+              "progress": 89
             },
             {
               "id": "T402",
               "emoji": "🖌️",
               "name": "Text, icons, colors, borders, progress and layout",
-              "progress": 94
+              "progress": 96
             },
             {
               "id": "T403",
               "emoji": "🖱️",
               "name": "Pointer, touch, button bindings and XDG activation",
-              "progress": 73
+              "progress": 74
             }
           ]
         },
@@ -184,7 +184,7 @@
               "id": "T503",
               "emoji": "🧪",
               "name": "End-to-end on Hyprland, notify-send and Edge activation",
-              "progress": 0
+              "progress": 12
             },
             {
               "id": "T504",
@@ -199,7 +199,7 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 74
+          "progress": 77
         },
         {
           "emoji": "🎨",
@@ -209,7 +209,7 @@
         {
           "emoji": "📜",
           "name": "Mako history/control API parity",
-          "progress": 77
+          "progress": 79
         }
       ]
     },
