@@ -60,7 +60,7 @@
               "id": "T103",
               "emoji": "🧰",
               "name": "Complete option validation, built-in grouping and escaping semantics",
-              "progress": 71
+              "progress": 73
             },
             {
               "id": "T104",
@@ -72,7 +72,7 @@
               "id": "T105",
               "emoji": "📐",
               "name": "Type/layout/style parity for all Mako config settings",
-              "progress": 74
+              "progress": 76
             }
           ]
         },
@@ -97,7 +97,7 @@
               "id": "T203",
               "emoji": "⏳",
               "name": "Timeout selection and timer/event scheduling",
-              "progress": 94
+              "progress": 95
             },
             {
               "id": "T204",
@@ -109,7 +109,7 @@
               "id": "T205",
               "emoji": "🔤",
               "name": "Pango markup/escaping, format specifiers and actions",
-              "progress": 77
+              "progress": 79
             }
           ]
         },
@@ -128,7 +128,7 @@
               "id": "T302",
               "emoji": "🧾",
               "name": "Implement full Mako D-Bus control interface, properties and JSON",
-              "progress": 87
+              "progress": 88
             },
             {
               "id": "T303",
@@ -159,7 +159,7 @@
               "id": "T403",
               "emoji": "🖱️",
               "name": "Pointer, touch, button bindings and XDG activation",
-              "progress": 75
+              "progress": 77
             }
           ]
         },
@@ -199,7 +199,7 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 93
+          "progress": 94
         },
         {
           "emoji": "🎨",
@@ -209,7 +209,7 @@
         {
           "emoji": "📜",
           "name": "Mako history/control API parity",
-          "progress": 89
+          "progress": 90
         }
       ]
     },
