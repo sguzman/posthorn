@@ -379,6 +379,29 @@ mod tests {
     }
 
     #[test]
+    fn grouped_history_reapplies_after_timer_expiration() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=app-name\n[grouped]\nhistory=0\n"
+        ).unwrap());
+        let now=Instant::now();
+        let persistent=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),requested_timeout_ms:0,
+            ..Request::default()
+        });
+        runtime.schedule(persistent,now).unwrap();
+        let expiring=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),requested_timeout_ms:100,
+            ..Request::default()
+        });
+        runtime.schedule(expiring,now).unwrap();
+        assert_eq!(runtime.expire(now+Duration::from_millis(100)).unwrap(),
+            vec![expiring]);
+        assert!(runtime.store.lock().unwrap().history().is_empty());
+        assert!(runtime.close(persistent,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(runtime.store.lock().unwrap().history()[0].id,persistent);
+    }
+
+    #[test]
     fn per_category_history_rules_apply_on_dismissal_and_expiration() {
         let config=Config::parse(
             "default-timeout=100\n[category=transient]\nhistory=0\n"
