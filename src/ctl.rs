@@ -62,7 +62,11 @@ pub enum Command {
 fn parse_mako_id(raw:&str)->Result<u32,&'static str>{
     if raw.is_empty(){return Ok(0);}
     let digits=raw.trim_start_matches(|ch:char|ch.is_ascii_whitespace());
-    if digits=="-0" {return Ok(0);}
+    // strtoumax permits a minus sign, then negates the parsed unsigned
+    // magnitude. Every spelling of negative zero therefore yields ID zero.
+    if digits.strip_prefix('-').is_some_and(|number|
+        !number.is_empty() && number.bytes().all(|ch|ch==b'0')
+    ){return Ok(0);}
     digits.parse().map_err(|_|"invalid notification ID")
 }
 
@@ -709,6 +713,8 @@ mod tests {
     fn notification_ids_match_mako_strtoumax_cli_semantics(){
         assert_eq!(parse_mako_id("  +0042"),Ok(42));
         assert_eq!(parse_mako_id("\t-0"),Ok(0));
+        assert_eq!(parse_mako_id(" -0000"),Ok(0));
+        assert!(parse_mako_id("-0001").is_err());
         assert_eq!(parse_mako_id(""),Ok(0));
         assert!(parse_mako_id(" ").is_err());
         assert!(parse_mako_id("42 ").is_err());
