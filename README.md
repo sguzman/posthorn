@@ -49,12 +49,15 @@ unverified work as complete.
 
 ```sh
 cargo test --all-targets
+cargo run -- --check-config
 cargo run -- --check-config /path/to/mako/config
 # In a temporary D-Bus session (never claims the real Mako bus name):
 dbus-run-session -- cargo test --test dbus_wire --features dbus-integration
 ```
 
-`--check-config` is a **development-only** parser command. Success means the
+`--check-config` is a **development-only**, read-only parser command. Without PATH,
+it follows Mako's legacy-before-XDG configuration lookup and uses Mako defaults
+when no file is found. Success means the
 parser recognized the file; it does *not* mean the current Posthorn renderer
 would reproduce every setting. Current features remain incomplete until
 integration tests demonstrate behavior.

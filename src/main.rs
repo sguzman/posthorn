@@ -14,7 +14,7 @@ async fn main() -> ExitCode {
         (Some("--help") | Some("-h"), None) => {
             println!("Posthorn (development stage; NOT a desktop notification daemon)\n\
                      Usage:\n\
-                     \tposthorn --check-config PATH\n\
+                     \tposthorn --check-config [PATH]\n\
                      \tposthorn --experimental-private-service PATH\n\
                      \tposthorn --experimental-private-desktop PATH\n\
                      \tposthorn --experimental-popup-preview PATH\n\
@@ -24,6 +24,16 @@ async fn main() -> ExitCode {
                      It uses org.posthorn.Development, NOT org.freedesktop.Notifications.");
             ExitCode::SUCCESS
         }
+        (Some("--check-config"), None) => match Config::from_mako_defaults() {
+            Ok((config,source)) => {
+                let source=source.as_ref().map(|path|path.display().to_string())
+                    .unwrap_or_else(||"Mako built-in defaults".into());
+                println!("Parsed config from {source}: {} criteria rules; {} history slots",
+                    config.rules.len(),config.max_history);
+                ExitCode::SUCCESS
+            }
+            Err(error) => { eprintln!("{error}"); ExitCode::FAILURE }
+        },
         (Some("--check-config"), Some(path)) => match Config::from_path(Path::new(&path)) {
             Ok(config) => {
                 println!("Parsed config: {} criteria rules; {} history slots", config.rules.len(), config.max_history);

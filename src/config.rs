@@ -201,6 +201,36 @@ impl Config {
         Ok(conf)
     }
 
+    /// Mako v1.11 searches ~/.mako/config before XDG_CONFIG_HOME/mako/config
+    /// (falling back to ~/.config/mako/config). Do not search XDG_CONFIG_DIRS:
+    /// upstream Mako does not use it for configuration discovery.
+    pub fn find_default_path(home:&Path,xdg_config_home:Option<&Path>)->Option<PathBuf>{
+        let legacy=home.join(".mako/config");
+        if fs::File::open(&legacy).is_ok(){return Some(legacy);}
+        let fallback=home.join(".config");
+        let config_home=xdg_config_home.unwrap_or(&fallback);
+        let modern=config_home.join("mako/config");
+        if fs::File::open(&modern).is_ok(){return Some(modern);}
+        None
+    }
+
+    /// Read the same implicit config as Mako when available; otherwise use
+    /// upstream defaults. No daemon startup or notification bus access occurs.
+    pub fn from_mako_defaults()->Result<(Self,Option<PathBuf>),ConfigError>{
+        let Some(home)=std::env::var_os("HOME") else {
+            return Ok((Self::default(),None));
+        };
+        let xdg=std::env::var_os("XDG_CONFIG_HOME").filter(|p|!p.is_empty());
+        let path=Self::find_default_path(Path::new(&home),xdg.as_deref().map(Path::new));
+        match path {
+            Some(path)=>{
+                let config=Self::from_path(&path)?;
+                Ok((config,Some(path)))
+            }
+            None=>Ok((Self::default(),None)),
+        }
+    }
+
     /// Includes are resolved with Mako's absolute or `~/` path convention.
     pub fn from_path(path: &Path) -> Result<Self, ConfigError> {
         let mut conf = Self::default();
@@ -496,6 +526,31 @@ mod tests {
             "over #11223","source #FFFFFF trailing"] {
             assert!(Config::parse(&format!("progress-color={value}\n")).is_err());
         }
+    }
+
+    #[test]
+    fn mako_config_lookup_prefers_legacy_then_xdg_then_home_fallback() {
+        let root=tempfile::tempdir().unwrap();
+        let home=root.path().join("home");
+        let xdg=root.path().join("xdg");
+        std::fs::create_dir_all(&home).unwrap();
+        assert_eq!(Config::find_default_path(&home,Some(&xdg)),None);
+
+        std::fs::create_dir_all(xdg.join("mako")).unwrap();
+        std::fs::write(xdg.join("mako/config"),"width=320\n").unwrap();
+        assert_eq!(Config::find_default_path(&home,Some(&xdg)),
+            Some(xdg.join("mako/config")));
+
+        std::fs::create_dir_all(home.join(".mako")).unwrap();
+        std::fs::write(home.join(".mako/config"),"width=420\n").unwrap();
+        assert_eq!(Config::find_default_path(&home,Some(&xdg)),
+            Some(home.join(".mako/config")));
+
+        std::fs::remove_file(home.join(".mako/config")).unwrap();
+        std::fs::create_dir_all(home.join(".config/mako")).unwrap();
+        std::fs::write(home.join(".config/mako/config"),"width=300\n").unwrap();
+        assert_eq!(Config::find_default_path(&home,None),
+            Some(home.join(".config/mako/config")));
     }
 
     #[test]
