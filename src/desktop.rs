@@ -6,7 +6,7 @@
 use std::io;
 use std::time::Duration;
 use crate::config::{Options, Traits};
-use crate::grouping::{GroupSpec,group_ordered};
+use crate::grouping::group_ordered_scoped;
 use crate::notification::{Notification, Urgency};
 use crate::render::{compose_mako_stack,render_notification_group_scaled,render_hidden_placeholder_scaled,PixelFrame,StackAlignment};
 use crate::runtime::SharedRuntime;
@@ -111,9 +111,6 @@ pub fn visible_members_indexed(runtime:&SharedRuntime)
 
 fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
     let config=runtime.config();
-    let spec=config.global.get("group-by")
-        .map(String::as_str).unwrap_or("none");
-    let spec=GroupSpec::parse(spec).map_err(other)?;
     // Keep lock acquisition order consistent with SharedRuntime::schedule:
     // store first, modes second. The reverse order can deadlock with a
     // concurrent Notify() while the popup thread is reading groups.
@@ -124,7 +121,7 @@ fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
     let mut selected=Vec::new();
     let mut hidden_count=0usize;
     let mut displayed_groups=0usize;
-    for group in group_ordered(by_id,&spec) {
+    for group in group_ordered_scoped(runtime,by_id,&modes).map_err(other)? {
         let count=group.ids.len();
         for (index,id) in group.ids.iter().enumerate() {
             if let Some(note)=by_id.iter().find(|n|&n.id==id) {
@@ -157,14 +154,11 @@ fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
 /// Count real groups eligible for display, excluding explicitly invisible
 /// categories. This excludes them from synthetic hidden-count placeholders.
 pub fn displayable_groups(runtime:&SharedRuntime)->io::Result<usize>{
-    let config=runtime.config();
-    let group_spec=config.global.get("group-by")
-        .map(String::as_str).unwrap_or("none");
-    let spec=GroupSpec::parse(group_spec).map_err(other)?;
     let store=runtime.store.lock().map_err(|_|poisoned())?;
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let mut count=0usize;
-    for group in group_ordered(store.active(),&spec){
+    for group in group_ordered_scoped(runtime,store.active(),&modes)
+        .map_err(other)?{
         if let Some(id)=group.ids.first(){
             if let Some(n)=store.active().iter().find(|n|&n.id==id){
                 let style=style_for_note_group(runtime,n,&modes,group.ids.len());
@@ -478,6 +472,28 @@ mod tests {
             runtime.store.lock().unwrap().push(Request::default());
         }
         assert_eq!(visible_notifications(&runtime).unwrap().len(),7);
+    }
+
+    #[test]
+    fn scoped_group_by_reaches_visible_projection_and_formatting() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=none\n[category=warning]\ngroup-by=app-name\n"
+        ).unwrap());
+        let old=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),category:"success".into(),..Request::default()
+        });
+        let unrelated=runtime.store.lock().unwrap().push(Request{
+            app_name:"other".into(),category:"success".into(),..Request::default()
+        });
+        let warning=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),category:"warning".into(),..Request::default()
+        });
+        let projection=visible_members_indexed(&runtime).unwrap();
+        assert_eq!(projection.len(),2);
+        assert_eq!(projection.iter().map(|m|(m.notification.id,m.group_count,m.group_index))
+            .collect::<Vec<_>>(),vec![(warning,2,0),(unrelated,1,-1)]);
+        assert_eq!(displayable_groups(&runtime).unwrap(),2);
+        assert!(projection.iter().all(|m|m.notification.id!=old));
     }
 
     #[test]

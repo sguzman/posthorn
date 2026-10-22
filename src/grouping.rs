@@ -3,7 +3,7 @@
 //! This module does not yet physically reorder notification surfaces or apply
 //! Mako's built-in hidden/group-index criteria to the rendered view.
 
-use std::collections::HashMap;
+use std::collections::{HashMap,HashSet};
 use crate::notification::{Notification, Urgency};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -107,6 +107,38 @@ pub fn group_ordered<'a>(
         }
     }
     groups
+}
+
+/// Group a display-order snapshot using each leading notification's resolved
+/// group-by style rather than assuming one global grouping specification.
+/// This is a projection: it does not mutate notification IDs or active order.
+pub fn group_ordered_scoped<'a>(
+    runtime:&crate::runtime::SharedRuntime,
+    notifications:impl IntoIterator<Item=&'a Notification>,
+    modes:&[String],
+)->Result<Vec<Group>,String>{
+    let notes:Vec<&Notification>=notifications.into_iter().collect();
+    let mut claimed=HashSet::new();
+    let mut groups=Vec::new();
+    for leader in &notes {
+        if claimed.contains(&leader.id){continue;}
+        let style=crate::desktop::style_for_note_index(runtime,leader,modes,-1);
+        let spec=GroupSpec::parse(style.get("group-by")
+            .map(String::as_str).unwrap_or("none"))?;
+        let mut ids=vec![leader.id];
+        claimed.insert(leader.id);
+        if !spec.disabled {
+            let all=group_ordered(notes.iter().copied(),&spec);
+            if let Some(matching)=all.into_iter()
+                .find(|g|g.ids.contains(&leader.id)) {
+                for id in matching.ids {
+                    if claimed.insert(id){ids.push(id);}
+                }
+            }
+        }
+        groups.push(Group{ids});
+    }
+    Ok(groups)
 }
 
 /// Select the Mako dismissal group using the TARGET notification's
