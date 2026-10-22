@@ -23,6 +23,16 @@ pub enum Command {
     Help,
 }
 
+/// Match makoctl's strtoumax(base 10) notification ID parsing.
+/// It permits leading C-locale whitespace, a '+' sign, and -0. A
+/// completely empty argument is parsed as zero by upstream strtoumax.
+fn parse_mako_id(raw:&str)->Result<u32,&'static str>{
+    if raw.is_empty(){return Ok(0);}
+    let digits=raw.trim_start_matches(|ch:char|ch.is_ascii_whitespace());
+    if digits=="-0" {return Ok(0);}
+    digits.parse().map_err(|_|"invalid notification ID")
+}
+
 pub fn parse_command(args: &[String]) -> Result<Command, String> {
     let Some((command, rest)) = args.split_first() else {
         return Ok(Command::Help);
@@ -57,10 +67,9 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                     options=false;
                 } else if options && arg=="-n" {
                     i+=1;
-                    id=rest.get(i).ok_or("missing notification ID")?
-                        .parse().map_err(|_|"invalid notification ID")?;
+                    id=parse_mako_id(rest.get(i).ok_or("missing notification ID")?)?;
                 } else if options && arg.len()>2 && arg.starts_with("-n") {
-                    id=arg[2..].parse().map_err(|_|"invalid notification ID")?;
+                    id=parse_mako_id(&arg[2..])?;
                 } else if options && arg.starts_with('-') && arg.len()>1 {
                     return Err(format!("unknown menu option {arg}"));
                 } else {
@@ -106,7 +115,7 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                                     i+=1;
                                     rest.get(i).ok_or("missing notification ID")?.as_str()
                                 }else{attached.as_str()};
-                                id=value.parse().map_err(|_|"invalid notification ID")?;
+                                id=parse_mako_id(value)?;
                                 break;
                             }
                             _=>return Err(format!("unknown dismiss option -{option}")),
@@ -135,10 +144,9 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                     options=false;
                 } else if options && arg=="-n" {
                     i+=1;
-                    id=rest.get(i).ok_or("missing notification ID")?
-                        .parse().map_err(|_|"invalid notification ID")?;
+                    id=parse_mako_id(rest.get(i).ok_or("missing notification ID")?)?;
                 } else if options && arg.starts_with("-n") {
-                    id=arg[2..].parse().map_err(|_|"invalid notification ID")?;
+                    id=parse_mako_id(&arg[2..])?;
                 } else if options && arg.starts_with('-') {
                     return Err(format!("unknown invoke option {arg}"));
                 } else if action.is_none() {
@@ -610,6 +618,23 @@ mod tests {
         assert!(parse_command(&v(&["dismiss","-ag"])).is_err());
         assert!(parse_command(&v(&["dismiss","-n42","-g"])).is_err());
         assert!(parse_command(&v(&["dismiss","-z"])).is_err());
+    }
+
+    #[test]
+    fn notification_ids_match_mako_strtoumax_cli_semantics(){
+        assert_eq!(parse_mako_id("  +0042"),Ok(42));
+        assert_eq!(parse_mako_id("\t-0"),Ok(0));
+        assert_eq!(parse_mako_id(""),Ok(0));
+        assert!(parse_mako_id(" ").is_err());
+        assert!(parse_mako_id("42 ").is_err());
+        assert!(parse_mako_id("-1").is_err());
+        assert!(parse_mako_id("4294967296").is_err());
+        assert_eq!(parse_command(&v(&["invoke","-n"," 42"])).unwrap(),
+            Command::Invoke{id:42,action:"default".into()});
+        assert_eq!(parse_command(&v(&["menu","-n"," +42","cat"])).unwrap(),
+            Command::Menu{id:42,program:vec!["cat".into()]});
+        assert_eq!(parse_command(&v(&["dismiss","-n","\t-0"])).unwrap(),
+            Command::Dismiss{id:0,all:false,group:false,history:true});
     }
 
     #[test]
