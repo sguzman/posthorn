@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::process::{Command as ProcessCommand, Stdio};
-use zbus::{zvariant::OwnedValue, Connection, Proxy};
+use zbus::{zvariant::{OwnedValue,Value}, Connection, Proxy};
 
 use crate::control::{CONTROL_INTERFACE, CONTROL_PATH};
 use crate::service::PRIVATE_BUS_NAME;
@@ -259,30 +259,39 @@ pub fn update_modes(mut current: Vec<String>, edits: &[(char, String)]) -> Vec<S
     current
 }
 
-/// Resolve a menu program's selected title to the Freedesktop action key.
+/// Keep the wire a{ss} entry sequence intact. Mako's linked-list actions
+/// are emitted in reverse sender order and may contain duplicate keys.
+/// Converting the dictionary into a HashMap destroys both properties.
+fn action_pairs(map:&HashMap<String,OwnedValue>)->Vec<(String,String)>{
+    let Some(value)=map.get("actions") else{return Vec::new()};
+    let Value::Dict(dict)=&**value else{return Vec::new()};
+    dict.iter().filter_map(|(key,label)|{
+        let (Value::Str(key),Value::Str(label))=(key,label) else{return None};
+        Some((key.as_str().to_owned(),label.as_str().to_owned()))
+    }).collect()
+}
+
+/// Resolve a menu program's selected title to the first matching action key
+/// in Mako's wire iteration order (not alphabetical key order).
 fn selected_action_key(
-    actions: &HashMap<String,String>, selected: &str,
-) -> Option<String> {
-    let mut entries:Vec<_>=actions.iter().collect();
-    entries.sort_by(|a,b|a.0.cmp(b.0));
-    entries.into_iter().find(|(_,title)|*title==selected)
+    actions:&[(String,String)],selected:&str,
+)->Option<String>{
+    actions.iter().find(|(_,title)|title==selected)
         .map(|(key,_)|key.clone())
 }
 
 /// Pass labels via stdin and read a selection from a user-configured menu
 /// application, without evaluating the labels in a shell.
 fn choose_from_menu(
-    program: &[String], actions: &HashMap<String,String>,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    if program.is_empty() || actions.is_empty() {
+    program:&[String],actions:&[(String,String)],
+)->Result<String,Box<dyn std::error::Error+Send+Sync>>{
+    if program.is_empty()||actions.is_empty(){
         return Err("menu command and actions are required".into());
     }
-    let mut entries:Vec<_>=actions.iter().collect();
-    entries.sort_by(|a,b|a.0.cmp(b.0));
     let mut child=ProcessCommand::new(&program[0]).args(&program[1..])
         .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
-    if let Some(mut input)=child.stdin.take() {
-        for (_,label) in entries {
+    if let Some(mut input)=child.stdin.take(){
+        for (_,label) in actions{
             writeln!(input,"{label}")?;
         }
     }
@@ -331,10 +340,7 @@ pub fn notification_json_text(map:&HashMap<String,OwnedValue>)->String{
     result.push_str(&format!("    \"urgency\": {},\n",
         urgency.map(json_quoted).unwrap_or_else(||"null".into())));
     result.push_str("    \"actions\": {");
-    let actions:HashMap<String,String>=map.get("actions")
-        .and_then(|v|HashMap::try_from(v.clone()).ok()).unwrap_or_default();
-    let mut actions:Vec<_>=actions.into_iter().collect();
-    actions.sort_by(|a,b|a.0.cmp(&b.0));
+    let actions=action_pairs(map);
     for (index,(key,label)) in actions.iter().enumerate(){
         if index>0{result.push_str(", ");}
         result.push_str(&json_quoted(key));
@@ -380,14 +386,10 @@ pub fn notification_text(map:&HashMap<String,OwnedValue>)->String{
     if let Some(urgency)=urgency {
         result.push_str(&format!("  Urgency: {urgency}\n"));
     }
-    if let Some(actions)=map.get("actions")
-        .and_then(|v|HashMap::<String,String>::try_from(v.clone()).ok())
-        .filter(|actions|!actions.is_empty())
-    {
+    let actions=action_pairs(map);
+    if !actions.is_empty(){
         result.push_str("  Actions:\n");
-        let mut pairs:Vec<_>=actions.into_iter().collect();
-        pairs.sort_by(|a,b|a.0.cmp(&b.0));
-        for (key,label) in pairs{
+        for (key,label) in actions {
             result.push_str(&format!("    {key}: {label}\n"));
         }
     }
@@ -434,9 +436,8 @@ pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error +
             }).ok_or("notification not found")?;
             let notification_id=note.get("id")
                 .and_then(|v|u32::try_from(v).ok()).ok_or("missing notification ID")?;
-            let actions:HashMap<String,String>=note.get("actions")
-                .and_then(|v|HashMap::try_from(v.clone()).ok())
-                .ok_or("notification has no actions")?;
+            let actions=action_pairs(note);
+            if actions.is_empty(){return Err("notification has no actions".into());}
             let action=choose_from_menu(&program,&actions)?;
             let _: ()=proxy.call("InvokeAction",&(notification_id,action)).await?;
         }
@@ -597,14 +598,45 @@ mod tests {
 
     #[test]
     fn selecting_menu_title_recovers_correct_action_key() {
-        let actions:HashMap<_,_>=[
+        let actions=vec![
             ("default".into(),"Open".into()),
             ("dismiss".into(),"Ignore".into())
-        ].into();
+        ];
         assert_eq!(selected_action_key(&actions,"Open"),Some("default".into()));
         assert!(selected_action_key(&actions,"no such title").is_none());
         let chosen=choose_from_menu(&["cat".into()],&actions).unwrap();
         assert_eq!(chosen,"default");
+        let duplicates=vec![
+            ("later".into(),"Shared title".into()),
+            ("earlier".into(),"Shared title".into()),
+        ];
+        assert_eq!(selected_action_key(&duplicates,"Shared title"),
+            Some("later".into()));
+    }
+
+    #[test]
+    fn menu_list_and_json_keep_mako_dictionary_action_order(){
+        use zbus::zvariant::{Dict,Signature};
+        let mut dict=Dict::new(&Signature::Str,&Signature::Str);
+        for (key,label) in [
+            ("z","Last"),("a","First"),("z","Duplicate"),
+        ]{
+            dict.append(Value::from(key),Value::from(label)).unwrap();
+        }
+        let mut fields=HashMap::new();
+        fields.insert("id".into(),OwnedValue::from(8u32));
+        fields.insert("actions".into(),Value::Dict(dict).try_to_owned().unwrap());
+        assert_eq!(action_pairs(&fields),vec![
+            ("z".into(),"Last".into()),
+            ("a".into(),"First".into()),
+            ("z".into(),"Duplicate".into()),
+        ]);
+        assert!(notification_text(&fields).contains(
+            "  Actions:\n    z: Last\n    a: First\n    z: Duplicate\n"
+        ));
+        assert!(notification_json_text(&fields).contains(
+            r#""actions": {"z": "Last", "a": "First", "z": "Duplicate"}"#
+        ));
     }
 
     #[test]
