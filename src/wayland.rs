@@ -1,8 +1,8 @@
-//! First Wayland layer-shell integration boundary.
+//! Private Wayland layer-shell presenter and compositor protocol integration.
 //!
-//! This is a configure-handshake probe, not a visible notification renderer.
-//! It does not acquire the desktop notification D-Bus name and cannot replace
-//! Mako yet. The future rendering loop will extend this protocol state.
+//! Supports buffered rendering, release-aware SHM, click/touch events, named
+//! output integer scaling, and compositor-issued XDG activation tokens.
+//! Live Hyprland acceptance is still required before replacing Mako.
 
 use wayland_client::{
     delegate_noop,

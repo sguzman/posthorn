@@ -1,8 +1,8 @@
-//! Freedesktop notification D-Bus adapter (not activated by the CLI yet).
+//! Freedesktop notification D-Bus adapter on an isolated development bus.
 //!
-//! This intentionally preserves the Mako wire signature. A Wayland renderer,
-//! timeouts, and the control interface are still required before serving the
-//! session-bus name. NEVER run this beside the installed Mako daemon.
+//! Preserves Mako wire signatures, including action and activation signals.
+//! The real session-bus name remains reserved for future MVP inauguration;
+//! do not run a replacement alongside the installed Mako daemon.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

@@ -109,7 +109,7 @@
               "id": "T205",
               "emoji": "🔤",
               "name": "Pango markup/escaping, format specifiers and actions",
-              "progress": 66
+              "progress": 72
             }
           ]
         },
@@ -122,7 +122,7 @@
               "id": "T301",
               "emoji": "📬",
               "name": "Implement org.freedesktop.Notifications methods and signals",
-              "progress": 83
+              "progress": 88
             },
             {
               "id": "T302",
@@ -147,19 +147,19 @@
               "id": "T401",
               "emoji": "🧱",
               "name": "Layer-shell surfaces, anchors, output routing and scaling",
-              "progress": 84
+              "progress": 88
             },
             {
               "id": "T402",
               "emoji": "🖌️",
               "name": "Text, icons, colors, borders, progress and layout",
-              "progress": 93
+              "progress": 94
             },
             {
               "id": "T403",
               "emoji": "🖱️",
               "name": "Pointer, touch, button bindings and XDG activation",
-              "progress": 61
+              "progress": 73
             }
           ]
         },
@@ -178,7 +178,7 @@
               "id": "T502",
               "emoji": "🔔",
               "name": "Reproduce category colors, per-category sounds and quiet mode",
-              "progress": 39
+              "progress": 51
             },
             {
               "id": "T503",
@@ -199,17 +199,17 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 67
+          "progress": 73
         },
         {
           "emoji": "🎨",
           "name": "Mako category coloring and sound parity",
-          "progress": 40
+          "progress": 52
         },
         {
           "emoji": "📜",
           "name": "Mako history/control API parity",
-          "progress": 74
+          "progress": 77
         }
       ]
     },

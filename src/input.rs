@@ -2,7 +2,8 @@
 //!
 //! A click is translated to an existing notification ID before any mutation.
 //! Invalid hit tests, gaps, or unsupported binding values are harmless.
-//! No compositor activation token is issued yet: this is not full MVP parity.
+//! XDG activation tokens are requested by the Wayland thread for action
+//! bindings; actual Hyprland activation behavior remains unverified.
 
 use std::io;
 use crate::grouping::{group_ordered,GroupSpec};

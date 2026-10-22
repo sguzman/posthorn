@@ -15,16 +15,17 @@ and Clear All, channels, SQLite persistence, and a general local message broker.
 > **Not yet a working daemon.** Rust now includes configuration/criteria,
 > notification lifecycle, timers, sorting/grouping projections, D-Bus
 > adapters on an isolated development bus, a continuously refreshed
-> Wayland layer-shell stack with release-aware SHM buffer retention, same-size surface reuse and named output
-> selection, distinct Mako outer/window margins and internal popup margins,
-> shrink-wrapped Cairo/Pango text and icons, configured
-> on-notify shell hooks, basic mouse/touch bindings with actions=0 suppression, category-aware history,
+> Wayland layer-shell stack with release-aware SHM buffers and surface reuse,
+> named output routing with integer-scaled buffers, distinct outer/window and
+> internal popup margins, shrink-wrapped Cairo/Pango text and icons, configured
+> post-grouping on-notify hooks, basic mouse/touch bindings, XDG activation
+> tokens, actions=0 suppression, and category-aware history,
 > grouped count formatting, overrideable secondary-member visibility, accurate overflow placeholders, and partial posthornctl.
 > **It does not claim the desktop notifications D-Bus name.** Inline
 > Freedesktop image-data hints, progress fills and transactional config reload
 > are implemented in the private development daemon. Exact Pango layout,
-> XDG activation, hot-plug/HiDPI scaling, full control parity and live
-> Hyprland QA remain.
+> native-resolution HiDPI text, output hotplug, full control parity, and live
+> Hyprland/XDG activation QA remain.
 > **Keep using Mako.** Do not replace, disable or uninstall it for this build.
 
 ## Progress
@@ -88,7 +89,8 @@ alongside a separate Wayland renderer thread and updates a persistent stacked
 popup surface whenever the notification store changes. It does not claim the
 real desktop notification D-Bus name or replace Mako. Basic button/touch
 handlers are implemented but compositor interaction, output routing,
-activation and HiDPI remain unverified. Do not autostart it.
+activation and scaling now have headless protocol tests but are not yet
+verified on a real Hyprland session. Do not autostart it.
 
 ## License
 
