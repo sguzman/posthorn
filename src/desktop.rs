@@ -256,12 +256,17 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
                 .and_then(|s|PopupLayer::from_mako(s))
                 .unwrap_or(PopupLayer::Top);
             let output=config.global.get("output").map(String::as_str).unwrap_or("");
-            viewer.update_frame_on_output(frame.as_ref(),corner,margins,layer,output)
-                .map_err(other)?;
-            previous=notes;
-            previous_modes=modes;
-            previous_revision=revision;
-            previous_scale=scale;
+            if frame.is_none()||!viewer.buffer_backpressure(){
+                viewer.update_frame_on_output(frame.as_ref(),corner,margins,layer,output)
+                    .map_err(other)?;
+                previous=notes;
+                previous_modes=modes;
+                previous_revision=revision;
+                previous_scale=scale;
+            }
+            // Otherwise leave the previous snapshots unchanged: the next
+            // compositor buffer release retries the newest frame, without
+            // dropping notification or input events.
         }
         for click in viewer.take_clicks() {
             // Request activation only for action bindings. Ordinary dismiss

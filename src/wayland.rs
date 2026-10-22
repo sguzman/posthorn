@@ -553,6 +553,12 @@ impl LivePresenter {
 
     /// Resolve compositor-advertised integer scale. The unqualified default
     /// follows wl_surface.enter instead of assuming the first monitor.
+    /// A slow compositor may retain old shared-memory buffers. Postpone
+    /// visual updates rather than terminating the entire notification daemon.
+    pub fn buffer_backpressure(&self)->bool {
+        self.retired.len()+usize::from(self.active.is_some())>=32
+    }
+
     pub fn output_scale(&self,output_name:&str)->u32{
         let output=if output_name.is_empty(){
             self.state.entered_output.as_ref()
