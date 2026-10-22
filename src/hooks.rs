@@ -28,11 +28,9 @@ impl NotifyBinding {
             "invoke-default-action" => Ok(Self::InvokeDefaultAction),
             _ => {
                 if let Some(cmd) = raw.strip_prefix("exec ") {
-                    if cmd.trim().is_empty() { return Err("empty exec command".into()); }
                     return Ok(Self::Exec(cmd.into()));
                 }
                 if let Some(key) = raw.strip_prefix("invoke-action ") {
-                    if key.is_empty() { return Err("empty action key".into()); }
                     return Ok(Self::InvokeAction(key.into()));
                 }
                 Err(format!("unknown Mako on-notify binding: {raw}"))
@@ -70,7 +68,13 @@ mod tests {
             NotifyBinding::InvokeDefaultAction);
         assert_eq!(NotifyBinding::parse("exec /usr/bin/pw-play sound.wav").unwrap(),
             NotifyBinding::Exec("/usr/bin/pw-play sound.wav".into()));
-        assert!(NotifyBinding::parse("exec ").is_err());
+        // Mako's parse_style_option accepts empty exec and invoke-action
+        // suffixes; the later shell run is a no-op and the empty action
+        // key can only match a sender-provided empty key.
+        assert_eq!(NotifyBinding::parse("exec ").unwrap(),
+            NotifyBinding::Exec(String::new()));
+        assert_eq!(NotifyBinding::parse("invoke-action ").unwrap(),
+            NotifyBinding::InvokeAction(String::new()));
         assert!(NotifyBinding::parse("magic").is_err());
     }
 
