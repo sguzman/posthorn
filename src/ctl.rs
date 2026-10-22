@@ -68,25 +68,43 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
             Ok(Command::Menu{id,program})
         }
         "dismiss" => {
-            let mut id = 0u32;
-            let (mut all, mut group, mut history) = (false, false, true);
+            // Upstream uses GNU getopt_long("aghn:"). It supports clustered
+            // short flags, attached -n IDs, --, and option permutation.
+            let mut id=0u32;
+            let (mut all,mut group,mut history)=(false,false,true);
+            let mut options=true;
             let mut i=0;
-            while i<rest.len() {
-                match rest[i].as_str() {
-                    "-a" | "--all" => all=true,
-                    "-g" | "--group" => group=true,
-                    "-h" | "--no-history" => history=false,
-                    "-n" => {
-                        i += 1;
-                        id = rest.get(i).ok_or("missing notification ID")?
-                            .parse().map_err(|_| "invalid notification ID")?;
+            while i<rest.len(){
+                let arg=rest[i].as_str();
+                if options && arg=="--" {
+                    options=false;
+                }else if options && arg.starts_with("--"){
+                    match arg{
+                        "--all"=>all=true,
+                        "--group"=>group=true,
+                        "--no-history"=>history=false,
+                        _=>return Err(format!("unknown dismiss option {arg}")),
                     }
-                    other if other.starts_with("-n") => {
-                        id = other[2..].parse().map_err(|_| "invalid notification ID")?;
+                }else if options && arg.starts_with('-') && arg.len()>1{
+                    let mut chars=arg[1..].chars().peekable();
+                    while let Some(option)=chars.next(){
+                        match option{
+                            'a'=>all=true,'g'=>group=true,'h'=>history=false,
+                            'n'=>{
+                                let attached:String=chars.collect();
+                                let value=if attached.is_empty(){
+                                    i+=1;
+                                    rest.get(i).ok_or("missing notification ID")?.as_str()
+                                }else{attached.as_str()};
+                                id=value.parse().map_err(|_|"invalid notification ID")?;
+                                break;
+                            }
+                            _=>return Err(format!("unknown dismiss option -{option}")),
+                        }
                     }
-                    other => return Err(format!("unknown dismiss option {other}")),
                 }
-                i += 1;
+                // GNU getopt ignores extra non-option arguments here.
+                i+=1;
             }
             if (all && group) || (id != 0 && (all || group)) {
                 return Err("invalid combination of dismiss options".into());
@@ -531,6 +549,21 @@ mod tests {
         assert!(selected_action_key(&actions,"no such title").is_none());
         let chosen=choose_from_menu(&["cat".into()],&actions).unwrap();
         assert_eq!(chosen,"default");
+    }
+
+    #[test]
+    fn dismiss_getopt_long_accepts_clusters_permutation_and_terminator() {
+        assert_eq!(parse_command(&v(&["dismiss","-hn42"])).unwrap(),
+            Command::Dismiss{id:42,all:false,group:false,history:false});
+        assert_eq!(parse_command(&v(&["dismiss","--all","-h"])).unwrap(),
+            Command::Dismiss{id:0,all:true,group:false,history:false});
+        assert_eq!(parse_command(&v(&["dismiss","-a","ignored"])).unwrap(),
+            Command::Dismiss{id:0,all:true,group:false,history:true});
+        assert_eq!(parse_command(&v(&["dismiss","--","-a"])).unwrap(),
+            Command::Dismiss{id:0,all:false,group:false,history:true});
+        assert!(parse_command(&v(&["dismiss","-ag"])).is_err());
+        assert!(parse_command(&v(&["dismiss","-n42","-g"])).is_err());
+        assert!(parse_command(&v(&["dismiss","-z"])).is_err());
     }
 
     #[test]
