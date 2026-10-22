@@ -157,6 +157,8 @@ struct ConfigureState {
     pointer_y: f64,
     clicks: Vec<PointerClick>,
     output_names: Vec<(wl_output::WlOutput,String)>,
+    output_scales: Vec<(wl_output::WlOutput,u32)>,
+    entered_output: Option<wl_output::WlOutput>,
     released_buffers: Vec<wl_buffer::WlBuffer>,
     activation_token: Option<String>,
 }
@@ -182,7 +184,22 @@ impl Dispatch<xdg_activation_token_v1::XdgActivationTokenV1, ()> for ConfigureSt
 }
 
 delegate_noop!(ConfigureState: ignore wl_compositor::WlCompositor);
-delegate_noop!(ConfigureState: ignore wl_surface::WlSurface);
+impl Dispatch<wl_surface::WlSurface, ()> for ConfigureState {
+    fn event(
+        state:&mut Self,surface:&wl_surface::WlSurface,event:wl_surface::Event,
+        _:&(),_:&Connection,_:&QueueHandle<Self>,
+    ){
+        if state.active_surface.as_ref()!=Some(surface) {return;}
+        match event {
+            wl_surface::Event::Enter{output}=>state.entered_output=Some(output),
+            wl_surface::Event::Leave{output}=>
+                if state.entered_output.as_ref()==Some(&output){
+                    state.entered_output=None;
+                },
+            _=>{},
+        }
+    }
+}
 delegate_noop!(ConfigureState: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
 delegate_noop!(ConfigureState: ignore wl_shm::WlShm);
 delegate_noop!(ConfigureState: ignore wl_shm_pool::WlShmPool);
@@ -202,14 +219,25 @@ impl Dispatch<wl_output::WlOutput, ()> for ConfigureState {
         state:&mut Self, output:&wl_output::WlOutput,event:wl_output::Event,
         _:&(),_:&Connection,_:&QueueHandle<Self>,
     ){
-        if let wl_output::Event::Name{name}=event {
-            if let Some((_,value))=state.output_names.iter_mut()
-                .find(|(proxy,_)|proxy==output)
-            {
-                *value=name;
-            }else {
-                state.output_names.push((output.clone(),name));
+        match event {
+            wl_output::Event::Name{name}=>{
+                if let Some((_,value))=state.output_names.iter_mut()
+                    .find(|(proxy,_)|proxy==output){
+                    *value=name;
+                }else{
+                    state.output_names.push((output.clone(),name));
+                }
             }
+            wl_output::Event::Scale{factor}=>{
+                let scale=factor.clamp(1,8) as u32;
+                if let Some((_,value))=state.output_scales.iter_mut()
+                    .find(|(proxy,_)|proxy==output){
+                    *value=scale;
+                }else{
+                    state.output_scales.push((output.clone(),scale));
+                }
+            }
+            _=>{},
         }
     }
 }
@@ -450,6 +478,7 @@ struct PopupSurfaceSpec {
     margins:PopupMargins,
     layer:PopupLayer,
     output_name:String,
+    scale:u32,
 }
 
 struct ShmAllocation {
@@ -522,6 +551,21 @@ impl LivePresenter {
         self.update_frame_on_output(frame,corner,margins,selected_layer,"")
     }
 
+    /// Resolve compositor-advertised integer scale. The unqualified default
+    /// follows wl_surface.enter instead of assuming the first monitor.
+    pub fn output_scale(&self,output_name:&str)->u32{
+        let output=if output_name.is_empty(){
+            self.state.entered_output.as_ref()
+        }else{
+            self.state.output_names.iter()
+                .find(|(_,name)|name==output_name)
+                .map(|(out,_)|out)
+        };
+        output.and_then(|target|self.state.output_scales.iter()
+            .find(|(out,_)|out==target)
+            .map(|(_,scale)|*scale)).unwrap_or(1)
+    }
+
     pub fn update_frame_on_output(
         &mut self, frame: Option<&PixelFrame>, corner: ScreenCorner,
         margins: PopupMargins, selected_layer: PopupLayer, output_name:&str,
@@ -543,9 +587,10 @@ impl LivePresenter {
                 .ok_or_else(||format!("Wayland output not found: {output_name}"))?
                 .0.clone())
         };
+        let scale=self.output_scale(output_name);
         let spec=PopupSurfaceSpec {
             width:frame.width,height:frame.height,corner,margins,
-            layer:selected_layer,output_name:output_name.into(),
+            layer:selected_layer,output_name:output_name.into(),scale,
         };
         if self.active.as_ref().is_some_and(|live|live.spec==spec){
             return self.redraw_active(frame);
@@ -564,6 +609,7 @@ impl LivePresenter {
         self.state.clicks.clear();
         let surface = self.compositor.create_surface(&self.qh, ());
         self.state.active_surface=Some(surface.clone());
+        self.state.entered_output=None;
         let layer = self.shell.get_layer_surface(
             &surface, output.as_ref(), selected_layer.protocol(),
             "posthorn-private-preview".into(), &self.qh, (),
@@ -584,17 +630,19 @@ impl LivePresenter {
         if (cw != 0 && cw != frame.width) || (ch != 0 && ch != frame.height) {
             return Err("compositor supplied an unexpected popup size".into());
         }
+        let physical=scale_frame(frame,scale)?;
         let mut backing = tempfile::tempfile()?;
-        backing.write_all(&frame.pixels)?;
+        backing.write_all(&physical.pixels)?;
         let pool = self.shm.create_pool(
-            backing.as_fd(), frame.pixels.len() as i32, &self.qh, (),
+            backing.as_fd(), physical.pixels.len() as i32, &self.qh, (),
         );
         let buffer = pool.create_buffer(
-            0, frame.width as i32, frame.height as i32, frame.stride,
+            0, physical.width as i32, physical.height as i32, physical.stride,
             wl_shm::Format::Argb8888, &self.qh, (),
         );
+        surface.set_buffer_scale(scale as i32);
         surface.attach(Some(&buffer), 0, 0);
-        surface.damage_buffer(0, 0, frame.width as i32, frame.height as i32);
+        surface.damage_buffer(0, 0, physical.width as i32, physical.height as i32);
         surface.commit();
         self.conn.flush()?;
         self.active = Some(LiveSurface {
@@ -617,14 +665,16 @@ impl LivePresenter {
         let Some(live)=self.active.as_mut() else {
             return Err("cannot redraw an unmapped Wayland notification".into());
         };
+        let physical=scale_frame(frame,live.spec.scale)?;
         let mut backing=tempfile::tempfile()?;
-        backing.write_all(&frame.pixels)?;
+        backing.write_all(&physical.pixels)?;
         let pool=self.shm.create_pool(backing.as_fd(),
-            frame.pixels.len() as i32,&self.qh,());
-        let buffer=pool.create_buffer(0,frame.width as i32,frame.height as i32,
-            frame.stride,wl_shm::Format::Argb8888,&self.qh,());
+            physical.pixels.len() as i32,&self.qh,());
+        let buffer=pool.create_buffer(0,physical.width as i32,physical.height as i32,
+            physical.stride,wl_shm::Format::Argb8888,&self.qh,());
+        live.surface.set_buffer_scale(live.spec.scale as i32);
         live.surface.attach(Some(&buffer),0,0);
-        live.surface.damage_buffer(0,0,frame.width as i32,frame.height as i32);
+        live.surface.damage_buffer(0,0,physical.width as i32,physical.height as i32);
         live.surface.commit();
         // Never destroy or drop the old allocation until wl_buffer.release.
         // The compositor might still be reading the old frame.
@@ -720,6 +770,7 @@ impl LivePresenter {
     pub fn clear(&mut self) {
         self.state.pointer_inside = false;
         self.state.active_surface=None;
+        self.state.entered_output=None;
         self.state.touch_contacts.clear();
         self.state.clicks.clear();
         if let Some(old) = self.active.take() {
@@ -844,12 +895,13 @@ mod tests {
         let spec=PopupSurfaceSpec{
             width:440,height:120,corner:ScreenCorner::TopRight,
             margins:PopupMargins::uniform(10),layer:PopupLayer::Top,
-            output_name:"DP-1".into(),
+            output_name:"DP-1".into(),scale:1,
         };
         assert_eq!(spec,spec.clone());
         assert_ne!(spec,PopupSurfaceSpec{width:500,..spec.clone()});
         assert_ne!(spec,PopupSurfaceSpec{output_name:"HDMI-A-1".into(),..spec.clone()});
         assert_ne!(spec,PopupSurfaceSpec{layer:PopupLayer::Overlay,..spec.clone()});
+        assert_ne!(spec,PopupSurfaceSpec{scale:2,..spec.clone()});
     }
 
     #[test]

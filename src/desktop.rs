@@ -231,13 +231,22 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
     let mut viewer=LivePresenter::connect().map_err(other)?;
     let (mut previous, mut previous_modes)=(Vec::new(),Vec::new());
     let mut previous_revision=u64::MAX;
+    let mut previous_scale=0u32;
     loop {
         let notes: Vec<_>=runtime.store.lock().map_err(|_|poisoned())?
             .active().iter().cloned().collect();
         let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
+        // Read Wayland output scale events before deciding whether a fresh
+        // logical image must be committed with new physical SHM dimensions.
+        viewer.poll_events().map_err(other)?;
+        let config=runtime.config();
+        let selected_output=config.global.get("output")
+            .map(String::as_str).unwrap_or("");
+        let scale=viewer.output_scale(selected_output);
         let revision=runtime.revision();
-        if notes!=previous || modes!=previous_modes || revision!=previous_revision {
-            let config=runtime.config();
+        if notes!=previous || modes!=previous_modes ||
+            revision!=previous_revision || scale!=previous_scale {
+
             let frame=snapshot_frame(&runtime)?;
             let corner=config.global.get("anchor")
                 .and_then(|s|ScreenCorner::from_mako(s))
@@ -252,8 +261,8 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
             previous=notes;
             previous_modes=modes;
             previous_revision=revision;
+            previous_scale=scale;
         }
-        viewer.poll_events().map_err(other)?;
         for click in viewer.take_clicks() {
             // Request activation only for action bindings. Ordinary dismiss
             // clicks must not incur a compositor token roundtrip.
