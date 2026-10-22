@@ -239,7 +239,7 @@ fi
 busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
   /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
   'susssasa{sv}i' 'Posthorn reload smoke' 0 '' 'Repaint me' '' 0 1 \
-  'category' 's' 'warning' 7000 >/dev/null
+  'category' 's' 'warning' 20000 >/dev/null
 old_visible=0
 for _ in {1..15}; do
   sleep 0.15
@@ -297,7 +297,54 @@ assert pixels[(35,76,143)] >= 300, (
 )
 PY
 sed -i 's/background-color=not-a-color/background-color=#234C8F/' "$root/mako.conf"
-echo "Headless Sway ${test_scale}x + D-Bus popups, timer, and live reload/rejection: OK"
+# A mode switch, unlike a configuration reload, must immediately
+# restyle already-active popups without restarting the daemon. Exercise the
+# actual layer-shell pixels via the private development bus at both scales.
+printf '\n[mode=quiet]\nbackground-color=#6B488F\n' >> "$root/mako.conf"
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako SetMode \
+  's' quiet >/dev/null
+mode_painted=0
+for _ in {1..20}; do
+  sleep 0.15
+  grim "$root/quiet-mode.png"
+  if /usr/bin/python3 - "$root/quiet-mode.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+counts = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if counts[(107,72,143)] >= 300 else 1)
+PY
+  then mode_painted=1; break; fi
+done
+[[ "$mode_painted" == 1 ]] || {
+  echo 'SetMode quiet did not repaint the active popup'
+  cat "$root/posthorn.log"
+  exit 1
+}
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako SetMode \
+  's' default >/dev/null
+mode_reverted=0
+for _ in {1..20}; do
+  sleep 0.15
+  grim "$root/default-mode.png"
+  if /usr/bin/python3 - "$root/default-mode.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+counts = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if counts[(35,76,143)] >= 300
+    and counts[(107,72,143)] < 100 else 1)
+PY
+  then mode_reverted=1; break; fi
+done
+[[ "$mode_reverted" == 1 ]] || {
+  echo 'SetMode default did not restore the existing popup appearance'
+  cat "$root/posthorn.log"
+  exit 1
+}
+echo "Headless Sway ${test_scale}x + D-Bus popups, timer, reload and live modes: OK"
 
 if [[ "$test_scale" == 1 ]]; then
   # Live registry hotplug: the target named output does not exist at daemon
