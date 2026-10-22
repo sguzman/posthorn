@@ -63,7 +63,8 @@ pub enum Command {
 /// completely empty argument is parsed as zero by upstream strtoumax.
 fn parse_mako_id(raw:&str)->Result<u32,&'static str>{
     if raw.is_empty(){return Ok(0);}
-    let digits=raw.trim_start_matches(|ch:char|ch.is_ascii_whitespace());
+    // strtoumax skips C isspace, including vertical tab (0x0B).
+    let digits=raw.trim_start_matches([' ','\t','\n','\r','\x0b','\x0c']);
     // strtoumax permits a minus sign, then negates the parsed unsigned
     // magnitude. Every spelling of negative zero therefore yields ID zero.
     if digits.strip_prefix('-').is_some_and(|number|
@@ -810,6 +811,8 @@ mod tests {
     #[test]
     fn notification_ids_match_mako_strtoumax_cli_semantics(){
         assert_eq!(parse_mako_id("  +0042"),Ok(42));
+        assert_eq!(parse_mako_id("\x0b+0042"),Ok(42));
+        assert_eq!(parse_mako_id("\x0c0"),Ok(0));
         assert_eq!(parse_mako_id("\t-0"),Ok(0));
         assert_eq!(parse_mako_id(" -0000"),Ok(0));
         assert!(parse_mako_id("-0001").is_err());
