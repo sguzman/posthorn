@@ -15,11 +15,11 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🔐 T003 — Keep live Mako untouched, isolate public test fixtures — `██████████ 100%`
 - 🧪 T004 — Validate Rust scaffold with CI and formatting — `██████████ 97%`
 
-### 🧩 P1 — Config, criteria and types port — `████████░░ 80%`
+### 🧩 P1 — Config, criteria and types port — `████████░░ 81%`
 
 - 📄 T101 — Parse Mako configuration sections and ordered overrides — `██████████ 100%`
-- 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `█████████░ 89%`
-- 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `██████░░░░ 62%`
+- 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `█████████░ 91%`
+- 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `███████░░░ 66%`
 - 📂 T104 — Include files with Mako-compatible path behavior — `████████░░ 75%`
 - 📐 T105 — Type/layout/style parity for all Mako config settings — `███████░░░ 72%`
 
@@ -45,7 +45,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 ### 🎛️ P5 — CLI and exact workstation parity — `█████░░░░░ 45%`
 
-- ⌨️ T501 — Port makoctl operations with compatibility tests — `███████░░░ 74%`
+- ⌨️ T501 — Port makoctl operations with compatibility tests — `████████░░ 76%`
 - 🔔 T502 — Reproduce category colors, per-category sounds and quiet mode — `███████░░░ 68%`
 - 🧪 T503 — End-to-end on Hyprland, notify-send and Edge activation — `████░░░░░░ 37%`
 - 🚀 T504 — MVP inauguration and opt-in reversible Mako switch — `░░░░░░░░░░ 0%`

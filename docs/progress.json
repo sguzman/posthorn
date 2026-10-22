@@ -54,13 +54,13 @@
               "id": "T102",
               "emoji": "🔎",
               "name": "Match categories, modes, exact fields, quoted and regex selectors",
-              "progress": 89
+              "progress": 91
             },
             {
               "id": "T103",
               "emoji": "🧰",
               "name": "Complete option validation, built-in grouping and escaping semantics",
-              "progress": 62
+              "progress": 66
             },
             {
               "id": "T104",
@@ -172,7 +172,7 @@
               "id": "T501",
               "emoji": "⌨️",
               "name": "Port makoctl operations with compatibility tests",
-              "progress": 74
+              "progress": 76
             },
             {
               "id": "T502",
