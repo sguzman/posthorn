@@ -594,9 +594,9 @@ async fn capabilities_union_root_and_scoped_styles_over_dbus()
     let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
     let capabilities:Vec<String>=desktop.call("GetCapabilities",&()).await?;
     assert_eq!(capabilities,vec![
-        "body-markup","actions","icon-static",
+        "body","body-markup","actions","icon-static",
         "x-canonical-private-synchronous","x-dunst-stack-tag",
-    ],"Mako's superstyle includes capabilities enabled by scoped rules");
+    ],"Mako's superstyle includes built-in grouped body plus scoped capabilities");
     Ok(())
 }
 
