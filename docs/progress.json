@@ -97,7 +97,7 @@
               "id": "T203",
               "emoji": "⏳",
               "name": "Timeout selection and timer/event scheduling",
-              "progress": 90
+              "progress": 92
             },
             {
               "id": "T204",
@@ -147,13 +147,13 @@
               "id": "T401",
               "emoji": "🧱",
               "name": "Layer-shell surfaces, anchors, output routing and scaling",
-              "progress": 90
+              "progress": 92
             },
             {
               "id": "T402",
               "emoji": "🖌️",
               "name": "Text, icons, colors, borders, progress and layout",
-              "progress": 98
+              "progress": 99
             },
             {
               "id": "T403",
@@ -184,7 +184,7 @@
               "id": "T503",
               "emoji": "🧪",
               "name": "End-to-end on Hyprland, notify-send and Edge activation",
-              "progress": 39
+              "progress": 44
             },
             {
               "id": "T504",
@@ -199,7 +199,7 @@
         {
           "emoji": "🔔",
           "name": "Desktop notification parity",
-          "progress": 85
+          "progress": 87
         },
         {
           "emoji": "🎨",

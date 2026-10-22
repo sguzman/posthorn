@@ -16,7 +16,7 @@ and Clear All, channels, SQLite persistence, and a general local message broker.
 > notification lifecycle, timers, sorting/grouping projections, D-Bus
 > adapters on an isolated development bus, a continuously refreshed
 > Wayland layer-shell stack with release-aware SHM buffers and surface reuse,
-> named output routing with integer-scaled buffers, distinct outer/window and
+> dynamic named output routing with native-resolution integer-scaled buffers, distinct outer/window and
 > internal popup margins, directional padding and corner radii, icon border-radius clipping, shrink-wrapped Cairo/Pango text and icons, configured
 > post-grouping on-notify hooks, basic mouse/touch bindings, XDG activation
 > tokens, actions=0 suppression, and category-aware history,
@@ -24,7 +24,7 @@ and Clear All, channels, SQLite persistence, and a general local message broker.
 > **It does not claim the desktop notifications D-Bus name.** Inline
 > Freedesktop image-data hints, progress fills and transactional config reload
 > are implemented in the private development daemon. Exact Pango layout,
-> native-resolution HiDPI text, output hotplug, full control parity, and live
+> fractional-scale behavior, full control parity, and live
 > Hyprland/XDG activation QA remain.
 > **Keep using Mako.** Do not replace, disable or uninstall it for this build.
 
@@ -99,7 +99,7 @@ isolated headless Sway compositor (wlroots). It launches the private
 `org.posthorn.Development` desktop service, calls Freedesktop `Notify`,
 observes layer-shell `configure` and `wl_surface.attach` protocol traffic,
 then uses wlroots screencopy to capture the headless output and verify
-that all three success/failure/warning category colors actually appear in newest-first order near the configured right anchor. After a Freedesktop CloseNotification, a second screenshot must show the closed category gone while other category popups remain. This proves
+that all three success/failure/warning category colors actually appear in newest-first order near the configured right anchor. After a Freedesktop CloseNotification, a second screenshot must show the closed category gone while other category popups remain. The same screenshot lifecycle runs at 1x and 2x scale and checks timer-driven expiration. This proves
 basic compositor rendering and category color propagation, **not** pixel-perfect
 Hyprland parity, fractional HiDPI, or production service ownership. The installed Mako daemon is never
 involved.
