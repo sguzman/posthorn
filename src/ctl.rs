@@ -125,9 +125,11 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                     value=>{positional.push(value.to_owned());i+=1;}
                 }
             }
+            if set && !edits.is_empty() {
+                return Err("mode -s cannot be combined with -a/-r/-t".into());
+            }
             if set {
                 // A marker is retained even if no positional mode follows.
-                // The set operation supersedes add/remove/toggle edits.
                 edits.push(('s',String::new()));
                 edits.extend(positional.into_iter().map(|m|('S',m)));
             } else if !positional.is_empty() {
@@ -379,6 +381,9 @@ mod tests {
         assert!(parse_command(&v(&["mode","quiet"])).is_err());
         assert!(parse_command(&v(&["mode","-a"])).is_err());
         assert!(parse_command(&v(&["mode","-a","-t"])).is_err());
+        assert!(parse_command(&v(&["mode","-s","-a","quiet"])).is_err());
+        assert!(parse_command(&v(&["mode","-r","default","-s","quiet"])).is_err());
+        assert!(parse_command(&v(&["mode","-t","quiet","-s"])).is_err());
         assert_eq!(parse_command(&v(&["mode","-a","quiet","-t","default"])).unwrap(),
             Command::Modes{edit:vec![('a',"quiet".into()),('t',"default".into())]});
         assert_eq!(update_modes(vec![],&[('a',"quiet".into()),('a',"quiet".into())]),
