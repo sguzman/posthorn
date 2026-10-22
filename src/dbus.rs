@@ -126,13 +126,22 @@ impl FreedesktopNotifications {
 impl FreedesktopNotifications {
     #[zbus(name = "GetCapabilities")]
     fn get_capabilities(&self) -> Vec<String> {
-        // This represents the intended Mako-compatible API capabilities.
-        // The adapter is not registered until its renderer supports them.
-        ["body", "body-markup", "actions", "icon-static",
-         "x-canonical-private-synchronous", "x-dunst-stack-tag"]
-            .into_iter()
-            .map(str::to_string)
-            .collect()
+        // Mako advertises capabilities from its root style, not from
+        // currently visible category rules and not as a fixed list.
+        let config=self.runtime.as_ref().map(SharedRuntime::config);
+        let style=config.as_ref().map(|c|&c.global);
+        let option=|key:&str|style.and_then(|s|s.get(key)).map(String::as_str);
+        let enabled=|key:&str,default:bool|option(key)
+            .map(|v|v=="1"||v.eq_ignore_ascii_case("true")).unwrap_or(default);
+        let mut capabilities=Vec::new();
+        if option("format").unwrap_or("<b>%s</b>\\n%b").contains("%b"){
+            capabilities.push("body");
+        }
+        if enabled("markup",true){capabilities.push("body-markup");}
+        if enabled("actions",true){capabilities.push("actions");}
+        if enabled("icons",true){capabilities.push("icon-static");}
+        capabilities.extend(["x-canonical-private-synchronous","x-dunst-stack-tag"]);
+        capabilities.into_iter().map(str::to_string).collect()
     }
 
     #[zbus(name = "GetServerInformation")]
@@ -238,6 +247,23 @@ mod tests {
         assert_eq!(svc.store.lock().unwrap().active()[0].progress,100);
         svc.apply_notify("app",id,"","Finished","",Vec::new(),HashMap::new(),-1).unwrap();
         assert_eq!(svc.store.lock().unwrap().active()[0].progress,0);
+    }
+
+    #[test]
+    fn capabilities_track_mako_root_style_not_category_rules() {
+        let service=FreedesktopNotifications::with_runtime(
+            SharedRuntime::new(crate::config::Config::parse(
+                "format=%s\nmarkup=0\nactions=0\nicons=0\n                 [category=success]\nmarkup=1\nactions=1\nicons=1\n"
+            ).unwrap())
+        );
+        assert_eq!(service.get_capabilities(),
+            ["x-canonical-private-synchronous","x-dunst-stack-tag"]);
+        let default=FreedesktopNotifications::with_runtime(
+            SharedRuntime::new(crate::config::Config::default())
+        );
+        assert_eq!(default.get_capabilities(),
+            ["body","body-markup","actions","icon-static",
+             "x-canonical-private-synchronous","x-dunst-stack-tag"]);
     }
 
     #[test]
