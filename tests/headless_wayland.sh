@@ -285,7 +285,7 @@ PY
   fi
   # Require the exact nonempty compositor token to be forwarded through the
   # Freedesktop ActivationToken signal ahead of ActionInvoked/closed.
-  token_value="$(sed -nE 's/.*xdg_activation_token_v1@[^ ]+[.]done, [(]Some[(]"([^"]+)"[)].*/\\1/p' "$root/posthorn.log" | tail -1)"
+  token_value="$(sed -nE 's/.*xdg_activation_token_v1@[^ ]+[.]done, [(]Some[(]"([^"]+)"[)].*/\1/p' "$root/posthorn.log" | tail -1)"
   activation_line="$(grep -n 'ActivationToken' "$root/action-signal.log" | head -1 | cut -d: -f1 || true)"
   action_line="$(grep -n 'ActionInvoked' "$root/action-signal.log" | head -1 | cut -d: -f1 || true)"
   closed_line="$(grep -n 'NotificationClosed' "$root/action-signal.log" | head -1 | cut -d: -f1 || true)"
