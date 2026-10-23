@@ -209,13 +209,14 @@ impl SharedRuntime {
             .ok_or("notification is not active")?;
         let modes = self.modes.lock().map_err(|_| "mode state lock poisoned")?;
         let mode_views: Vec<&str> = modes.iter().map(String::as_str).collect();
+        let observed_output=self.surface_output();
         let traits = Traits {
             app_name: &note.app_name, app_icon: &note.app_icon,
             category: &note.category, desktop_entry: &note.desktop_entry,
             summary: &note.summary, body: &note.body,
             urgency:note.urgency.criteria_label(),
             anchor: config.global.get("anchor").map(String::as_str).unwrap_or("top-right"),
-            output: config.global.get("output").map(String::as_str).unwrap_or(""),
+            output: observed_output.as_deref().unwrap_or(""),
             modes: &mode_views,
             requested_timeout_ms: note.requested_timeout_ms,
             actionable: !note.actions.is_empty(), group_index: -1, hidden: false,
