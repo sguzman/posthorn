@@ -269,6 +269,72 @@ PY
     exit 1
   }
 fi
+# Verify actual default-action/XDG activation at fractional and HiDPI
+# scales, independently of the already-covered 1x action path.
+if [[ "$test_scale" == 1.25 || "$test_scale" == 2 ]]; then
+  if [[ "$test_scale" == 1.25 ]]; then
+    action_x=1350; logical_width=1536; logical_height=864
+  else
+    action_x=800; logical_width=960; logical_height=540
+  fi
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" monitor org.posthorn.Development \
+    >"$root/scaled-action-signals.log" 2>&1 &
+  monitor_pid=$!
+  sleep 0.2
+  action_reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn scaled action fixture' 0 '' 'Scaled default action' '' \
+    2 'default' 'Open' 1 'category' 's' 'warning' 30000)"
+  [[ "$action_reply" == u\ * ]] || { echo 'Invalid scaled action notification ID'; exit 1; }
+  scaled_action_ready=0
+  for _ in {1..20}; do
+    sleep 0.12
+    grim "$root/scaled-action-before.png"
+    if ./target/debug/examples/qa_png_probe \
+        "$root/scaled-action-before.png" '#715536' 300 present >/dev/null 2>&1; then
+      scaled_action_ready=1; break
+    fi
+  done
+  [[ "$scaled_action_ready" == 1 ]] || { echo 'Scaled action popup never painted'; exit 1; }
+  before_tokens="$(grep -Ec 'xdg_activation_token_v1@[^ ]+[.]done' "$root/posthorn.log" || true)"
+  POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer \
+    "$action_x" 25 "$logical_width" "$logical_height" 272
+  scaled_action_done=0
+  for _ in {1..35}; do
+    latest_tokens="$(grep -Ec 'xdg_activation_token_v1@[^ ]+[.]done' "$root/posthorn.log" || true)"
+    if (( latest_tokens == before_tokens + 1 )) &&
+       grep -q 'ActivationToken' "$root/scaled-action-signals.log" &&
+       grep -q 'ActionInvoked' "$root/scaled-action-signals.log" &&
+       grep -q 'NotificationClosed' "$root/scaled-action-signals.log"; then
+      scaled_action_done=1; break
+    fi
+    sleep 0.12
+  done
+  token_value="$(sed -nE 's/.*xdg_activation_token_v1@[^ ]+[.]done, [(]Some[(]"([^"]+)"[)].*/\1/p' "$root/posthorn.log" | tail -1)"
+  activation_line="$(grep -n 'ActivationToken' "$root/scaled-action-signals.log" | head -1 | cut -d: -f1 || true)"
+  action_line="$(grep -n 'ActionInvoked' "$root/scaled-action-signals.log" | head -1 | cut -d: -f1 || true)"
+  closed_line="$(grep -n 'NotificationClosed' "$root/scaled-action-signals.log" | head -1 | cut -d: -f1 || true)"
+  if [[ "$scaled_action_done" != 1 || -z "$token_value" ||
+        -z "$activation_line" || -z "$action_line" || -z "$closed_line" ]] ||
+     ! grep -Fq "$token_value" "$root/scaled-action-signals.log" ||
+     (( activation_line >= action_line || action_line >= closed_line )); then
+    echo "Scaled ${test_scale}x action failed XDG token and ordered signal acceptance"
+    cat "$root/scaled-action-signals.log"
+    grep -E 'xdg_activation(_token)?_v1@' "$root/posthorn.log" | tail -35 || true
+    exit 1
+  fi
+  kill "$monitor_pid" 2>/dev/null || true
+  wait "$monitor_pid" 2>/dev/null || true
+  monitor_pid=""
+  grim "$root/scaled-action-after.png"
+  /usr/bin/python3 "$root/check-dismissed.py" "$root/scaled-action-after.png" || {
+    echo "Scaled ${test_scale}x default action failed to dismiss target popup"
+    exit 1
+  }
+  echo "Native ${test_scale}x left click forwarded compositor XDG activation token: OK"
+fi
+
 # The compositor-originated left click must invoke the sender's default
 # action and dismiss only that notification. Observe the D-Bus signal.
 if [[ "$test_scale" == 1 ]]; then
