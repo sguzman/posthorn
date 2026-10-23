@@ -93,6 +93,30 @@ regressions passed [full CI](https://github.com/sguzman/posthorn/actions/runs/39
 at commit d621893. Direct render measurement regression is separately
 tracked. Further layout and compositor parity remains an MVP gate.
 
+## Source-matched color parsing and deep includes
+
+Mako v1.11 \`types.c:parse_color\` requires a \`#\` prefix and exactly
+six or eight following bytes, but parses those bytes with C
+\`strtoul(..., base=16)\`, then truncates to uint32 and appends opaque
+alpha for six-byte inputs. Posthorn now reproduces the allowed C-locale
+leading whitespace, unary signs, 0x prefixes, and signed wraparound
+instead of requiring each byte to be a hex digit. Tests compare known
+C fixture values, config acceptance, and exact Cairo background pixels.
+
+Mako's \`config.c:apply_config_option\` recursively loads included files
+without a fixed nesting limit. Posthorn no longer rejects the 17th
+nested include: 22-file chains are exercised through \`Config::from_path\`
+and real private D-Bus Reload. Malformed leaf configurations and
+include cycles reject the reload transactionally, retaining the last
+good configuration. Canonical include-cycle detection is a safety
+divergence from Mako's unbounded recursion, not proof of complete
+configuration parity.
+
+The regression suite passed both CI jobs at
+[commit 3f3754a](https://github.com/sguzman/posthorn/actions/runs/39950069729).
+These findings do not close remaining POSIX grammar, properties, or
+real Hyprland parity gates.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.

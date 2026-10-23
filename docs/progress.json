@@ -60,19 +60,19 @@
               "id": "T103",
               "emoji": "🧰",
               "name": "Complete option validation, built-in grouping and escaping semantics",
-              "progress": 77
+              "progress": 78
             },
             {
               "id": "T104",
               "emoji": "📂",
               "name": "Include files with Mako-compatible path behavior",
-              "progress": 81
+              "progress": 83
             },
             {
               "id": "T105",
               "emoji": "📐",
               "name": "Type/layout/style parity for all Mako config settings",
-              "progress": 78
+              "progress": 79
             }
           ]
         },
