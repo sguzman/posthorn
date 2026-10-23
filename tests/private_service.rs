@@ -59,6 +59,53 @@ async fn private_service_expires_and_archives_a_notification() -> Result<(), Box
 }
 
 #[tokio::test]
+async fn private_dbus_image_path_preserves_raw_linux_file_url_through_cairo()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use std::os::unix::ffi::OsStringExt;
+    use posthorn::render::render_notification;
+    use posthorn::config::Options;
+    let dir=tempfile::tempdir()?;
+    let filename=std::ffi::OsString::from_vec(b"dbus-hint-icon\xff.png".to_vec());
+    let target=dir.path().join(filename);
+    let icon=gdk_pixbuf::Pixbuf::new(
+        gdk_pixbuf::Colorspace::Rgb,true,8,12,12
+    ).ok_or("unable to allocate image fixture")?;
+    icon.fill(0xFF0000FF);
+    icon.savev(&target,"png",&[])?;
+    let uri=format!("file://{}/dbus-hint-icon%FF.png",dir.path().display());
+
+    let (conn,runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let hints:HashMap<String,OwnedValue>=[(
+        "image-path".to_owned(),
+        OwnedValue::try_from(zbus::zvariant::Value::from(uri.clone()))?,
+    )].into();
+    let id:u32=desktop.call("Notify",&(
+        "icon-dbus-test",0u32,"missing.png","Icon","",
+        Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let note=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).cloned().ok_or("missing notification")?;
+    assert_eq!(note.app_icon,uri);
+    assert!(note.image_data.is_none());
+
+    let mut style=Options::new();
+    for (key,value) in [
+        ("width","160"),("height","70"),("padding","4"),
+        ("border-size","0"),("icon-location","left"),
+        ("max-icon-size","16"),("background-color","#305747"),
+    ] {
+        style.insert(key.into(),value.into());
+    }
+    let frame=render_notification(&note,&style)?;
+    let at=(frame.height as usize/2)*frame.stride as usize+6*4;
+    assert_eq!(&frame.pixels[at..at+4],&[0,0,255,255],
+        "image-path must flow from Notify through raw-byte URL decoder into Cairo");
+    Ok(())
+}
+
+#[tokio::test]
 async fn empty_image_path_hint_clears_app_icon_through_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
