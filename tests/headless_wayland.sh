@@ -627,7 +627,7 @@ PY
   # A direct replacement reuses the already associated notification surface.
   # Its initial criteria now match HEADLESS-1 and choose the scoped timeout.
   policy_id="${result#u }"
-  replaced="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  replaced="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s -- call \
     org.posthorn.Development /org/freedesktop/Notifications \
     org.freedesktop.Notifications Notify 'susssasa{sv}i' \
     'Posthorn scoped-policy test' "$policy_id" '' 'Output-scoped expiry fixture' '' \
