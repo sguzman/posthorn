@@ -880,6 +880,43 @@ mod tests {
     }
 
     #[test]
+    fn actual_icon_pixels_follow_mako_selected_size_component_scale(){
+        let dir=tempfile::tempdir().unwrap();
+        for (folder,rgba) in [
+            ("16x16/apps@2",0xFF0000FF),
+            ("16x16@2/apps",0x00FF00FF),
+        ] {
+            let path=dir.path().join(folder).join("posthorn.png");
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let pixbuf=gdk_pixbuf::Pixbuf::new(
+                gdk_pixbuf::Colorspace::Rgb,true,8,12,12
+            ).unwrap();
+            pixbuf.fill(rgba);
+            pixbuf.savev(&path,"png",&[]).unwrap();
+        }
+        let mut note=fixture();
+        note.app_icon="posthorn".into();
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","160"),("height","70"),("padding","4"),
+            ("border-size","0"),("icon-location","left"),
+            ("max-icon-size","16"),("background-color","#305747"),
+        ] {style.insert(key.into(),value.into());}
+        style.insert("icon-path".into(),dir.path().to_string_lossy().into_owned());
+        let native=render_notification_group_with_icon_scale(&note,&style,0,1,1).unwrap();
+        let hidpi=render_notification_group_with_icon_scale(&note,&style,0,1,2).unwrap();
+        assert_eq!((native.width,native.height),(hidpi.width,hidpi.height),
+            "the selected scale must not enlarge the popup");
+        let index=|frame:&RenderedNotification|{
+            (frame.height as usize/2)*frame.stride as usize+6*4
+        };
+        assert_eq!(&native.pixels[index(&native)..index(&native)+4],
+            &[0,0,255,255],"Mako picks first size-bearing component at 1x");
+        assert_eq!(&hidpi.pixels[index(&hidpi)..index(&hidpi)+4],
+            &[0,255,0,255],"2x must not trust @2 in an unselected path component");
+    }
+
+    #[test]
     fn progress_fill_respects_value_and_uses_configured_color() {
         let mut note=fixture();
         note.progress=50;
