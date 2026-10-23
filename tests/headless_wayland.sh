@@ -944,6 +944,14 @@ EOF
     cat "$root/posthorn.log"
     exit 1
   }
+  # Style/config reload reapplies appearance, not notification-arrival hooks.
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  sleep 0.25
+  [[ "$(cat "$root/qa-hook.log")" == "$audible_id" ]] || {
+    echo 'Reload incorrectly replayed a previously delivered sound hook'
+    exit 1
+  }
   busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
     org.posthorn.Development /org/freedesktop/Notifications \
     org.freedesktop.Notifications CloseNotification 'u' "$audible_id" >/dev/null
