@@ -95,17 +95,17 @@ tracked. Further layout and compositor parity remains an MVP gate.
 
 ## Source-matched color parsing and deep includes
 
-Mako v1.11 \`types.c:parse_color\` requires a \`#\` prefix and exactly
+Mako v1.11 `types.c:parse_color` requires a `#` prefix and exactly
 six or eight following bytes, but parses those bytes with C
-\`strtoul(..., base=16)\`, then truncates to uint32 and appends opaque
+`strtoul(..., base=16)`, then truncates to uint32 and appends opaque
 alpha for six-byte inputs. Posthorn now reproduces the allowed C-locale
 leading whitespace, unary signs, 0x prefixes, and signed wraparound
 instead of requiring each byte to be a hex digit. Tests compare known
 C fixture values, config acceptance, and exact Cairo background pixels.
 
-Mako's \`config.c:apply_config_option\` recursively loads included files
+Mako's `config.c:apply_config_option` recursively loads included files
 without a fixed nesting limit. Posthorn no longer rejects the 17th
-nested include: 22-file chains are exercised through \`Config::from_path\`
+nested include: 22-file chains are exercised through `Config::from_path`
 and real private D-Bus Reload. Malformed leaf configurations and
 include cycles reject the reload transactionally, retaining the last
 good configuration. Canonical include-cycle detection is a safety
