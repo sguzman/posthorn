@@ -44,11 +44,17 @@ serializer. Its `posthornctl` client uses a matching ordered deserializer for
 menu selection, human listing, and JSON listing. The private D-Bus roundtrip,
 binary encoding, and menu selection have passed
 [CI acceptance](https://github.com/sguzman/posthorn/actions/runs/39866232367).
-The `Notifications` property still passes through zvariant's
-`Value`/BTreeMap conversion; this sorts action keys and drops duplicate
-entries. D-Bus dictionaries conventionally require unique keys, although
-Mako itself emits duplicates. Property wire fidelity therefore remains an
-explicit MVP gap; neither this commit nor passing CI establishes full parity.
+The standard control object's `Properties.Get` and `GetAll` now use a
+path-local ordered serializer instead of the zbus-generated OwnedValue
+conversion. Both retain repeated `a{ss}` keys in Mako's linked-list
+order. The private D-Bus regression compares actual wire bytes for
+Get, GetAll, ListNotifications and ListHistory and confirms standard
+property signatures, read-only errors, and PropertiesChanged
+introspection. All jobs passed [CI at 8ecf716](https://github.com/sguzman/posthorn/actions/runs/39952699403).
+The old map-backed accessor remains an internal compatibility helper and
+is not the external property wire path. D-Bus dictionaries conventionally
+require unique keys, although Mako itself emits duplicates. Full daemon
+runtime and compositor parity remain unproven.
 
 ## Sender-ordered dismissal options
 
@@ -59,7 +65,7 @@ Posthorn now deserializes arrival-ordered entries and validates each before
 constructing the internal options map. Both the parser unit test and the
 [private D-Bus duplicate-key regression](https://github.com/sguzman/posthorn/actions/runs/39896396119)
 passed Rust and headless Wayland CI at commit `e362363`. This fixes
-dismissal input parity, **not** the separate lossy `Notifications` property.
+dismissal input parity independently of the now-verified ordered property path.
 
 ## POSIX ERE criteria compatibility
 

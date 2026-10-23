@@ -1,8 +1,8 @@
 //! Mako control-interface implementation on Posthorn's isolated development
 //! session-bus name. The public Mako method and property signatures are retained.
 //! Group dismissal, modes, and transactional reload are implemented. The
-//! Notifications property still loses duplicate action keys during Value
-//! conversion; production cutover remains an explicit MVP acceptance gate.
+//! Get/GetAll on the control path use ordered property serialization to retain
+//! repeated action keys; production cutover remains an explicit MVP gate.
 
 use std::collections::{HashMap,HashSet};
 use std::sync::{Arc, Mutex};
@@ -282,9 +282,9 @@ fn wire_notification_fields(note: &Notification) -> zbus::fdo::Result<HashMap<St
 
 fn wire_notification(note:&Notification)->zbus::fdo::Result<HashMap<String,OwnedValue>>{
     let mut obj=wire_notification_fields(note)?;
-    // The Notifications property still uses zvariant::Dict, whose BTreeMap
-    // collapses duplicate keys and sorts entries. ListNotifications and
-    // ListHistory instead serialize the original ordered action list directly.
+    // This legacy/internal map snapshot intentionally collapses duplicate
+    // keys. All public on-wire methods and standard Properties.Get/GetAll
+    // serialize OrderedNotificationWire directly without this conversion.
     let mut actions=Dict::new(&Signature::Str,&Signature::Str);
     for action in &note.actions {
         actions.append(
@@ -406,10 +406,11 @@ impl MakoControl {
 
     #[zbus(property, name = "Notifications")]
     fn notifications(&self) -> zbus::fdo::Result<Vec<HashMap<String, OwnedValue>>> {
-        // zbus's #[interface(property)] requires Into<Value>, which
-        // materializes the nested dictionary and collapses duplicate keys.
-        // Custom ordered serialization works for the two read methods;
-        // property fidelity remains an explicit compatibility gap.
+        // zbus's generated property accessor requires Into<Value> and
+        // collapses duplicate nested dictionary keys; this accessor is only
+        // used for the internal macro interface. The control path overrides
+        // standard Properties.Get/GetAll with OrderedControlProperties,
+        // which uses ordered_snapshot instead.
         self.snapshot(false)
     }
 

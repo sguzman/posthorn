@@ -128,7 +128,7 @@
               "id": "T302",
               "emoji": "🧾",
               "name": "Implement full Mako D-Bus control interface, properties and JSON",
-              "progress": 94
+              "progress": 97
             },
             {
               "id": "T303",
@@ -209,7 +209,7 @@
         {
           "emoji": "📜",
           "name": "Mako history/control API parity",
-          "progress": 93
+          "progress": 96
         }
       ]
     },
