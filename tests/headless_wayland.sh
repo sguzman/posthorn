@@ -36,7 +36,8 @@ esac
 if [[ "$test_scale" == 1 ]]; then
   cargo build --quiet --example qa_virtual_pointer
 fi
-printf 'output * resolution %s scale %s\n' "$resolution" "$test_scale" > "$root/sway.conf"
+# Keep the headless test Wayland-only; no Xwayland binary is provisioned.
+printf 'xwayland disable\noutput * resolution %s scale %s\n' "$resolution" "$test_scale" > "$root/sway.conf"
 sway --unsupported-gpu -c "$root/sway.conf" >"$root/sway.log" 2>&1 &
 sway_pid=$!
 
@@ -59,6 +60,29 @@ if [[ -z "$socket" ]]; then
   exit 1
 fi
 export WAYLAND_DISPLAY="${socket##*/}"
+# An early Wayland socket does not mean the compositor has completed startup.
+# Wait for the isolated Sway IPC command path before starting Posthorn's
+# registry roundtrip; otherwise a busy runner can falsely fail layer-shell QA.
+ipc_ready=0
+for _ in {1..60}; do
+  startup_ipc="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'sway-ipc.*.sock' -print -quit)"
+  if [[ -n "$startup_ipc" && -S "$startup_ipc" ]] &&
+      swaymsg -s "$startup_ipc" -t get_outputs >/dev/null 2>&1; then
+    ipc_ready=1
+    break
+  fi
+  if ! kill -0 "$sway_pid" 2>/dev/null; then
+    echo 'Sway exited before IPC initialization'
+    cat "$root/sway.log"
+    exit 1
+  fi
+  sleep 0.15
+done
+[[ "$ipc_ready" == 1 ]] || {
+  echo 'Headless Sway did not finish IPC initialization'
+  cat "$root/sway.log"
+  exit 1
+}
 
 cat > "$root/mako.conf" <<'EOF'
 width=300
