@@ -1419,6 +1419,35 @@ async fn posix_literal_backslash_d_criteria_drive_private_dbus_on_notify()
 }
 
 #[tokio::test]
+async fn glibc_literal_hex_and_end_anchor_spellings_drive_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let cfg=Config::parse(
+        "[summary~=^\\\\x41$]\non-notify=dismiss\n[summary~=^foo\\\\z$]\non-notify=dismiss\n"
+    )?;
+    let (conn,runtime)=open_private_service(cfg).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    for summary in ["x41", "fooz"] {
+        let id:u32=desktop.call("Notify",&(
+            "posix-escapes",0u32,"",summary,"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        let store=runtime.store.lock().unwrap();
+        assert!(store.active().is_empty(),"{summary:?} must trigger Mako matching");
+        assert_eq!(store.history().front().map(|n|n.id),Some(id));
+    }
+    for summary in ["A", "foo"] {
+        let id:u32=desktop.call("Notify",&(
+            "posix-escapes",0u32,"",summary,"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        assert!(runtime.store.lock().unwrap().active().iter().any(|n|n.id==id),
+            "Rust-only escape meaning must not dismiss {summary:?}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn on_notify_bindings_dismiss_and_invoke_without_replay()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
