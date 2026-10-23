@@ -911,6 +911,67 @@ done
   cat "$root/posthorn.log"
   exit 1
 }
+# Mako's configured on-notify exec also launches notification sounds.
+# Verify a trusted shell command receives the D-Bus ID and quiet suppresses
+# that command, with no physical audio, user bus, or output device involved.
+if [[ "$test_scale" == 1 ]]; then
+  cat >> "$root/mako.conf" <<EOF
+[category=qa-audio-hook]
+on-notify=exec printf '%s\n' "\$id" >> '$root/qa-hook.log'
+[mode=quiet]
+on-notify=none
+EOF
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  audible="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn audio-hook QA' 0 '' 'Configured hook executed' '' \
+    0 1 'category' 's' 'qa-audio-hook' 30000)"
+  [[ "$audible" == u\ * ]] || { echo 'Invalid hook Notify result'; exit 1; }
+  audible_id="$(printf '%s\n' "$audible" | cut -d ' ' -f 2)"
+  hook_fired=0
+  for _ in {1..25}; do
+    sleep 0.1
+    if [[ -f "$root/qa-hook.log" ]] &&
+       [[ "$(cat "$root/qa-hook.log")" == "$audible_id" ]]; then
+      hook_fired=1
+      break
+    fi
+  done
+  [[ "$hook_fired" == 1 ]] || {
+    echo 'Mako-compatible on-notify exec did not receive numeric ID'
+    cat "$root/posthorn.log"
+    exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications CloseNotification 'u' "$audible_id" >/dev/null
+
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako SetMode \
+    's' quiet >/dev/null
+  silent="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn silent-hook QA' 0 '' 'No hook should run' '' \
+    0 1 'category' 's' 'qa-audio-hook' 30000)"
+  [[ "$silent" == u\ * ]] || { echo 'Invalid quiet-hook Notify result'; exit 1; }
+  sleep 0.4
+  [[ "$(cat "$root/qa-hook.log")" == "$audible_id" ]] || {
+    echo 'Quiet mode unexpectedly executed notification sound hook'
+    exit 1
+  }
+  silent_id="$(printf '%s\n' "$silent" | cut -d ' ' -f 2)"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications CloseNotification 'u' "$silent_id" >/dev/null
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako SetMode \
+    's' default >/dev/null
+  echo 'on-notify ID delivery and quiet-mode sound-hook suppression: OK'
+fi
+
 echo "Headless Sway ${test_scale}x + D-Bus popups, compositor pointer at 1x, timer, reload and live modes: OK"
 
 if [[ "$test_scale" == 1 ]]; then
