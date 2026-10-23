@@ -56,6 +56,23 @@ is not the external property wire path. D-Bus dictionaries conventionally
 require unique keys, although Mako itself emits duplicates. Full daemon
 runtime and compositor parity remain unproven.
 
+## Isolated D-Bus name ownership and collision behavior
+
+On the private `dbus-run-session` test bus, Posthorn requests
+`org.freedesktop.Notifications` with `DoNotQueue`. A second attempted
+standard-name server must fail immediately, and a subsequent
+`org.freedesktop.DBus.GetNameOwner` query must still report the original
+owner. The same assertions exercise two instances of
+`org.posthorn.Development` to ensure the development entrypoint does not
+have different queue or replacement behavior. This test **never**
+contacts the workstation's real session bus or installed Mako.
+
+The Rust/private D-Bus job and all headless Sway acceptance scales passed at
+[commit f121917](https://github.com/sguzman/posthorn/actions/runs/40014316439).
+This verifies bus-name collision handling but is not permission for the
+production cutover; real Hyprland and whole-daemon feature parity remain
+hard prerequisites.
+
 ## Sender-ordered dismissal options
 
 Mako 1.11 parses `DismissNotifications`' `a{sv}` arguments in wire order.
