@@ -31,9 +31,9 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `██████████ 96%`
 - 🔤 T205 — Pango markup/escaping, format specifiers and actions — `████████░░ 81%`
 
-### 🚌 P3 — D-Bus protocol and control surface — `█████████░ 85%`
+### 🚌 P3 — D-Bus protocol and control surface — `█████████░ 86%`
 
-- 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `██████████ 95%`
+- 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `██████████ 96%`
 - 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `█████████░ 92%`
 - 🔄 T303 — Correct startup, bus ownership and config reload behavior — `███████░░░ 69%`
 
