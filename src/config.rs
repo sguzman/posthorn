@@ -30,6 +30,31 @@ fn err(location: impl Into<String>, message: impl Into<String>) -> ConfigError {
     ConfigError { location: location.into(), message: message.into() }
 }
 
+/// glibc's POSIX ERE regcomp treats \\d and \\D as ordinary escaped
+/// letters. Rust regex treats those same spellings as digit classes. Preserve
+/// Mako's behavior without changing the escape grammar for the supported
+/// GNU POSIX extensions such as \\w, \\s and \\b.
+fn mako_posix_ere_escapes(pattern: &str) -> String {
+    let mut normalized = String::with_capacity(pattern.len());
+    let mut chars = pattern.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            normalized.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('d') => normalized.push('d'),
+            Some('D') => normalized.push('D'),
+            Some(other) => {
+                normalized.push('\\');
+                normalized.push(other);
+            }
+            None => normalized.push('\\'),
+        }
+    }
+    normalized
+}
+
 #[derive(Clone, Debug)]
 pub struct Selector {
     pub key: String,
@@ -51,7 +76,8 @@ impl Selector {
             // Mako uses POSIX REG_EXTENDED|REG_NOSUB without REG_NEWLINE.
             // Unlike Rust regex's default, POSIX '.' matches a newline in
             // that mode. Dot-all must NOT also enable multiline anchors.
-            Some(Regex::new(&format!("(?s:{value})"))
+            let pattern = mako_posix_ere_escapes(value);
+            Some(Regex::new(&format!("(?s:{pattern})"))
                 .map_err(|e| format!("invalid regex: {e}"))?)
         } else { None };
         if ["actionable", "expiring", "grouped", "hidden"].contains(&key)
@@ -698,6 +724,33 @@ mod tests {
         assert_eq!(quiet["background-color"],"#305747");
         assert_eq!(quiet["on-notify"],"none");
     }
+    #[test]
+    fn posix_ere_digit_spelling_is_literal_not_rust_digit_class() {
+        let mut fields = note("normal", &["default"]);
+        for pattern in [r"\d+", r"[\d]+"] {
+            let rule = Selector::new("summary~", pattern).unwrap();
+            fields.summary = "ddd";
+            assert!(rule.matches(&fields), "{pattern} must match literal d");
+            fields.summary = "123";
+            assert!(!rule.matches(&fields), "{pattern} must not match digits");
+        }
+        for pattern in [r"\D+", r"[\D]+"] {
+            let rule = Selector::new("summary~", pattern).unwrap();
+            fields.summary = "DDD";
+            assert!(rule.matches(&fields), "{pattern} must match literal D");
+            fields.summary = "abc";
+            assert!(!rule.matches(&fields), "{pattern} is not a non-digit class");
+        }
+        // A doubled escape must remain a literal backslash, not be
+        // normalized into the POSIX escaped-letter behavior.
+        assert_eq!(mako_posix_ere_escapes(r"\\d+"), r"\\d+");
+        let rule = Config::parse("[summary~=\\\\d+]\nwidth=441\n").unwrap();
+        fields.summary = "dd";
+        assert!(rule.rules[0].selectors[0].matches(&fields));
+        fields.summary = "123";
+        assert!(!rule.rules[0].selectors[0].matches(&fields));
+    }
+
     #[test]
     fn quoted_criteria_and_regex() {
         let c=Config::parse("[app-name=\"Example App\" summary~=^Hello]\nwidth=440\n").unwrap();
