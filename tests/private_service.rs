@@ -1010,6 +1010,41 @@ async fn control_reload_swaps_styles_and_preserves_last_good_file()
 }
 
 #[tokio::test]
+async fn deeply_included_config_reload_preserves_last_good_state_on_errors()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::open_private_service_from_path;
+    let dir=tempfile::tempdir()?;
+    let file=|i:usize|dir.path().join(format!("mako-included-{i:02}.conf"));
+    for i in 0..20 {
+        let content=format!("include={}\n",file(i+1).display());
+        std::fs::write(file(i),content)?;
+    }
+    std::fs::write(file(20),"background-color=#305747\n")?;
+    let (conn,runtime)=open_private_service_from_path(&file(0)).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    assert_eq!(runtime.config().global["background-color"],"#305747");
+
+    std::fs::write(file(20),"background-color=#684148\n")?;
+    let _:()=ctl.call("Reload",&()).await?;
+    assert_eq!(runtime.config().global["background-color"],"#684148");
+    assert_eq!(runtime.revision(),1);
+
+    std::fs::write(file(20),"background-color=#invalid\n")?;
+    let rejected:zbus::Result<()>=ctl.call("Reload",&()).await;
+    assert!(rejected.is_err(),"invalid deep include was accepted");
+    assert_eq!(runtime.config().global["background-color"],"#684148");
+    assert_eq!(runtime.revision(),1);
+
+    std::fs::write(file(20),format!("include={}\n",file(0).display()))?;
+    let cyclic:zbus::Result<()>=ctl.call("Reload",&()).await;
+    assert!(cyclic.is_err(),"cyclic deep include was accepted");
+    assert_eq!(runtime.config().global["background-color"],"#684148");
+    assert_eq!(runtime.revision(),1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn invalid_known_hint_variant_does_not_replace_notification()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
