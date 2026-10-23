@@ -60,7 +60,7 @@
               "id": "T103",
               "emoji": "🧰",
               "name": "Complete option validation, built-in grouping and escaping semantics",
-              "progress": 75
+              "progress": 77
             },
             {
               "id": "T104",
@@ -72,7 +72,7 @@
               "id": "T105",
               "emoji": "📐",
               "name": "Type/layout/style parity for all Mako config settings",
-              "progress": 76
+              "progress": 77
             }
           ]
         },
@@ -172,7 +172,7 @@
               "id": "T501",
               "emoji": "⌨️",
               "name": "Port makoctl operations with compatibility tests",
-              "progress": 92
+              "progress": 93
             },
             {
               "id": "T502",

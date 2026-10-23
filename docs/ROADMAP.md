@@ -19,9 +19,9 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 - 📄 T101 — Parse Mako configuration sections and ordered overrides — `██████████ 100%`
 - 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `█████████░ 92%`
-- 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `████████░░ 75%`
+- 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `████████░░ 77%`
 - 📂 T104 — Include files with Mako-compatible path behavior — `████████░░ 81%`
-- 📐 T105 — Type/layout/style parity for all Mako config settings — `████████░░ 76%`
+- 📐 T105 — Type/layout/style parity for all Mako config settings — `████████░░ 77%`
 
 ### 📨 P2 — Notification lifecycle and formatting — `██████████ 95%`
 
@@ -43,9 +43,9 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `██████████ 99%`
 - 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `████████░░ 77%`
 
-### 🎛️ P5 — CLI and exact workstation parity — `█████░░░░░ 52%`
+### 🎛️ P5 — CLI and exact workstation parity — `█████░░░░░ 53%`
 
-- ⌨️ T501 — Port makoctl operations with compatibility tests — `█████████░ 92%`
+- ⌨️ T501 — Port makoctl operations with compatibility tests — `█████████░ 93%`
 - 🔔 T502 — Reproduce category colors, per-category sounds and quiet mode — `███████░░░ 68%`
 - 🧪 T503 — End-to-end on Hyprland, notify-send and Edge activation — `█████░░░░░ 49%`
 - 🚀 T504 — MVP inauguration and opt-in reversible Mako switch — `░░░░░░░░░░ 0%`
