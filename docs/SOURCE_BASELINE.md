@@ -654,3 +654,22 @@ private D-Bus and 1×/1.25×/2× isolated Sway suite passed in
 [run 40030597962](https://github.com/sguzman/posthorn/actions/runs/40030597962)
 at commit `7bd46a5`. This is source-level placeholder compatibility,
 not evidence of real desktop grouping under billions of notifications.
+
+## Zero-valued scoped max-visible validation
+
+Mako v1.11.0 `criteria.c:validate_criteria` checks the **numeric**
+`criteria->style.max_visible` field, not its style-spec presence bit,
+when deciding whether non-surface selectors may specify max-visible.
+Consequently `[category=urgent] max-visible=0` is valid, while the
+same selector with any nonzero value is rejected. `types.c:parse_int`
+uses `(int)strtol` on 64-bit Linux, so values like `4294967296`
+narrow to zero and follow the same acceptance branch. Criteria are
+validated at section end using the final assignment.
+
+Posthorn now validates the narrowed final numeric value and has source-pinned
+Rust regressions for zero, signed zero, narrowing, nonzero, overwritten
+assignments and surface-scoped negative values. The isolated Rust/private
+D-Bus and 1×/1.25×/2× Sway CI completed successfully at
+[commit d96b461](https://github.com/sguzman/posthorn/actions/runs/40031933688).
+This is configuration acceptance evidence, **not** physical Hyprland or
+production cutover acceptance.
