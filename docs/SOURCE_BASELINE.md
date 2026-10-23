@@ -225,6 +225,24 @@ without changing popup geometry. Rust and headless Wayland CI passed at
 These acceptance cases do not prove complete monitor-hotplug or live
 Hyprland parity.
 
+## Relative and non-UTF-8 file icon URLs
+
+Mako v1.11 `icon.c:resolve_icon` strips the `file://` prefix and
+percent-decodes the path verbatim. It does not require an absolute path.
+Posthorn previously rejected relative `file://` paths and any decoded
+filename containing non-UTF-8 Linux bytes. The Linux-native decoder now
+retains raw filename bytes in an `OsString` and supports relative paths,
+without relaxing confined theme-name validation or allowing embedded NUL.
+
+Tests verify decoded relative, absolute, malformed-percent, and non-UTF-8
+filenames. Cairo tests construct genuine PNG fixtures, including a
+non-UTF-8 filename, and confirm the expected icon pixels. Both Rust,
+isolated D-Bus and headless Wayland CI passed at
+[commit 7b72418](https://github.com/sguzman/posthorn/actions/runs/39980888535).
+The embedded-NUL rejection remains an intentional safety divergence
+from C's truncating string representation. Real Hyprland acceptance
+and complete theme fidelity remain open.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
