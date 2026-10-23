@@ -568,9 +568,13 @@ to remain visible past an output-only 1800ms timeout, followed by
 an explicit-ID replacement that must expire under that output rule
 and honor `history=0`. Rust unit and private D-Bus validation
 passed at [ddd2112](https://github.com/sguzman/posthorn/actions/runs/40038629306);
-the corrected final headless compositor acceptance is tracked in
-[8e7400a](https://github.com/sguzman/posthorn/actions/runs/40038808422)
-and is **not asserted green until both CI jobs finish**.
+the corrected Sway acceptance and Rust/private D-Bus suites **both passed** at
+[8e7400a](https://github.com/sguzman/posthorn/actions/runs/40038808422).
+The subsequent source-evidence commit was also fully green at
+[92c8ece](https://github.com/sguzman/posthorn/actions/runs/40039186852),
+including 1×, 1.25×, and 2× isolated Sway compositor acceptance.
+This proves the bounded NULL-surface and replacement behavior, not
+per-notification multi-output association on real Hyprland.
 
 Real Hyprland monitor reassignment, multiple independent notification
 surfaces, and complete output-sensitive grouping behavior remain open.
@@ -772,8 +776,9 @@ passed on [commit 30c2562](https://github.com/sguzman/posthorn/actions/runs/4003
 [503fa7e](https://github.com/sguzman/posthorn/actions/runs/40036902279)
 passed isolated 1×, 1.25×, and 2× Sway compositor acceptance; its
 older integration suite included the corrected historical expectation.
-The latest commit's headless-Sway job was still pending at evidence
-recording and is not claimed as green here.
+A later full CI run also passed on
+[92c8ece](https://github.com/sguzman/posthorn/actions/runs/40039186852),
+including this regression and isolated compositor checks.
 
 These checks do not authorize production D-Bus ownership or establish
 real Hyprland pointer, touch, compositor or cutover acceptance.

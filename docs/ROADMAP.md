@@ -27,7 +27,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 - 🆔 T201 — Allocate nonzero IDs, replacement by ID and app-scoped tag — `██████████ 100%`
 - 🗃️ T202 — Bounded in-memory history, close and restore — `██████████ 100%`
-- ⏳ T203 — Timeout selection and timer/event scheduling — `██████████ 96%`
+- ⏳ T203 — Timeout selection and timer/event scheduling — `██████████ 97%`
 - 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `██████████ 99%`
 - 🔤 T205 — Pango markup/escaping, format specifiers and actions — `████████░░ 84%`
 
@@ -39,7 +39,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 ### 🪟 P4 — Wayland protocol and rendering — `██████████ 96%`
 
-- 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `██████████ 96%`
+- 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `██████████ 97%`
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `██████████ 99%`
 - 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `█████████░ 92%`
 
