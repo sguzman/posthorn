@@ -186,23 +186,28 @@ impl NotificationStore {
             }
             return;
         }
-        // Mako compares the actual signed enum values rather than
-        // normalizing unsupported sender urgencies into a known band.
-        let rank = Urgency::mako_value;
-        let rank_new = rank(notification.urgency);
-        let policy = self.sort_policy;
-        let index = self.active.iter().position(|existing| {
-            let rank_old = rank(existing.urgency);
-            if rank_new == rank_old {
-                // Newer first for -time, older first for +time.
-                !policy.time_ascending
-            } else if policy.priority_ascending {
-                rank_new < rank_old
-            } else {
-                rank_new > rank_old
+        // Port Mako notification.c:get_last_notif_by_urgency(), not a
+        // generic numeric sort. It searches only the known C enum band
+        // [-1,2], backwards through the active list, starting from
+        // (new urgency + time-direction offset). An out-of-range urgency
+        // can therefore insert at the front even for ascending priority.
+        // This behavior is observable for D-Bus senders using raw y/u/i
+        // values outside the freedesktop 0/1/2 urgency convention.
+        let direction:i32=if self.sort_policy.priority_ascending{-1}else{1};
+        let offset=if self.sort_policy.time_ascending{0}else{direction};
+        let start=notification.urgency.mako_value().checked_add(offset);
+        if let Some(mut current)=start {
+            while (-1..=2).contains(&current) {
+                if let Some(index)=self.active.iter().rposition(|existing|
+                    existing.urgency.mako_value()==current
+                ){
+                    self.active.insert(index+1,notification);
+                    return;
+                }
+                current+=direction;
             }
-        }).unwrap_or(self.active.len());
-        self.active.insert(index, notification);
+        }
+        self.active.push_front(notification);
     }
 
     pub fn push(&mut self, request: Request) -> u32 {
@@ -523,6 +528,48 @@ mod tests {
         assert_eq!(store.restore(),Some(c));
         assert_eq!(store.active()[0].id,c);
     }
+    #[test]
+    fn priority_sort_reproduces_mako_bounded_urgency_search(){
+        let make=|urgency|Request{urgency,..Request::default()};
+        for ascending in [true,false] {
+            for time_ascending in [true,false] {
+                let mut store=NotificationStore::new(0);
+                store.set_sort_policy(SortPolicy{
+                    by_priority:true,priority_ascending:ascending,time_ascending,
+                });
+                // Outside the C enum band, Mako starts at the list sentinel
+                // instead of finding a normal numeric insertion position.
+                let a=store.push(make(Urgency::Other(3)));
+                let b=store.push(make(Urgency::Other(4)));
+                let c=store.push(make(Urgency::Other(-3)));
+                assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+                    vec![c,b,a],
+                    "Mako's bounded search differs from numeric sort");
+            }
+        }
+    }
+
+    #[test]
+    fn ascending_priority_keeps_valid_urgencies_in_upstream_order(){
+        for time_ascending in [true,false] {
+            let mut store=NotificationStore::new(0);
+            store.set_sort_policy(SortPolicy{
+                by_priority:true,priority_ascending:true,time_ascending,
+            });
+            let make=|urgency|Request{urgency,..Request::default()};
+            let first=store.push(make(Urgency::Normal));
+            let second=store.push(make(Urgency::Normal));
+            let low=store.push(make(Urgency::Low));
+            let critical=store.push(make(Urgency::Critical));
+            let unknown=store.push(make(Urgency::Unknown));
+            let expected=if time_ascending{
+                vec![unknown,low,first,second,critical]
+            }else{vec![unknown,low,second,first,critical]};
+            assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+                expected);
+        }
+    }
+
     #[test]
     fn priority_sort_keeps_distinct_out_of_range_urgency_bands(){
         let mut store=NotificationStore::new(5);
