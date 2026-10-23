@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn missing_or_disabled_action_suppresses_signals_but_still_dismisses(){
         let runtime=SharedRuntime::new(Config::parse(
-            "[category=disabled]\\nactions=0\\n"
+            "[category=disabled]\nactions=0\n"
         ).unwrap());
         let id=runtime.store.lock().unwrap().push(Request{
             category:"disabled".into(),actions:vec![
