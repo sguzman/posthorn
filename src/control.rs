@@ -7,7 +7,9 @@
 use std::collections::{HashMap,HashSet};
 use std::sync::{Arc, Mutex};
 
+use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 use serde::ser::{Serialize, SerializeMap, Serializer};
+use std::fmt;
 use zbus::{interface, zvariant::{Dict, OwnedValue, SerializeValue, Signature, Value}, Connection};
 
 use crate::dbus::{BUS_NAME, OBJECT_PATH};
@@ -17,6 +19,57 @@ use crate::runtime::SharedRuntime;
 pub const CONTROL_INTERFACE: &str = "fr.emersion.Mako";
 pub const CONTROL_PATH: &str = "/fr/emersion/Mako";
     
+/// Mako parses DismissNotifications a{sv} in sender order. A HashMap at
+/// the D-Bus boundary hides earlier malformed duplicate keys before the C
+/// implementation would reject them. Keep the arrival sequence until every
+/// known field has been type-checked.
+#[derive(Debug, zbus::zvariant::Type)]
+#[zvariant(signature = "a{sv}")]
+struct OrderedDismissOptions(Vec<(String, OwnedValue)>);
+
+impl<'de> Deserialize<'de> for OrderedDismissOptions {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Entries;
+        impl<'de> Visitor<'de> for Entries {
+            type Value = OrderedDismissOptions;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("arrival-ordered Mako a{sv} dismissal options")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut entries = Vec::new();
+                while let Some((key, value)) = map.next_entry::<String, OwnedValue>()? {
+                    entries.push((key, value));
+                }
+                Ok(OrderedDismissOptions(entries))
+            }
+        }
+        deserializer.deserialize_map(Entries)
+    }
+}
+
+impl OrderedDismissOptions {
+    fn into_effective_map(self) -> zbus::fdo::Result<HashMap<String, OwnedValue>> {
+        let mut options = HashMap::new();
+        for (key, value) in self.0 {
+            let valid = match key.as_str() {
+                "id" => u32::try_from(&value).is_ok(),
+                "all" | "group" | "history" => bool::try_from(&value).is_ok(),
+                // Mako skips unknown value variants without interpreting them.
+                _ => true,
+            };
+            if !valid {
+                return Err(zbus::fdo::Error::InvalidArgs(format!(
+                    "dismissal option '{key}' has incorrect D-Bus type"
+                )));
+            }
+            // Mako overwrites repeated fields as it visits them; the last
+            // valid value is effective, but an earlier invalid one is fatal.
+            options.insert(key, value);
+        }
+        Ok(options)
+    }
+}
+
 /// sd-bus emits the action a{ss} dictionary in linked-list order, including
 /// repeated keys. zvariant::Dict is backed by a BTreeMap and cannot represent
 /// either property; serialize the dictionary entries directly instead.
@@ -262,9 +315,10 @@ impl MakoControl {
     #[zbus(name = "DismissNotifications")]
     async fn dismiss_notifications(
         &self,
-        options: HashMap<String, OwnedValue>,
+        options: OrderedDismissOptions,
         #[zbus(connection)] conn: &Connection,
     ) -> zbus::fdo::Result<()> {
+        let options = options.into_effective_map()?;
         let ids = self.dismiss_impl(&options)?;
         if !ids.is_empty() {
             for id in ids {
@@ -381,6 +435,35 @@ mod tests {
 
     fn fixture() -> MakoControl {
         MakoControl::new(Arc::new(Mutex::new(NotificationStore::new(5))))
+    }
+
+    #[test]
+    fn ordered_dismissal_options_validate_every_duplicate_before_collapsing() {
+        use zbus::zvariant::Type;
+        assert_eq!(OrderedDismissOptions::SIGNATURE.to_string(), "a{sv}");
+        for key in ["id", "all", "group", "history"] {
+            let correct = if key == "id" {
+                OwnedValue::from(1u32)
+            } else {
+                OwnedValue::from(true)
+            };
+            let options = OrderedDismissOptions(vec![
+                (key.into(), OwnedValue::from(-1i32)),
+                (key.into(), correct),
+            ]);
+            assert!(matches!(options.into_effective_map(),
+                Err(zbus::fdo::Error::InvalidArgs(_))),
+                "malformed earlier {key} must not disappear");
+        }
+        let options = OrderedDismissOptions(vec![
+            ("all".into(), OwnedValue::from(true)),
+            ("future-extension".into(), OwnedValue::from(-1i32)),
+            ("all".into(), OwnedValue::from(false)),
+            ("id".into(), OwnedValue::from(7u32)),
+        ]).into_effective_map().unwrap();
+        assert!(!bool::try_from(&options["all"]).unwrap());
+        assert_eq!(u32::try_from(&options["id"]).unwrap(), 7);
+        assert!(options.contains_key("future-extension"));
     }
 
     #[test]
