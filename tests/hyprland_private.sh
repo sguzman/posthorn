@@ -76,6 +76,12 @@ on-button-right=none
 on-touch=none
 EOF
 
+# Capture a private baseline before the QA layer surface exists.
+# The desktop may already contain the chosen color in wallpaper or apps:
+# require a *change from that baseline*, not an absolute pixel threshold.
+grim "$root/baseline.png" ||
+  die 'unable to capture the original Hyprland desktop baseline'
+
 ./target/debug/posthorn --experimental-private-desktop "$root/config" \
   >"$root/private-desktop.log" 2>&1 &
 daemon_pid=$!
@@ -104,7 +110,7 @@ painted=0
 for _ in {1..25}; do
   grim "$root/visible.png"
   if ./target/debug/examples/qa_png_probe \
-      "$root/visible.png" '#193FA7' 500 present >/dev/null 2>&1; then
+      "$root/visible.png" '#193FA7' 500 increase "$root/baseline.png" >/dev/null 2>&1; then
     painted=1
     break
   fi
@@ -122,7 +128,7 @@ removed=0
 for _ in {1..25}; do
   grim "$root/after-close.png"
   if ./target/debug/examples/qa_png_probe \
-      "$root/after-close.png" '#193FA7' 60 absent >/dev/null 2>&1; then
+      "$root/after-close.png" '#193FA7' 60 restored "$root/baseline.png" >/dev/null 2>&1; then
     removed=1
     break
   fi
