@@ -391,6 +391,17 @@ async fn control_action_dictionary_preserves_raw_wire_order_with_duplicate_keys(
     assert!(modes_reply.body().data().bytes()
         .windows(b"quiet\0".len()).any(|w|w==b"quiet\0"),
         "ordinary Properties.Get must observe the updated mode list");
+    for known in [
+        "org.freedesktop.DBus.Introspectable",
+        "org.freedesktop.DBus.Peer",
+        "org.freedesktop.DBus.Properties",
+    ] {
+        let empty:HashMap<String,OwnedValue>=props.call("GetAll",&(known,)).await?;
+        assert!(empty.is_empty(),"{known} has no standard properties");
+    }
+    let unknown_all:zbus::Result<HashMap<String,OwnedValue>>=
+        props.call("GetAll",&("no.such.Interface",)).await;
+    assert!(unknown_all.is_err(),"unknown interface must not return an empty map");
     let missing:zbus::Result<OwnedValue>=props.call("Get",&(
         CONTROL_INTERFACE,"NotAProperty"
     )).await;

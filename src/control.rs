@@ -444,9 +444,15 @@ impl OrderedControlProperties {
         Self { control: MakoControl::with_runtime(runtime) }
     }
 
-    fn validate_interface(name: &str) -> zbus::fdo::Result<()> {
-        if name == CONTROL_INTERFACE { Ok(()) } else {
-            Err(zbus::fdo::Error::UnknownInterface(name.into()))
+    fn has_properties(name: &str) -> zbus::fdo::Result<bool> {
+        match name {
+            CONTROL_INTERFACE => Ok(true),
+            // zbus registers these on every object path. They expose no
+            // properties, so standard GetAll succeeds with an empty a{sv}.
+            "org.freedesktop.DBus.Properties"
+            | "org.freedesktop.DBus.Introspectable"
+            | "org.freedesktop.DBus.Peer" => Ok(false),
+            _ => Err(zbus::fdo::Error::UnknownInterface(name.into())),
         }
     }
 }
@@ -475,13 +481,16 @@ impl Serialize for OrderedPropertyValue {
 struct OrderedControlPropertiesMap {
     modes: Vec<String>,
     notifications: Vec<OrderedNotificationWire>,
+    empty: bool,
 }
 
 impl Serialize for OrderedControlPropertiesMap {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map=serializer.serialize_map(Some(2))?;
-        map.serialize_entry("Modes",&SerializeValue(&self.modes))?;
-        map.serialize_entry("Notifications",&SerializeValue(&self.notifications))?;
+        let mut map=serializer.serialize_map(Some(if self.empty {0} else {2}))?;
+        if !self.empty {
+            map.serialize_entry("Modes",&SerializeValue(&self.modes))?;
+            map.serialize_entry("Notifications",&SerializeValue(&self.notifications))?;
+        }
         map.end()
     }
 }
@@ -492,7 +501,9 @@ impl OrderedControlProperties {
     fn get(&self, interface: &str, property: &str)
         -> zbus::fdo::Result<OrderedPropertyValue>
     {
-        Self::validate_interface(interface)?;
+        if !Self::has_properties(interface)? {
+            return Err(zbus::fdo::Error::UnknownProperty(property.into()));
+        }
         match property {
             "Modes" => Ok(OrderedPropertyValue::Modes(self.control.list_modes()?)),
             "Notifications" => Ok(OrderedPropertyValue::Notifications(
@@ -505,10 +516,15 @@ impl OrderedControlProperties {
     fn get_all(&self, interface: &str)
         -> zbus::fdo::Result<OrderedControlPropertiesMap>
     {
-        Self::validate_interface(interface)?;
+        if !Self::has_properties(interface)? {
+            return Ok(OrderedControlPropertiesMap {
+                modes:Vec::new(), notifications:Vec::new(), empty:true,
+            });
+        }
         Ok(OrderedControlPropertiesMap {
             modes:self.control.list_modes()?,
             notifications:self.control.ordered_snapshot(false)?,
+            empty:false,
         })
     }
 
@@ -516,7 +532,9 @@ impl OrderedControlProperties {
     fn set(&self, interface: &str, property: &str, _value: OwnedValue)
         -> zbus::fdo::Result<()>
     {
-        Self::validate_interface(interface)?;
+        if !Self::has_properties(interface)? {
+            return Err(zbus::fdo::Error::UnknownProperty(property.into()));
+        }
         match property {
             "Modes" | "Notifications" =>
                 Err(zbus::fdo::Error::PropertyReadOnly(property.into())),
