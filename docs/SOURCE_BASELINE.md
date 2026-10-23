@@ -245,6 +245,30 @@ The embedded-NUL rejection remains an intentional safety divergence
 from C's truncating string representation. Real Hyprland acceptance
 and complete theme fidelity remain open.
 
+## Raw-byte icon hints and integer progress fill
+
+Mako 1.11 resolves sender-provided `image-path` hints through its
+regular icon loader. In addition to direct Cairo fixture tests,
+Posthorn now sends a percent-encoded non-UTF-8 Linux filename through
+the real private `org.freedesktop.Notifications.Notify` method and
+verifies that the selected icon bytes are painted into the raster
+([commit 1cbcf08](https://github.com/sguzman/posthorn/actions/runs/39983942994)).
+
+Mako `render.c:render_notification` uses **integer division** for
+the progress fill width: `(width - 2 * border_size) * progress / 100`,
+before Cairo receives the rectangle. Posthorn previously drew a
+fractional-width rectangle, which could blend its trailing pixel.
+The renderer now uses Mako's integer logical-width calculation before
+HiDPI scaling. Regression tests inspect solid filled/unfilled
+pixel boundaries for several percentages at 1× and 2×. A private
+D-Bus integration test also sends `value=33` and validates the
+exact painted boundary through the sender-to-renderer path.
+Both CI jobs passed at
+[commit c704039](https://github.com/sguzman/posthorn/actions/runs/39984630050).
+
+These are isolated renderer and protocol tests, **not** proof of
+complete live Hyprland presentation, interaction or cutover parity.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
