@@ -177,13 +177,16 @@ struct ConfigureState {
     pending_activation_token: Option<xdg_activation_token_v1::XdgActivationTokenV1>,
 }
 
+// Mako v1.11 include/wayland.h fixes the tracked contact array to ten.
+const MAKO_MAX_TOUCHPOINTS:i32=10;
+
 // Keep touch-contact transitions testable without a physical touchscreen.
 // The headless wlroots virtual-pointer protocol does not inject wl_touch;
 // unit tests below therefore establish only protocol-event bookkeeping,
 // not real compositor touch delivery or Hyprland acceptance.
 impl ConfigureState {
     fn touch_down(&mut self,id:i32,x:f64,y:f64){
-        if id>=0 {
+        if (0..MAKO_MAX_TOUCHPOINTS).contains(&id) {
             self.touch_contacts.insert(id,(mako_fixed_coordinate(x),mako_fixed_coordinate(y)));
         }
     }
@@ -1026,7 +1029,13 @@ mod tests {
         assert!(state.clicks.is_empty(),"cancelled touch must not dismiss a popup");
         state.touch_down(-1,27.0,12.0); // invalid signed Wayland ID
         state.touch_up(-1,19);
-        assert!(state.clicks.is_empty(),"invalid touch IDs must not dispatch");
+        state.touch_down(10,27.0,12.0); // Mako tracks only IDs 0..9
+        state.touch_up(10,21);
+        state.touch_down(9,30.0,20.0);
+        state.touch_up(9,22);
+        assert_eq!(state.clicks.len(),1);
+        assert_eq!(state.clicks.remove(0).serial,22);
+        assert!(state.clicks.is_empty(),"out-of-range touch IDs must not dispatch");
         state.touch_down(2,33.0,19.0);
         // LivePresenter.clear() and surface recreation cancel contacts.
         state.touch_cancel();
