@@ -283,6 +283,22 @@ PY
     grep -E 'xdg_activation(_token)?_v1@' "$root/posthorn.log" | tail -35 || true
     exit 1
   fi
+  # Require the exact nonempty compositor token to be forwarded through the
+  # Freedesktop ActivationToken signal ahead of ActionInvoked/closed.
+  token_value="$(sed -nE 's/.*xdg_activation_token_v1@[^ ]+[.]done, [(]Some[(]"([^"]+)"[)].*/\\1/p' "$root/posthorn.log" | tail -1)"
+  activation_line="$(grep -n 'ActivationToken' "$root/action-signal.log" | head -1 | cut -d: -f1 || true)"
+  action_line="$(grep -n 'ActionInvoked' "$root/action-signal.log" | head -1 | cut -d: -f1 || true)"
+  closed_line="$(grep -n 'NotificationClosed' "$root/action-signal.log" | head -1 | cut -d: -f1 || true)"
+  if [[ -z "$token_value" ]] ||
+     ! grep -Fq "$token_value" "$root/action-signal.log" ||
+     [[ -z "$activation_line" || -z "$action_line" || -z "$closed_line" ]] ||
+     (( activation_line >= action_line || action_line >= closed_line )); then
+    echo 'Compositor-issued token was not forwarded before the action and close signals'
+    grep -E 'xdg_activation(_token)?_v1@' "$root/posthorn.log" | tail -15 || true
+    cat "$root/action-signal.log"
+    exit 1
+  fi
+  echo 'Compositor activation token forwarded ahead of action and close: OK'
   kill "$monitor_pid" 2>/dev/null || true
   wait "$monitor_pid" 2>/dev/null || true
   monitor_pid=""
