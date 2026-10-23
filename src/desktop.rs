@@ -10,7 +10,7 @@ use crate::grouping::group_ordered_scoped;
 use crate::notification::Notification;
 use crate::render::{compose_mako_stack,render_notification_group_with_icon_scale,render_hidden_placeholder_scaled,PixelFrame,StackAlignment};
 use crate::runtime::SharedRuntime;
-use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins,PointerClick};
+use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins};
 
 /// Mako applies outer-margin to the layer-shell window; margin belongs to
 /// the per-notification layout and must never shift the entire surface.
