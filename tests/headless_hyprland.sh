@@ -28,7 +28,7 @@ unset WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE || true
 # This avoids reliance on DRM devices in the GitHub Actions container.
 export WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_RENDERER=pixman
 printf 'output * resolution 1280x720\n' >"$root/sway.conf"
-sway --unsupported-gpu -c "$root/sway.conf" >"$root/sway.log" 2>&1 &
+/usr/local/bin/sway-qa-unprivileged --unsupported-gpu -c "$root/sway.conf" >"$root/sway.log" 2>&1 &
 sway_pid=$!
 sway_socket=""
 for _ in {1..80}; do
