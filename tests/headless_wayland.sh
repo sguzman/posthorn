@@ -573,9 +573,11 @@ busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   org.posthorn.Development /org/freedesktop/Notifications \
   org.freedesktop.Notifications CloseNotification 'u' "$output_probe_id" >/dev/null
 
-# After the compositor assigned HEADLESS-1, a new notification's
-# output-scoped timeout and history policy must be selected from that real
-# monitor. Its sender timeout is -1, so the category's short default wins.
+# Mako v1.11 criteria.c requires notif->surface for [output].
+# A fresh Notify has no surface while its initial timeout is selected,
+# even if the compositor mapped another notification to HEADLESS-1.
+# After it acquires a surface, an explicit-ID replacement retains that
+# association and can select the output-specific short timeout.
 if [[ "$test_scale" == 1 ]]; then
   cat >> "$root/mako.conf" <<'EOF'
 [category=output-policy output=HEADLESS-1]
@@ -606,6 +608,32 @@ PY
   done
   [[ "$policy_seen" == 1 ]] || {
     echo 'Output-scoped expiration policy popup never painted'
+    exit 1
+  }
+  # The fresh notification must NOT inherit [output]'s 1800ms timeout.
+  sleep 2.0
+  grim "$root/output-policy-still-visible.png"
+  if ! /usr/bin/python3 - "$root/output-policy-still-visible.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+counts=Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if counts[(158,98,53)] >= 300 else 1)
+PY
+  then
+    echo 'Fresh notification incorrectly inherited output-scoped timeout'
+    exit 1
+  fi
+  # A direct replacement reuses the already associated notification surface.
+  # Its initial criteria now match HEADLESS-1 and choose the scoped timeout.
+  policy_id="${result#u }"
+  replaced="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn scoped-policy test' "$policy_id" '' 'Output-scoped expiry fixture' '' \
+    0 1 'category' 's' 'output-policy' -1)"
+  [[ "$replaced" == "u $policy_id" ]] || {
+    echo 'Direct replacement failed to preserve output-policy ID'
     exit 1
   }
   sleep 1.8
