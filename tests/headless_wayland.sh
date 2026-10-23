@@ -541,6 +541,73 @@ PY
   fi
 fi
 
+# If the sender advertises actions but omits "default", Mako's
+# invoke-default-action binding still dismisses on left click. It does not
+# request XDG activation or emit action signals without a matching key.
+if [[ "$test_scale" == 1 ]]; then
+  cat >> "$root/mako.conf" <<'EOF'
+[category=no-default-action]
+background-color=#AF7925
+EOF
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" monitor org.posthorn.Development \
+    >"$root/missing-action-signals.log" 2>&1 &
+  monitor_pid=$!
+  sleep 0.2
+  missing_result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn missing default QA' 0 '' 'No default action key' '' \
+    2 'open' 'Open' 1 'category' 's' 'no-default-action' 30000)"
+  [[ "$missing_result" == u\ * ]] || { echo 'Invalid missing-default Notify result'; exit 1; }
+  missing_visible=0
+  for _ in {1..15}; do
+    sleep 0.1
+    grim "$root/missing-default-before.png"
+    if /usr/bin/python3 - "$root/missing-default-before.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+counts=Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if counts[(175,121,37)] >= 300 else 1)
+PY
+    then missing_visible=1; break; fi
+  done
+  [[ "$missing_visible" == 1 ]] || { echo 'Missing-default popup never painted'; exit 1; }
+  before_tokens="$(grep -Ec 'xdg_activation_v1@[^ ]+[.]get_activation_token' "$root/posthorn.log" || true)"
+  POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720 272
+  closed_missing=0
+  for _ in {1..20}; do
+    if grep -q 'Member=NotificationClosed' "$root/missing-action-signals.log"; then
+      closed_missing=1
+      break
+    fi
+    sleep 0.1
+  done
+  after_tokens="$(grep -Ec 'xdg_activation_v1@[^ ]+[.]get_activation_token' "$root/posthorn.log" || true)"
+  if [[ "$closed_missing" != 1 ]] ||
+     grep -Eq 'Member=(ActivationToken|ActionInvoked)' "$root/missing-action-signals.log" ||
+     [[ "$before_tokens" != "$after_tokens" ]]; then
+    echo 'Missing-default click must close without compositor token or action signals'
+    cat "$root/missing-action-signals.log"
+    exit 1
+  fi
+  kill "$monitor_pid" 2>/dev/null || true
+  wait "$monitor_pid" 2>/dev/null || true
+  monitor_pid=""
+  grim "$root/missing-default-after.png"
+  /usr/bin/python3 - "$root/missing-default-after.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+counts=Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+assert counts[(175,121,37)] < 100, "missing-default popup remained after click"
+assert counts[(48,87,71)] >= 300, "older success popup disappeared"
+assert counts[(104,65,72)] >= 300, "older failure popup disappeared"
+PY
+fi
+
 # Exercise timer-driven expiry through the full private D-Bus / Wayland path.
 # Use a distinct warning color so visual removal can be distinguished from
 # ordinary notification closure in the compositor capture.
