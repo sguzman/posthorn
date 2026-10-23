@@ -256,6 +256,7 @@ struct DesktopClick {
     // asynchronous compositor XDG activation-token response. A second
     // hit-test after that wait can otherwise target a newer popup.
     target:Notification,
+    instance:u64,
     binding:crate::hooks::NotifyBinding,
     activation_token:Option<String>,
 }
@@ -263,9 +264,12 @@ struct DesktopClick {
 /// A replaced or removed notification is no longer the one whose hotspot
 /// produced the compositor event. Never retarget the same click to a
 /// different notification or a newer payload with the same Freedesktop ID.
-fn click_target_is_current(runtime:&SharedRuntime,target:&Notification)->io::Result<bool>{
-    Ok(runtime.store.lock().map_err(|_|poisoned())?
-        .active().iter().any(|note|note==target))
+fn click_target_is_current(
+    runtime:&SharedRuntime,target:&Notification,instance:u64
+)->io::Result<bool>{
+    let store=runtime.store.lock().map_err(|_|poisoned())?;
+    Ok(store.active_instance(target.id)==Some(instance)
+       && store.active().iter().any(|note|note==target))
 }
 
 fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<DesktopClick>) -> io::Result<()> {
@@ -336,13 +340,18 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
             // Capture the active notification before resolving its hit-test.
             // If a concurrent D-Bus Notify replaces it, the later identity
             // guard drops the event instead of dispatching to a newer popup.
-            let snapshot=runtime.store.lock().map_err(|_|poisoned())?
-                .active().iter().cloned().collect::<Vec<_>>();
+            let snapshot={
+                let store=runtime.store.lock().map_err(|_|poisoned())?;
+                store.active().iter().filter_map(|note|
+                    store.active_instance(note.id).map(|instance|
+                        (note.clone(),instance))
+                ).collect::<Vec<_>>()
+            };
             let Some((id,binding))=crate::input::hit_test(&runtime,click)
                 .map_err(other)? else{continue};
-            let Some(target)=snapshot.into_iter().find(|note|note.id==id)
-                else{continue};
-            if !click_target_is_current(&runtime,&target)? {continue;}
+            let Some((target,instance))=snapshot.into_iter()
+                .find(|(note,_)|note.id==id) else{continue};
+            if !click_target_is_current(&runtime,&target,instance)? {continue;}
             // Request activation only for an actually matching sender action.
             // Dismissals and missing default keys must not incur a token wait.
             let invokes_action=crate::input::should_request_activation_token(
@@ -350,7 +359,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
             let activation_token=if invokes_action {
                 viewer.request_activation_token(click.serial).map_err(other)?
             }else{None};
-            if sender.send(DesktopClick{target,binding,activation_token}).is_err() {
+            if sender.send(DesktopClick{target,instance,binding,activation_token}).is_err() {
                 return Ok(());
             }
         }
@@ -389,7 +398,7 @@ async fn run_private_desktop_instance(conn:zbus::Connection,runtime:SharedRuntim
         tokio::select! {
             click=clicks.recv() => {
                 if let Some(event)=click {
-                    if click_target_is_current(&runtime,&event.target)? {
+                    if click_target_is_current(&runtime,&event.target,event.instance)? {
                         crate::input::dispatch_binding(
                             &conn,&runtime,event.target.id,event.binding,
                             event.activation_token.as_deref()
@@ -425,25 +434,30 @@ mod tests {
         });
         let snapshot=runtime.store.lock().unwrap().active()
             .iter().find(|n|n.id==old).unwrap().clone();
-        assert!(click_target_is_current(&runtime,&snapshot).unwrap());
+        let original_instance=runtime.store.lock().unwrap()
+            .active_instance(old).unwrap();
+        assert!(click_target_is_current(&runtime,&snapshot,original_instance).unwrap());
         let newer=runtime.store.lock().unwrap().push(Request{
             summary:"New popup covering original hotspot".into(),..Request::default()
         });
         // A new popup does not retroactively retarget an already captured
         // click; the original notification still exists unchanged.
-        assert!(click_target_is_current(&runtime,&snapshot).unwrap());
+        assert!(click_target_is_current(&runtime,&snapshot,original_instance).unwrap());
         assert_ne!(old,newer);
         // Freedesktop replaces_id keeps the numeric ID. Identity must still
         // distinguish the new payload from the clicked one.
         assert_eq!(runtime.store.lock().unwrap().push(Request{
             replaces_id:old,summary:"Replaced popup".into(),..Request::default()
         }),old);
-        assert!(!click_target_is_current(&runtime,&snapshot).unwrap());
+        assert!(!click_target_is_current(&runtime,&snapshot,original_instance).unwrap());
         let replacement=runtime.store.lock().unwrap().active()
             .iter().find(|n|n.id==old).unwrap().clone();
-        assert!(click_target_is_current(&runtime,&replacement).unwrap());
+        let replacement_instance=runtime.store.lock().unwrap()
+            .active_instance(old).unwrap();
+        assert_ne!(original_instance,replacement_instance);
+        assert!(click_target_is_current(&runtime,&replacement,replacement_instance).unwrap());
         runtime.close(old,CloseReason::Dismissed,false).unwrap();
-        assert!(!click_target_is_current(&runtime,&replacement).unwrap());
+        assert!(!click_target_is_current(&runtime,&replacement,replacement_instance).unwrap());
     }
 
     #[test]
