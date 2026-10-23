@@ -336,8 +336,14 @@ pub fn render_notification_group_with_icon_scale(
         context.clip();
         context.set_operator(operator);
         set_color(&context,color);
-        context.rectangle(border,border,
-            inner_width*f64::from(note.progress.min(100))/100.0,inner_height);
+        // Mako v1.11 render.c computes progress_width as an integer:
+        // (notification_width - 2*border_size) * progress / 100.
+        // Fractional Cairo rectangles introduce an unwanted blended edge
+        // pixel that is absent from Mako's pixel-aligned progress bar.
+        let logical_width=i64::from(width).saturating_sub(2*(border as i64));
+        let progress_width=logical_width.saturating_mul(i64::from(note.progress.min(100)))
+            / 100;
+        context.rectangle(border,border,progress_width as f64,inner_height);
         context.fill().map_err(|e|e.to_string())?;
         context.restore().map_err(|e|e.to_string())?;
     }
@@ -968,6 +974,39 @@ mod tests {
             &[0,0,255,255],"Mako picks first size-bearing component at 1x");
         assert_eq!(&hidpi.pixels[index(&hidpi)..index(&hidpi)+4],
             &[0,255,0,255],"2x must not trust @2 in an unselected path component");
+    }
+
+    #[test]
+    fn progress_fill_uses_integer_logical_pixel_width_before_hidpi_scaling(){
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","101"),("height","70"),("padding","0"),
+            ("border-size","0"),("background-color","#0000FFFF"),
+            ("progress-color","source #FF0000FF"),
+        ] {style.insert(key.into(),value.into());}
+        let mut note=fixture();
+        for value in [1,33,49,66,99,100] {
+            note.progress=value;
+            for scale in [1u32,2] {
+                let frame=render_notification_group_scaled(&note,&style,0,scale).unwrap();
+                let logical_filled=101*(value as usize)/100;
+                let y=(frame.height as usize).saturating_sub(3*scale as usize);
+                let color_at=|physical_x:usize| {
+                    let start=y*(frame.stride as usize)+physical_x*4;
+                    frame.pixels[start..start+4].to_vec()
+                };
+                if logical_filled>0 {
+                    assert_eq!(color_at(logical_filled*scale as usize-1),
+                        [0,0,255,255],
+                        "last filled pixel must remain solid at {value}% and {scale}x");
+                }
+                if logical_filled<101 {
+                    assert_eq!(color_at(logical_filled*scale as usize),
+                        [255,0,0,255],
+                        "first unfilled pixel must have no fractional Cairo blend at {value}% and {scale}x");
+                }
+            }
+        }
     }
 
     #[test]
