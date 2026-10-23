@@ -411,9 +411,26 @@ the real `HEADLESS-1` output and rejects a deliberately mismatched
 `NONEXISTENT` output. Rust/private D-Bus and the 1×, 1.25×, and
 2× headless compositor suites passed at
 [commit 5fa0e6b](https://github.com/sguzman/posthorn/actions/runs/40005894396).
+The 1× live-registry hotplug test also queues a notification for
+an absent `HEADLESS-2` monitor, adds that monitor, and requires the
+same popup to repaint in a color supplied by a rule scoped to its
+**actual new output**, not merely its configured target. The full
+private Rust/D-Bus and 1×/1.25×/2× compositor CI passed at
+[commit 467e6c1](https://github.com/sguzman/posthorn/actions/runs/40006415764).
+
+The notification scheduler independently used to construct selector traits
+from the configured placement string. It now uses the observed output as
+well. A lifecycle regression verifies that output-scoped
+`default-timeout=210` and `history=0` **do not** match before
+compositor assignment, then do match once the surface is observed on
+`DP-2`. Both CI jobs passed at
+[commit dc26d78](https://github.com/sguzman/posthorn/actions/runs/40006884032).
+A stronger end-to-end expiry/history test was added after that green
+checkpoint and is undergoing separate CI acceptance; do not treat it as
+already verified.
+
 Real Hyprland monitor reassignment, multiple independent notification
-surfaces, and complete output-sensitive timeout/grouping behavior are
-not yet accepted.
+surfaces, and complete output-sensitive grouping behavior remain open.
 
 ## Explicit nonclaims
 
