@@ -3,7 +3,8 @@
 set -euo pipefail
 
 die(){ printf 'Posthorn Hyprland QA: %s\n' "$*" >&2; exit 1; }
-cd "$(dirname "$0")/.."
+script_path="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
+cd "$(dirname "$script_path")/.."
 
 [[ -v POSTHORN_HYPRLAND_QA ]] ||
   die 'explicit POSTHORN_HYPRLAND_QA=1 guard required'
@@ -27,7 +28,7 @@ if [[ "$#" != 1 || "$1" != '--inside' ]]; then
   [[ "$owner_before" == s\ * ]] || die 'unexpected original bus owner'
   cargo build --quiet --bin posthorn --example qa_png_probe
   # The child gets a new DBUS_SESSION_BUS_ADDRESS but retains WAYLAND_DISPLAY.
-  dbus-run-session -- bash "$0" --inside
+  dbus-run-session -- bash "$script_path" --inside
   owner_after="$(busctl --user --timeout=3s call org.freedesktop.DBus \
     /org/freedesktop/DBus org.freedesktop.DBus GetNameOwner \
     s org.freedesktop.Notifications 2>/dev/null)" ||
