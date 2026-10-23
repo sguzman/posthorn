@@ -425,9 +425,14 @@ well. A lifecycle regression verifies that output-scoped
 compositor assignment, then do match once the surface is observed on
 `DP-2`. Both CI jobs passed at
 [commit dc26d78](https://github.com/sguzman/posthorn/actions/runs/40006884032).
-A stronger end-to-end expiry/history test was added after that green
-checkpoint and is undergoing separate CI acceptance; do not treat it as
-already verified.
+A stronger 1× compositor acceptance sends a notification with a
+sender timeout of -1 and checks that `[output=HEADLESS-1]` selects
+the scoped short default timeout, paints its distinctive color, removes
+the popup on expiry, and excludes it from `ListHistory` when
+`history=0`. The signed D-Bus fixture uses an explicit option terminator
+so `busctl` passes -1 as the actual method argument. Rust/private D-Bus
+and all headless Sway output scales passed at
+[commit a483bbd](https://github.com/sguzman/posthorn/actions/runs/40008223463).
 
 Real Hyprland monitor reassignment, multiple independent notification
 surfaces, and complete output-sensitive grouping behavior remain open.
