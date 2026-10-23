@@ -59,6 +59,40 @@ async fn private_service_expires_and_archives_a_notification() -> Result<(), Box
 }
 
 #[tokio::test]
+async fn empty_image_path_hint_clears_app_icon_through_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let hints:HashMap<String,OwnedValue>=[(
+        "image-path".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from(""))?,
+    )].into();
+    let id:u32=desktop.call("Notify",&(
+        "image-hint-fixture",0u32,"original.png","Summary","",
+        Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let note=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).unwrap().clone();
+    assert_eq!(note.app_icon,"",
+        "Mako accepts an empty image-path as an override, not as absent");
+
+    let legacy:HashMap<String,OwnedValue>=[(
+        "image_path".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("legacy.png"))?,
+    )].into();
+    let replacement:u32=desktop.call("Notify",&(
+        "image-hint-fixture",id,"original.png","Replacement","",
+        Vec::<String>::new(),legacy,-1i32
+    )).await?;
+    assert_eq!(replacement,id);
+    let note=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).unwrap().clone();
+    assert_eq!(note.app_icon,"legacy.png");
+    Ok(())
+}
+
+#[tokio::test]
 async fn malformed_dismiss_options_are_rejected_over_real_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
