@@ -379,6 +379,18 @@ async fn control_action_dictionary_preserves_raw_wire_order_with_duplicate_keys(
     let all_bytes=all_body.data().bytes();
     assert!(all_bytes.windows(b"Modes\0".len()).any(|w|w==b"Modes\0"),
         "standard Properties.GetAll must include Modes as well");
+    // Regular applications decode the property map rather than inspecting
+    // bytes. Confirm that both are still present under typed GetAll.
+    let decoded:HashMap<String,OwnedValue>=all_body.deserialize()?;
+    assert_eq!(decoded.len(),2);
+    assert!(decoded.contains_key("Notifications"));
+    assert!(decoded.contains_key("Modes"));
+    let _:()=ctl.call("SetModes",&(vec!["quiet".to_string()],)).await?;
+    let modes_reply=props.call_method("Get",&(CONTROL_INTERFACE,"Modes")).await?;
+    assert_eq!(modes_reply.body().signature().to_string(),"v");
+    assert!(modes_reply.body().data().bytes()
+        .windows(b"quiet\0".len()).any(|w|w==b"quiet\0"),
+        "ordinary Properties.Get must observe the updated mode list");
     let missing:zbus::Result<OwnedValue>=props.call("Get",&(
         CONTROL_INTERFACE,"NotAProperty"
     )).await;
