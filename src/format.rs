@@ -83,7 +83,10 @@ pub fn render_notification_format(template: &str, n: &FormatNotification<'_>,
             // Upstream Mako v1.11 uses mako_asprintf("%d", notif->id).
             // %d interprets the uint32 ID bits as a signed 32-bit integer.
             'i' => ((n.id as i32).to_string(),false),
-            'g' => (n.group_count.to_string(),false),
+            // Mako v1.11 stores group_count as an `int` and formats it
+            // with `%d`; formatting a Rust usize directly diverges after
+            // the signed 32-bit boundary.
+            'g' => ((n.group_count as i32).to_string(),false),
             _ => (String::new(),false),
         };
         if trusted { raw } else { escape_markup(&raw) }
@@ -172,6 +175,21 @@ mod tests {
             let note=FormatNotification{id,..FormatNotification::default()};
             assert_eq!(render_notification_format("id=%i",&note,false),
                 format!("id={expected}"));
+        }
+    }
+
+    #[test]
+    fn group_count_placeholder_matches_mako_signed_int_formatting() {
+        // include/notification.h defines group_count as int; notification.c
+        // uses mako_asprintf("%d", notif->group_count).
+        for (count, expected) in [
+            (0usize, "0"),
+            (i32::MAX as usize, "2147483647"),
+            ((i32::MAX as usize) + 1, "-2147483648"),
+            (u32::MAX as usize, "-1"),
+        ] {
+            let note=FormatNotification{group_count:count,..FormatNotification::default()};
+            assert_eq!(render_notification_format("%g",&note,false),expected);
         }
     }
 
