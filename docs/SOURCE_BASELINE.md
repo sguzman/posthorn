@@ -368,6 +368,17 @@ disappears while older notifications remain. This acceptance passed the
 Clicks outside a popup and unbound middle clicks are also checked for
 non-dismissal and absence of an unnecessary activation request.
 
+Mako v1.11 calls `create_xdg_activation_token` for a matching
+sender action **before** checking whether the resolved style permits
+action signals. The 1× compositor test now reloads a scoped
+`actions=0` rule, sends a notification with a real default action,
+and clicks it with the temporary virtual pointer. The test verifies
+that the token request still occurs, the target popup disappears,
+and neither `ActivationToken` nor `ActionInvoked` is emitted.
+The complete headless Wayland job passed at
+[commit b27949e](https://github.com/sguzman/posthorn/actions/runs/40002064939);
+the separate Rust CI job remained in progress when this was recorded.
+
 These are authentic **headless Sway** protocol observations, not mocked
 tokens. They still do **not** prove production Hyprland action focus,
 compositor touch behavior, exact fractional-buffer negotiation, physical
