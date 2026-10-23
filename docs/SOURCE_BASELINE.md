@@ -77,14 +77,21 @@ This is **not** full POSIX ERE parity: glibc accepts capture backreferences
 such as (ab)\1 that the Rust regex crate does not. Locale-sensitive
 character classes and other grammar differences still need acceptance tests.
 
-## Style interaction acceptance gap
+## Mako-style padding and corner-radius resolution
 
-Mako's config.c clamps left/right padding to at least corresponding
-border-radius values when both are specified in the same style, accounting
-for parse order; applying a separate scoped border-radius without padding
-does not necessarily re-clamp the inherited root padding. Posthorn's
-style-map/rendering implementation has not yet reproduced that
-order-and-scope-specific behavior. Do not apply an unconditional clamp.
+Mako's config.c clamps left/right padding to at least the corresponding
+border-radius when both are specified in the same style. It preserves the
+clamped result across later radius reassignments. The root style already
+specifies padding and radius in its defaults, but a user criteria style begins
+empty. Overriding only one field in a later scoped rule does not re-clamp the
+inherited field.
+
+Posthorn now records configuration-time padding/radius assignment state
+separately from the unchanged raw config value and applies its effective
+padding during style resolution. Root, scoped, repeated, and later-override
+regressions passed [full CI](https://github.com/sguzman/posthorn/actions/runs/39947427676)
+at commit d621893. Direct render measurement regression is separately
+tracked. Further layout and compositor parity remains an MVP gate.
 
 ## Explicit nonclaims
 

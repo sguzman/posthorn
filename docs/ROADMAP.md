@@ -21,7 +21,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `█████████░ 94%`
 - 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `████████░░ 77%`
 - 📂 T104 — Include files with Mako-compatible path behavior — `████████░░ 81%`
-- 📐 T105 — Type/layout/style parity for all Mako config settings — `████████░░ 77%`
+- 📐 T105 — Type/layout/style parity for all Mako config settings — `████████░░ 78%`
 
 ### 📨 P2 — Notification lifecycle and formatting — `██████████ 95%`
 
