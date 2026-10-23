@@ -15,13 +15,25 @@ name is not owned by the existing daemon.
 The runner compiles only the experimental private desktop and Rust PNG
 pixel probe. It starts a **new nested D-Bus session**, retains the real
 Wayland compositor socket, and runs Posthorn on its private
-`org.posthorn.Development` name using a disposable configuration. It
-then sends a Freedesktop `Notify`, captures a temporary real-monitor
-screenshot, checks for the unique notification background color, closes
-the notification through the private bus, and checks that its color
-disappears. The runner terminates its child process and deletes temporary
-captures on exit. An opt-in `POSTHORN_KEEP_QA=1` preserves artifacts for
-private debugging only; **never commit screenshots or user-session logs to
+`org.posthorn.Development` name using a disposable configuration.
+Direct `--inside` invocation is rejected unless the parent has supplied
+the original bus address and checked owner. The child also compares
+the two bus daemon GUIDs to prove that its private session is **not**
+the original bus, even if address strings are misleading.
+
+Before launching Posthorn, the runner captures an ephemeral baseline
+screenshot. It sends a Freedesktop `Notify`, verifies the resulting
+ID and active private control entry, then requires the distinct popup
+color to **increase relative to the original screenshot**. After
+`CloseNotification`, it verifies both that the control entry disappears
+and that the matched pixel count returns close to its original baseline.
+These comparisons reject false positives from an existing wallpaper or
+application that already uses the QA color. Compositor queries and
+screenshot captures have explicit timeouts; the runner terminates its
+child process and deletes temporary captures on exit.
+
+An opt-in `POSTHORN_KEEP_QA=1` preserves artifacts for private
+debugging only; **never commit screenshots or user-session logs to
 this public repository**.
 
 All application/configuration side effects are isolated. The script
