@@ -50,6 +50,17 @@ entries. D-Bus dictionaries conventionally require unique keys, although
 Mako itself emits duplicates. Property wire fidelity therefore remains an
 explicit MVP gap; neither this commit nor passing CI establishes full parity.
 
+## Sender-ordered dismissal options
+
+Mako 1.11 parses `DismissNotifications`' `a{sv}` arguments in wire order.
+An earlier malformed known option must cause rejection even when a later
+duplicate supplies a valid value; last valid occurrences otherwise win.
+Posthorn now deserializes arrival-ordered entries and validates each before
+constructing the internal options map. Both the parser unit test and the
+[private D-Bus duplicate-key regression](https://github.com/sguzman/posthorn/actions/runs/39896396119)
+passed Rust and headless Wayland CI at commit `e362363`. This fixes
+dismissal input parity, **not** the separate lossy `Notifications` property.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
