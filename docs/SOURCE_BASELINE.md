@@ -577,6 +577,15 @@ audio playback, PipeWire routing, device selection, audible fidelity,
 or the workstation's sound configuration. The test never launches
 `pw-play` or touches physical audio. Acoustic acceptance remains open.
 
+After the initial hook has fired, a real private
+`fr.emersion.Mako.Reload` must **not** re-execute it for that existing
+notification. Likewise, closing the notification and calling the private
+`RestoreNotification` history method must restore it without issuing
+another shell command. Both isolated compositor and Rust/private D-Bus CI
+passed for [reload at commit 9edc1cc](https://github.com/sguzman/posthorn/actions/runs/40026559560)
+and [history restoration at commit 6412755](https://github.com/sguzman/posthorn/actions/runs/40026782751).
+These test Mako's on-notify arrival semantics, **not physical audio**.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
