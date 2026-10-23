@@ -139,6 +139,13 @@ impl PopupBounds {
     }
 }
 
+/// Mako v1.11 calls wl_fixed_to_int() at pointer enter/motion and touch
+/// down/motion. Wayland f64 coordinates represent 24.8 fixed-point values;
+/// arithmetic right shift rounds negative subpixels down, not toward zero.
+fn mako_fixed_coordinate(position:f64)->f64 {
+    position.floor()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointerClick {
     pub x: f64,
@@ -309,13 +316,13 @@ impl Dispatch<wl_pointer::WlPointer, ()> for ConfigureState {
         match event {
             wl_pointer::Event::Enter { surface, surface_x, surface_y, .. } => {
                 state.pointer_inside = state.active_surface.as_ref()==Some(&surface);
-                state.pointer_x = surface_x;
-                state.pointer_y = surface_y;
+                state.pointer_x = mako_fixed_coordinate(surface_x);
+                state.pointer_y = mako_fixed_coordinate(surface_y);
             }
             wl_pointer::Event::Leave { .. } => state.pointer_inside = false,
             wl_pointer::Event::Motion { surface_x, surface_y, .. } => {
-                state.pointer_x = surface_x;
-                state.pointer_y = surface_y;
+                state.pointer_x = mako_fixed_coordinate(surface_x);
+                state.pointer_y = mako_fixed_coordinate(surface_y);
             }
             wl_pointer::Event::Button { serial, button, state: WEnum::Value(wl_pointer::ButtonState::Pressed), .. }
                 if state.pointer_inside =>
@@ -338,12 +345,12 @@ impl Dispatch<wl_touch::WlTouch, ()> for ConfigureState {
         match event {
             wl_touch::Event::Down{surface,id,x,y,..}=>{
                 if state.active_surface.as_ref()==Some(&surface){
-                    state.touch_contacts.insert(id,(x,y));
+                    state.touch_contacts.insert(id,(mako_fixed_coordinate(x),mako_fixed_coordinate(y)));
                 }
             }
             wl_touch::Event::Motion{id,x,y,..}=>{
                 if let Some(position)=state.touch_contacts.get_mut(&id){
-                    *position=(x,y);
+                    *position=(mako_fixed_coordinate(x),mako_fixed_coordinate(y));
                 }
             }
             wl_touch::Event::Up{id,serial,..}=>{
@@ -928,6 +935,31 @@ mod tests {
         state.clicks.push(PointerClick{x,y,button:0,serial:11});
         assert_eq!(state.clicks.remove(0).button,0);
         assert!(state.touch_contacts.is_empty());
+    }
+
+    #[test]
+    fn mako_wayland_fixed_coordinates_round_at_event_boundaries(){
+        assert_eq!(mako_fixed_coordinate(31.99609375),31.0);
+        assert_eq!(mako_fixed_coordinate(32.0),32.0);
+        assert_eq!(mako_fixed_coordinate(32.00390625),32.0);
+        assert_eq!(mako_fixed_coordinate(-0.00390625),-1.0);
+        assert_eq!(mako_fixed_coordinate(-1.00390625),-2.0);
+        // The surface stores the already-quantized coordinate for later
+        // button/touch release events, matching Mako's wl_fixed_to_int.
+        let mut state=ConfigureState::default();
+        state.pointer_inside=true;
+        state.pointer_x=mako_fixed_coordinate(63.99609375);
+        state.pointer_y=mako_fixed_coordinate(9.99609375);
+        state.clicks.push(PointerClick{
+            x:state.pointer_x,y:state.pointer_y,button:272,serial:4
+        });
+        let click=state.clicks.remove(0);
+        assert_eq!((click.x,click.y),(63.0,9.0));
+        state.touch_contacts.insert(0,(
+            mako_fixed_coordinate(63.99609375),
+            mako_fixed_coordinate(9.99609375)
+        ));
+        assert_eq!(state.touch_contacts.remove(&0),Some((63.0,9.0)));
     }
 
     #[test]
