@@ -62,7 +62,9 @@ pub fn style_for_note_index(
         desktop_entry:&n.desktop_entry, summary:&n.summary, body:&n.body,
         urgency:n.urgency.criteria_label(),
         anchor:if n.surface_associated {
-            config.global.get("anchor").map(String::as_str).unwrap_or("top-right")
+            n.surface_anchor.as_deref().or_else(||
+                config.global.get("anchor").map(String::as_str)
+            ).unwrap_or("top-right")
         }else{""},
         output:if n.surface_associated {
             observed_output.as_deref().unwrap_or("")

@@ -1078,6 +1078,47 @@ async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_d
 }
 
 #[tokio::test]
+async fn direct_replacement_uses_prior_category_surface_anchor_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "default-timeout=4000\n[category=warning]\nanchor=bottom-left\n\
+         [anchor=bottom-left]\ndefault-timeout=1000\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let warning:HashMap<String,OwnedValue>=[(
+        "category".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("warning"))?
+    )].into();
+    let id:u32=desktop.call("Notify",&(
+        "anchor-parity",0u32,"","Warning","",Vec::<String>::new(),
+        warning,-1i32
+    )).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).unwrap().surface_anchor.as_deref(),
+        Some("bottom-left"));
+    let first_remaining=runtime.next_deadline()?
+        .ok_or("missing original timeout")?
+        .saturating_duration_since(std::time::Instant::now());
+    assert!(first_remaining>Duration::from_secs(3));
+    let replaced:u32=desktop.call("Notify",&(
+        "anchor-parity",id,"","Normal","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_eq!(replaced,id);
+    let remaining=runtime.next_deadline()?
+        .ok_or("missing replacement timeout")?
+        .saturating_duration_since(std::time::Instant::now());
+    assert!(remaining>Duration::from_millis(200)
+        && remaining<=Duration::from_secs(1),
+        "replacement should match old bottom-left surface: {remaining:?}");
+    assert_eq!(runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).unwrap().surface_anchor.as_deref(),
+        Some("bottom-left"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn new_notifications_do_not_inherit_surface_selectors_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {

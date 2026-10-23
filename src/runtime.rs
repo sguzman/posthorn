@@ -222,7 +222,9 @@ impl SharedRuntime {
             urgency:note.urgency.criteria_label(),
             // Mako has NULL notif->surface during initial Notify criteria.
             anchor: if note.surface_associated {
-                config.global.get("anchor").map(String::as_str).unwrap_or("top-right")
+                note.surface_anchor.as_deref().or_else(||
+                    config.global.get("anchor").map(String::as_str)
+                ).unwrap_or("top-right")
             }else{""},
             output: if note.surface_associated {
                 observed_output.as_deref().unwrap_or("")
@@ -261,7 +263,8 @@ impl SharedRuntime {
         }
         // Mako associates the chosen surface after applying initial style.
         // Direct-ID replacement inherits it; fresh/tag replacements do not.
-        store.associate_surface(id);
+        store.associate_surface(id,
+            style.get("anchor").map(String::as_str).unwrap_or("top-right"));
         Ok(())
     }
 
@@ -913,6 +916,46 @@ mod tests {
         assert_eq!(runtime.next_deadline().unwrap(),
             Some(now+Duration::from_millis(255)),
             "direct replacement inherits the existing surface anchor");
+    }
+
+    #[test]
+    fn direct_replacement_matches_existing_category_selected_surface_anchor() {
+        // Mako criteria.c uses notif->surface->anchor, not root anchor.
+        // A first category rule can position the surface at bottom-left.
+        let runtime=SharedRuntime::new(Config::parse(
+            "default-timeout=4000\n[category=warning]\nanchor=bottom-left\n\
+             [anchor=bottom-left]\ndefault-timeout=1000\n"
+        ).unwrap());
+        let now=Instant::now();
+        let id=runtime.store.lock().unwrap().push(Request {
+            category:"warning".into(),..Request::default()
+        });
+        runtime.schedule(id,now).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+Duration::from_millis(4000)));
+        let anchor=runtime.store.lock().unwrap().active().iter()
+            .find(|n|n.id==id).unwrap().surface_anchor.clone();
+        assert_eq!(anchor.as_deref(),Some("bottom-left"));
+
+        assert_eq!(runtime.store.lock().unwrap().push(Request {
+            replaces_id:id,category:"normal".into(),..Request::default()
+        }),id);
+        runtime.schedule(id,now+Duration::from_millis(20)).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+Duration::from_millis(1020)),
+            "the old attached bottom-left surface must select [anchor]");
+        let note=runtime.store.lock().unwrap().active().iter()
+            .find(|n|n.id==id).unwrap().clone();
+        assert_eq!(note.surface_anchor.as_deref(),Some("bottom-left"));
+
+        let fresh=runtime.store.lock().unwrap().push(Request {
+            category:"normal".into(),..Request::default()
+        });
+        runtime.schedule(fresh,now+Duration::from_millis(40)).unwrap();
+        // Confirm fresh normal notification does NOT inherit bottom-left.
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .find(|n|n.id==fresh).unwrap().surface_anchor.as_deref(),
+            Some("top-right"));
     }
 
     #[test]

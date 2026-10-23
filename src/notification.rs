@@ -77,6 +77,9 @@ pub struct Notification {
     /// Mako criteria evaluate [anchor] and [output] only when notif->surface
     /// exists. A fresh notification has no surface during its first pass.
     pub surface_associated:bool,
+    /// Anchor of the already attached Mako surface, not necessarily the
+    /// configured root anchor. Direct-ID reset retains this association.
+    pub surface_anchor:Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -113,7 +116,7 @@ impl Notification {
             progress: request.progress, requested_timeout_ms: request.requested_timeout_ms,
             actions: request.actions,
             group_index:-1,group_count:1,grouping_applied:false,
-            surface_associated:false }
+            surface_associated:false,surface_anchor:None }
     }
 
     /// Returns None for a persistent notification, otherwise its timeout.
@@ -180,8 +183,14 @@ impl NotificationStore {
     pub fn active(&self) -> &VecDeque<Notification> { &self.active }
 
     /// apply_each_criteria creates or reuses a surface after style selection.
-    pub fn associate_surface(&mut self,id:u32) {
+    pub fn associate_surface(&mut self,id:u32,selected_anchor:&str) {
         if let Some(note)=self.active.iter_mut().find(|n|n.id==id){
+            // Mako's apply_each_criteria reuses notif->surface when no
+            // matching new surface is found. Do not overwrite the anchor
+            // of an already attached surface on a direct replacement.
+            if note.surface_anchor.is_none(){
+                note.surface_anchor=Some(selected_anchor.to_owned());
+            }
             note.surface_associated=true;
         }
     }
@@ -251,15 +260,16 @@ impl NotificationStore {
         if let Some(index)=direct_replace {
             let id=self.active[index].id;
             let old=&self.active[index];
-            let (group_index,group_count,grouping_applied,surface_associated)=
+            let (group_index,group_count,grouping_applied,surface_associated,surface_anchor)=
                 (old.group_index,old.group_count,old.grouping_applied,
-                 old.surface_associated);
+                 old.surface_associated,old.surface_anchor.clone());
             self.active[index]=Notification::from_request(id,request);
             self.active[index].group_index=group_index;
             self.active[index].group_count=group_count;
             self.active[index].grouping_applied=grouping_applied;
             // reset_notification leaves the prior surface association.
             self.active[index].surface_associated=surface_associated;
+            self.active[index].surface_anchor=surface_anchor;
             self.record_new_instance(id);
             return id;
         }
@@ -370,6 +380,7 @@ impl NotificationStore {
         self.active_instances.remove(&id);
         // Mako nulls notif->surface when saving a historical notification.
         notification.surface_associated=false;
+        notification.surface_anchor=None;
         if save_history && history_enabled && self.max_history != 0 {
             self.history.push_front(notification.clone());
             self.history.truncate(self.max_history);
