@@ -25,7 +25,7 @@ impl Color {
         let digits = digits.strip_prefix("0x")
             .or_else(|| digits.strip_prefix("0X")).unwrap_or(digits);
         let number = u32::from_str_radix(digits, 16)
-            .map_err(|_| "invalid hex color")?;
+            .map_err(|_| "invalid hex digit")?;
         let number = if negative { number.wrapping_neg() } else { number };
         let rgba = if raw.len() == 6 { (number << 8) | 0xff } else { number };
         Ok(Self {
