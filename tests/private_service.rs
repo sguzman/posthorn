@@ -233,6 +233,70 @@ async fn malformed_dismiss_options_are_rejected_over_real_dbus()
     Ok(())
 }
 
+/// Preserve duplicate a{sv} options on the test wire, as sd-bus allows.
+/// HashMap would silently merge the keys before they reach the daemon.
+#[derive(zbus::zvariant::Type)]
+#[zvariant(signature = "a{sv}")]
+struct OrderedDismissWire(Vec<(String, OwnedValue)>);
+
+impl serde::Serialize for OrderedDismissWire {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (key, value) in &self.0 {
+            map.serialize_entry(key, value)?;
+        }
+        map.end()
+    }
+}
+
+#[tokio::test]
+async fn duplicate_dismiss_keys_follow_mako_validation_on_private_dbus()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+{
+    let (conn, runtime) = open_private_service(Config::default()).await?;
+    let desktop = Proxy::new(&conn, PRIVATE_BUS_NAME, OBJECT_PATH, BUS_NAME).await?;
+    let control = Proxy::new(&conn, PRIVATE_BUS_NAME, CONTROL_PATH, CONTROL_INTERFACE).await?;
+    let id: u32 = desktop.call("Notify", &(
+        "duplicate-dismiss-wire", 0u32, "", "Keep this", "",
+        Vec::<String>::new(), HashMap::<String, OwnedValue>::new(), -1i32
+    )).await?;
+
+    // The first (badly typed) id must fail, even when a later id is valid.
+    let bad_id = OrderedDismissWire(vec![
+        ("id".into(), OwnedValue::from(-1i32)),
+        ("id".into(), OwnedValue::from(id)),
+    ]);
+    let result: zbus::Result<()> = control.call("DismissNotifications", &(bad_id,)).await;
+    assert!(result.is_err(), "earlier invalid id was hidden by its duplicate");
+    assert_eq!(runtime.store.lock().unwrap().active().len(), 1);
+
+    for key in ["all", "group", "history"] {
+        let bad = OrderedDismissWire(vec![
+            (key.into(), OwnedValue::from(-1i32)),
+            (key.into(), OwnedValue::from(false)),
+            ("id".into(), OwnedValue::from(id)),
+        ]);
+        let result: zbus::Result<()> = control.call("DismissNotifications", &(bad,)).await;
+        assert!(result.is_err(), "earlier invalid {key} was hidden by its duplicate");
+        assert_eq!(runtime.store.lock().unwrap().active().len(), 1);
+    }
+
+    // A valid later duplicate overrides the first, like Mako's sequential
+    // sd_bus_message_read loop. Unknown option values are skipped.
+    let valid = OrderedDismissWire(vec![
+        ("all".into(), OwnedValue::from(true)),
+        ("unused-extension".into(), OwnedValue::from(-1i32)),
+        ("all".into(), OwnedValue::from(false)),
+        ("id".into(), OwnedValue::from(id)),
+        ("history".into(), OwnedValue::from(false)),
+    ]);
+    let _: () = control.call("DismissNotifications", &(valid,)).await?;
+    assert!(runtime.store.lock().unwrap().active().is_empty());
+    assert!(runtime.store.lock().unwrap().history().is_empty());
+    Ok(())
+}
+
 #[tokio::test]
 async fn private_control_menu_invokes_existing_action_without_shell()
     -> Result<(),Box<dyn std::error::Error + Send + Sync>>
