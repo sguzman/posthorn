@@ -124,6 +124,12 @@ pointer/touch or action focus, exact fractional-buffer negotiation,
 physical audio, pixel-perfect Mako rendering or production service
 ownership. The installed Mako daemon is never involved.
 
+A separate [guarded private Hyprland acceptance runner](docs/HYPRLAND_QA.md)
+is prepared for delegated automated workstation QA. It checks real-screen
+popup appearance/removal using a disposable nested D-Bus session, without
+changing Mako's bus ownership. **This runner has not yet been executed
+on Hyprland**, so no real-session acceptance is claimed.
+
 ## License
 
 MIT. Mako's original authors are credited in [the source baseline](docs/SOURCE_BASELINE.md).
