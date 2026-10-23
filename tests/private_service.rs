@@ -21,6 +21,8 @@ async fn private_service_expires_and_archives_a_notification() -> Result<(), Box
         "test-sender", 0u32, "", "Done", "body", Vec::<String>::new(),
         HashMap::<String, OwnedValue>::new(), 100000i32
     )).await?;
+    let original_instance=runtime.store.lock().unwrap()
+        .active_instance(id).ok_or("new D-Bus notification lacks an active instance")?;
     assert!(runtime.next_deadline()?.is_some());
 
     tokio::time::sleep(Duration::from_millis(60)).await;
@@ -34,6 +36,8 @@ async fn private_service_expires_and_archives_a_notification() -> Result<(), Box
     assert!(current.is_empty());
     assert_eq!(history.len(), 1);
     assert_eq!(u32::try_from(history[0].get("id").unwrap())?, id);
+    assert!(runtime.store.lock().unwrap().active_instance(id).is_none(),
+        "expired notifications must not remain active click targets");
 
     // Exercise a separate CLI session-bus connection, not just the server
     // internals or a proxy sharing the same connection.
@@ -45,6 +49,8 @@ async fn private_service_expires_and_archives_a_notification() -> Result<(), Box
     let restored: Vec<HashMap<String, OwnedValue>> =
         control.call("ListNotifications", &()).await?;
     assert_eq!(restored.len(), 1);
+    assert_ne!(runtime.store.lock().unwrap().active_instance(id),Some(original_instance),
+        "restore over the control bus must start a new active click lifetime");
     assert!(runtime.next_deadline()?.is_none(),
         "upstream Mako restores notifications without new expiration timers");
     execute(Command::Dismiss {
