@@ -209,7 +209,7 @@ impl SharedRuntime {
 
     fn schedule_impl(&self, id: u32, now: Instant, run_hook: bool) -> Result<(), &'static str> {
         let config=self.config();
-        let store = self.store.lock().map_err(|_| "notification store lock poisoned")?;
+        let mut store = self.store.lock().map_err(|_| "notification store lock poisoned")?;
         let note = store.active().iter().find(|n| n.id == id)
             .ok_or("notification is not active")?;
         let modes = self.modes.lock().map_err(|_| "mode state lock poisoned")?;
@@ -220,8 +220,13 @@ impl SharedRuntime {
             category: &note.category, desktop_entry: &note.desktop_entry,
             summary: &note.summary, body: &note.body,
             urgency:note.urgency.criteria_label(),
-            anchor: config.global.get("anchor").map(String::as_str).unwrap_or("top-right"),
-            output: observed_output.as_deref().unwrap_or(""),
+            // Mako has NULL notif->surface during initial Notify criteria.
+            anchor: if note.surface_associated {
+                config.global.get("anchor").map(String::as_str).unwrap_or("top-right")
+            }else{""},
+            output: if note.surface_associated {
+                observed_output.as_deref().unwrap_or("")
+            }else{""},
             modes: &mode_views,
             requested_timeout_ms: note.requested_timeout_ms,
             // Mako applies criteria to the preserved group-index on direct ID
@@ -254,6 +259,9 @@ impl SharedRuntime {
         }else{
             pending.remove(&id);
         }
+        // Mako associates the chosen surface after applying initial style.
+        // Direct-ID replacement inherits it; fresh/tag replacements do not.
+        store.associate_surface(id);
         Ok(())
     }
 
@@ -864,20 +872,31 @@ mod tests {
         assert!(runtime.close(before_enter,CloseReason::Dismissed,true).unwrap());
         assert_eq!(runtime.store.lock().unwrap().history().len(),1,
             "the unmatched output-scoped history=0 must not suppress history");
-        // The same config must apply its monitor rule only after the
-        // compositor reports that the surface actually entered DP-2.
+        // Even after another surface entered DP-2, a *new* notification
+        // starts with NULL notif->surface and cannot match [output] while
+        // choosing its initial timeout.
         runtime.set_surface_output(Some("DP-2")).unwrap();
         let after_enter=runtime.store.lock().unwrap().push(Request::default());
         runtime.schedule_without_hook(after_enter,now).unwrap();
         assert_eq!(runtime.next_deadline().unwrap(),
-            Some(now+std::time::Duration::from_millis(210)));
+            Some(now+std::time::Duration::from_millis(900)));
+        assert!(runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==after_enter).unwrap().surface_associated);
+        // Explicit ID replacement retains the earlier surface association,
+        // allowing output selectors to influence its initial timeout.
+        assert_eq!(runtime.store.lock().unwrap().push(Request{
+            replaces_id:after_enter,..Request::default()
+        }),after_enter);
+        runtime.schedule_without_hook(after_enter,now+Duration::from_millis(5)).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+std::time::Duration::from_millis(215)));
         assert!(runtime.close(after_enter,CloseReason::Dismissed,true).unwrap());
         assert_eq!(runtime.store.lock().unwrap().history().len(),1,
-            "matching output-scoped history=0 must not add a history entry");
+            "output-matched history=0 must not add a history entry");
     }
 
     #[test]
-    fn anchor_selector_controls_timeout_on_non_default_anchor() {
+    fn anchor_selector_requires_preexisting_surface_for_initial_timeout() {
         let runtime=SharedRuntime::new(Config::parse(
             "anchor=bottom-left\ndefault-timeout=1000\n             [anchor=bottom-left]\ndefault-timeout=250\n"
         ).unwrap());
@@ -885,7 +904,35 @@ mod tests {
         let now=Instant::now();
         runtime.schedule(id,now).unwrap();
         assert_eq!(runtime.next_deadline().unwrap(),
-            Some(now+Duration::from_millis(250)));
+            Some(now+Duration::from_millis(1000)),
+            "new notifications have no surface during initial criteria");
+        assert_eq!(runtime.store.lock().unwrap().push(Request {
+            replaces_id:id,..Request::default()
+        }),id);
+        runtime.schedule(id,now+Duration::from_millis(5)).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+Duration::from_millis(255)),
+            "direct replacement inherits the existing surface anchor");
+    }
+
+    #[test]
+    fn tag_replacement_does_not_inherit_surface_scoped_timeout() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "anchor=bottom-left\ndefault-timeout=1000\n             [anchor=bottom-left]\ndefault-timeout=250\n"
+        ).unwrap());
+        let now=Instant::now();
+        let tagged=Request {
+            app_name:"app".into(),tag:"progress".into(),..Request::default()
+        };
+        let id=runtime.store.lock().unwrap().push(tagged.clone());
+        runtime.schedule(id,now).unwrap();
+        assert_eq!(runtime.store.lock().unwrap().push(tagged),id);
+        assert!(!runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==id).unwrap().surface_associated);
+        runtime.schedule(id,now+Duration::from_millis(5)).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+Duration::from_millis(1005)),
+            "a new stack-tag object cannot use its predecessor's surface");
     }
 
     #[test]

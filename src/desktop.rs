@@ -61,9 +61,12 @@ pub fn style_for_note_index(
         app_name:&n.app_name, app_icon:&n.app_icon, category:&n.category,
         desktop_entry:&n.desktop_entry, summary:&n.summary, body:&n.body,
         urgency:n.urgency.criteria_label(),
-        anchor:config.global.get("anchor")
-            .map(String::as_str).unwrap_or("top-right"),
-        output:observed_output.as_deref().unwrap_or(""),
+        anchor:if n.surface_associated {
+            config.global.get("anchor").map(String::as_str).unwrap_or("top-right")
+        }else{""},
+        output:if n.surface_associated {
+            observed_output.as_deref().unwrap_or("")
+        }else{""},
         modes:&mode_views,
         requested_timeout_ms:n.requested_timeout_ms,
         actionable:!n.actions.is_empty(),

@@ -1078,6 +1078,51 @@ async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_d
 }
 
 #[tokio::test]
+async fn new_notifications_do_not_inherit_surface_selectors_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "anchor=bottom-left\ndefault-timeout=4000\n\
+         [anchor=bottom-left]\ndefault-timeout=2000\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let tagged:HashMap<String,OwnedValue>=[(
+        "x-dunst-stack-tag".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("one"))?
+    )].into();
+    let first:u32=desktop.call("Notify",&(
+        "surface-fixture",0u32,"","Initial","",Vec::<String>::new(),
+        tagged.clone(),-1i32
+    )).await?;
+    let first_deadline=runtime.next_deadline()?.ok_or("missing first timeout")?;
+    assert!(first_deadline.saturating_duration_since(std::time::Instant::now())
+        >Duration::from_secs(3));
+    assert!(runtime.store.lock().unwrap().active()
+        .iter().find(|n|n.id==first).unwrap().surface_associated);
+
+    let direct:u32=desktop.call("Notify",&(
+        "surface-fixture",first,"","Direct","",Vec::<String>::new(),
+        tagged.clone(),-1i32
+    )).await?;
+    assert_eq!(direct,first);
+    let direct_left=runtime.next_deadline()?.ok_or("missing replacement timeout")?
+        .saturating_duration_since(std::time::Instant::now());
+    assert!(direct_left>Duration::from_secs(1)&&direct_left<=Duration::from_secs(2),
+        "direct-ID replacement should inherit anchor: {direct_left:?}");
+
+    let tag:u32=desktop.call("Notify",&(
+        "surface-fixture",0u32,"","Tag","",Vec::<String>::new(),
+        tagged,-1i32
+    )).await?;
+    assert_eq!(tag,first);
+    let tag_left=runtime.next_deadline()?.ok_or("missing tag timeout")?
+        .saturating_duration_since(std::time::Instant::now());
+    assert!(tag_left>Duration::from_secs(3)&&tag_left<=Duration::from_secs(4),
+        "tag replacement must start with NULL surface: {tag_left:?}");
+    Ok(())
+}
+
+#[tokio::test]
 async fn direct_id_replacement_preserves_pre_regroup_group_index_timeout_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {

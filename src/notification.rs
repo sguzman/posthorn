@@ -74,6 +74,9 @@ pub struct Notification {
     /// Direct NotificationStore fixtures may be unscheduled; render those
     /// with the compatibility replay rather than claiming stored grouping.
     pub grouping_applied:bool,
+    /// Mako criteria evaluate [anchor] and [output] only when notif->surface
+    /// exists. A fresh notification has no surface during its first pass.
+    pub surface_associated:bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -109,7 +112,8 @@ impl Notification {
             desktop_entry: request.desktop_entry, tag: request.tag, urgency: request.urgency,
             progress: request.progress, requested_timeout_ms: request.requested_timeout_ms,
             actions: request.actions,
-            group_index:-1,group_count:1,grouping_applied:false }
+            group_index:-1,group_count:1,grouping_applied:false,
+            surface_associated:false }
     }
 
     /// Returns None for a persistent notification, otherwise its timeout.
@@ -174,6 +178,13 @@ impl NotificationStore {
     }
 
     pub fn active(&self) -> &VecDeque<Notification> { &self.active }
+
+    /// apply_each_criteria creates or reuses a surface after style selection.
+    pub fn associate_surface(&mut self,id:u32) {
+        if let Some(note)=self.active.iter_mut().find(|n|n.id==id){
+            note.surface_associated=true;
+        }
+    }
     pub fn history(&self) -> &VecDeque<Notification> { &self.history }
 
     /// Instance numbers are internal only: notification identity on D-Bus
@@ -240,12 +251,15 @@ impl NotificationStore {
         if let Some(index)=direct_replace {
             let id=self.active[index].id;
             let old=&self.active[index];
-            let (group_index,group_count,grouping_applied)=
-                (old.group_index,old.group_count,old.grouping_applied);
+            let (group_index,group_count,grouping_applied,surface_associated)=
+                (old.group_index,old.group_count,old.grouping_applied,
+                 old.surface_associated);
             self.active[index]=Notification::from_request(id,request);
             self.active[index].group_index=group_index;
             self.active[index].group_count=group_count;
             self.active[index].grouping_applied=grouping_applied;
+            // reset_notification leaves the prior surface association.
+            self.active[index].surface_associated=surface_associated;
             self.record_new_instance(id);
             return id;
         }
@@ -352,8 +366,10 @@ impl NotificationStore {
     pub fn close(&mut self, id: u32, _reason: CloseReason, save_history: bool,
                  history_enabled: bool) -> Option<Notification> {
         let idx = self.active.iter().position(|n| n.id == id)?;
-        let notification = self.active.remove(idx)?;
+        let mut notification = self.active.remove(idx)?;
         self.active_instances.remove(&id);
+        // Mako nulls notif->surface when saving a historical notification.
+        notification.surface_associated=false;
         if save_history && history_enabled && self.max_history != 0 {
             self.history.push_front(notification.clone());
             self.history.truncate(self.max_history);
@@ -363,8 +379,10 @@ impl NotificationStore {
 
     /// Restores the newest notification from the in-memory history.
     pub fn restore(&mut self) -> Option<u32> {
-        let notification = self.history.pop_front()?;
+        let mut notification = self.history.pop_front()?;
         let id = notification.id;
+        // RestoreNotification applies criteria and creates a new surface.
+        notification.surface_associated=true;
         // Mako reinserts restored notifications using the active sort policy;
         // pushing to the front would break urgency and ascending-time ordering.
         self.insert_sorted(notification);
