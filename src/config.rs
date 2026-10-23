@@ -30,10 +30,11 @@ fn err(location: impl Into<String>, message: impl Into<String>) -> ConfigError {
     ConfigError { location: location.into(), message: message.into() }
 }
 
-/// glibc's POSIX ERE regcomp treats \\d and \\D as ordinary escaped
-/// letters. Rust regex treats those same spellings as digit classes. Preserve
-/// Mako's behavior without changing the escape grammar for the supported
-/// GNU POSIX extensions such as \\w, \\s and \\b.
+/// glibc's POSIX REG_EXTENDED treats many escaped ASCII letters as
+/// literals. Rust regex instead gives them meanings (digit classes, hex/Unicode
+/// escapes and end-of-input anchors), or rejects them. Preserve the tested
+/// glibc spellings while retaining GNU POSIX extensions \\w, \\s, \\b and \\A.
+/// This is not a complete POSIX regex implementation.
 fn mako_posix_ere_escapes(pattern: &str) -> String {
     let mut normalized = String::with_capacity(pattern.len());
     let mut chars = pattern.chars();
@@ -43,8 +44,8 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
             continue;
         }
         match chars.next() {
-            Some('d') => normalized.push('d'),
-            Some('D') => normalized.push('D'),
+            Some(letter @ ('d' | 'D' | 'x' | 'u' | 'z' | 'Q' | 'E' |
+                'p' | 'P' | 'v' | 'h' | 'H' | 'R' | 'C')) => normalized.push(letter),
             Some(other) => {
                 normalized.push('\\');
                 normalized.push(other);
@@ -749,6 +750,34 @@ mod tests {
         assert!(rule.rules[0].selectors[0].matches(&fields));
         fields.summary = "123";
         assert!(!rule.rules[0].selectors[0].matches(&fields));
+    }
+
+    #[test]
+    fn glibc_posix_literal_escape_letters_do_not_become_rust_regex_operators() {
+        let mut fields = note("normal", &["default"]);
+        for (pattern, matching, not_matching) in [
+            (r"\x41", "x41", "A"),
+            (r"\u0041", "u0041", "A"),
+            (r"foo\z", "fooz", "foo"),
+            (r"\Qab\E", "QabE", "ab"),
+            (r"\pL", "pL", "abc"),
+            (r"\v+", "vvv", "\u{000b}"),
+        ] {
+            let selector=Selector::new("summary~",pattern).unwrap();
+            fields.summary=matching;
+            assert!(selector.matches(&fields), "glibc {pattern} must match {matching:?}");
+            fields.summary=not_matching;
+            assert!(!selector.matches(&fields), "glibc {pattern} must not match {not_matching:?}");
+        }
+        // GNU POSIX shortcuts recognized by glibc still keep their meaning.
+        let word=Selector::new("summary~",r"\w+").unwrap();
+        fields.summary="hello_123";
+        assert!(word.matches(&fields));
+        let digit=Selector::new("summary~",r"[[:digit:]]+").unwrap();
+        fields.summary="123";
+        assert!(digit.matches(&fields));
+        // Escaped backslashes represent literal backslashes, not an escape.
+        assert_eq!(mako_posix_ere_escapes(r"\\x41"), r"\\x41");
     }
 
     #[test]
