@@ -5,7 +5,37 @@
 use std::collections::{HashSet,VecDeque};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub enum Urgency { Unknown, Low, Normal, Critical }
+pub enum Urgency { Unknown, Low, Normal, Critical, Other(i32) }
+
+impl Urgency {
+    /// Mako keeps the signed enum value supplied by y/u/i D-Bus hints, even
+    /// when it does not correspond to a recognized urgency. uint32 values
+    /// narrow to C's signed enum representation.
+    pub fn from_mako_wire(value:Option<i64>)->Self {
+        match value.map(|number|number as i32){
+            None|Some(-1)=>Self::Unknown,
+            Some(0)=>Self::Low,
+            Some(1)=>Self::Normal,
+            Some(2)=>Self::Critical,
+            Some(other)=>Self::Other(other),
+        }
+    }
+
+    pub fn mako_value(self)->i32{
+        match self {
+            Self::Unknown=>-1,Self::Low=>0,Self::Normal=>1,
+            Self::Critical=>2,Self::Other(value)=>value,
+        }
+    }
+
+    /// Only low/normal/critical can match user urgency criteria.
+    pub fn criteria_label(self)->&'static str{
+        match self {
+            Self::Unknown=>"unknown",Self::Low=>"low",Self::Normal=>"normal",
+            Self::Critical=>"critical",Self::Other(_)=>"invalid",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CloseReason {
@@ -153,12 +183,9 @@ impl NotificationStore {
             }
             return;
         }
-        let rank = |urgency: Urgency| match urgency {
-            Urgency::Unknown => 0u8,
-            Urgency::Low => 1,
-            Urgency::Normal => 2,
-            Urgency::Critical => 3,
-        };
+        // Mako compares the actual signed enum values rather than
+        // normalizing unsupported sender urgencies into a known band.
+        let rank = Urgency::mako_value;
         let rank_new = rank(notification.urgency);
         let policy = self.sort_policy;
         let index = self.active.iter().position(|existing| {
@@ -493,6 +520,24 @@ mod tests {
         assert_eq!(store.restore(),Some(c));
         assert_eq!(store.active()[0].id,c);
     }
+    #[test]
+    fn priority_sort_keeps_distinct_out_of_range_urgency_bands(){
+        let mut store=NotificationStore::new(5);
+        store.set_sort_policy(SortPolicy{
+            by_priority:true,priority_ascending:false,time_ascending:false
+        });
+        let make=|urgency|Request{urgency,..Request::default()};
+        let normal=store.push(make(Urgency::Normal));
+        let very_low=store.push(make(Urgency::Other(-3)));
+        let high=store.push(make(Urgency::Other(7)));
+        let critical=store.push(make(Urgency::Critical));
+        assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![high,critical,normal,very_low]);
+        assert_eq!(Urgency::from_mako_wire(Some(u32::MAX as i64)),
+            Urgency::Unknown);
+        assert_eq!(Urgency::Other(-3).mako_value() as u8,253u8);
+    }
+
     #[test]
     fn urgency_sort_preserves_time_order_inside_priority_bands() {
         let mut store = NotificationStore::new(5);

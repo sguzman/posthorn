@@ -220,12 +220,9 @@ fn wire_notification_fields(note: &Notification) -> zbus::fdo::Result<HashMap<St
         obj.insert(key.into(), string_value(value)?);
     }
     obj.insert("id".into(), OwnedValue::from(note.id));
-    obj.insert("urgency".into(), OwnedValue::from(match note.urgency {
-        Urgency::Unknown => 255u8,
-        Urgency::Low => 0,
-        Urgency::Normal => 1,
-        Urgency::Critical => 2,
-    }));
+    // Mako serializes the stored signed enum as a D-Bus byte (y),
+    // truncating values outside the normal -1/0/1/2 range.
+    obj.insert("urgency".into(),OwnedValue::from(note.urgency.mako_value() as u8));
     Ok(obj)
 }
 

@@ -59,10 +59,7 @@ pub fn style_for_note_index(
     let traits=Traits {
         app_name:&n.app_name, app_icon:&n.app_icon, category:&n.category,
         desktop_entry:&n.desktop_entry, summary:&n.summary, body:&n.body,
-        urgency:match n.urgency {
-            Urgency::Unknown=>"unknown",
-            Urgency::Low=>"low",Urgency::Normal=>"normal",Urgency::Critical=>"critical"
-        },
+        urgency:n.urgency.criteria_label(),
         anchor:config.global.get("anchor")
             .map(String::as_str).unwrap_or("top-right"),
         output:config.global.get("output").map(String::as_str).unwrap_or(""),

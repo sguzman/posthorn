@@ -80,10 +80,9 @@ fn key(note: &Notification, spec: &GroupSpec) -> Vec<String> {
         GroupField::DesktopEntry => note.desktop_entry.clone(),
         GroupField::Summary => note.summary.clone(),
         GroupField::Body => note.body.clone(),
-        GroupField::Urgency => match note.urgency {
-            Urgency::Unknown => "unknown",Urgency::Low => "low",
-            Urgency::Normal => "normal", Urgency::Critical => "critical"
-        }.to_owned(),
+        // Grouping compares enum values, not display names. Distinct
+        // out-of-range urgencies must never collapse into one "invalid".
+        GroupField::Urgency => note.urgency.mako_value().to_string(),
         GroupField::Actionable => (!note.actions.is_empty()).to_string(),
         GroupField::Expiring => (note.requested_timeout_ms != 0).to_string(),
     }).collect()

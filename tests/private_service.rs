@@ -988,6 +988,9 @@ async fn chromium_urgency_variants_are_preserved_over_real_dbus()
         (OwnedValue::from(0i32),Urgency::Low),
         (OwnedValue::from(2i32),Urgency::Critical),
         (OwnedValue::from(0u8),Urgency::Low),
+        (OwnedValue::from(-3i32),Urgency::Other(-3)),
+        (OwnedValue::from(3u32),Urgency::Other(3)),
+        (OwnedValue::from(255u8),Urgency::Other(255)),
     ] {
         let hints:HashMap<String,OwnedValue>=[("urgency".into(),value)].into();
         let id:u32=desktop.call("Notify",&(
@@ -1005,6 +1008,7 @@ async fn chromium_urgency_variants_are_preserved_over_real_dbus()
         assert_eq!(urgency,match expected{
             Urgency::Unknown=>255,
             Urgency::Low=>0,Urgency::Normal=>1,Urgency::Critical=>2,
+            Urgency::Other(value)=>value as u8,
         });
     }
     Ok(())

@@ -167,12 +167,7 @@ impl FreedesktopNotifications {
                 .or_else(||u32::try_from(v).ok().map(i64::from))
                 .or_else(||i32::try_from(v).ok().map(i64::from))
         });
-        let urgency = match urgency_number {
-            None | Some(-1) => Urgency::Unknown,
-            Some(0) => Urgency::Low,
-            Some(2) => Urgency::Critical,
-            _ => Urgency::Normal,
-        };
+        let urgency=Urgency::from_mako_wire(urgency_number);
         // Historical Freedesktop aliases are still accepted by Mako. The
         // modern image-data hint takes precedence over both image-path and
         // the app_icon Notify argument.
@@ -438,6 +433,10 @@ mod tests {
             (OwnedValue::from(2i32),Urgency::Critical),
             (OwnedValue::from(1i32),Urgency::Normal),
             (OwnedValue::from(-1i32),Urgency::Unknown),
+            (OwnedValue::from(-2i32),Urgency::Other(-2)),
+            (OwnedValue::from(3u8),Urgency::Other(3)),
+            (OwnedValue::from(255u32),Urgency::Other(255)),
+            (OwnedValue::from(u32::MAX),Urgency::Unknown),
         ] {
             let hints=[("urgency".into(),variant)].into();
             let id=service.apply_notify("sender",0,"","Urgency","",

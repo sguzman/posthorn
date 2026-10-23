@@ -190,12 +190,7 @@ impl SharedRuntime {
             app_name: &note.app_name, app_icon: &note.app_icon,
             category: &note.category, desktop_entry: &note.desktop_entry,
             summary: &note.summary, body: &note.body,
-            urgency: match note.urgency {
-                crate::notification::Urgency::Unknown => "unknown",
-                crate::notification::Urgency::Low => "low",
-                crate::notification::Urgency::Normal => "normal",
-                crate::notification::Urgency::Critical => "critical",
-            },
+            urgency:note.urgency.criteria_label(),
             anchor: config.global.get("anchor").map(String::as_str).unwrap_or("top-right"),
             output: config.global.get("output").map(String::as_str).unwrap_or(""),
             modes: &mode_views,
