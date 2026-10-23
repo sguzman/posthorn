@@ -21,10 +21,11 @@ fi
 [[ -n "$HYPRLAND_INSTANCE_SIGNATURE" && -n "$WAYLAND_DISPLAY" ]] ||
   die 'missing Hyprland session or Wayland socket'
 [[ -d "$XDG_RUNTIME_DIR" ]] || die 'missing XDG_RUNTIME_DIR'
-for tool in busctl hyprctl dbus-run-session grim cargo; do
+for tool in busctl hyprctl dbus-run-session grim cargo timeout; do
   command -v "$tool" >/dev/null || die "missing prerequisite: $tool"
 done
-hyprctl monitors >/dev/null || die 'real Hyprland monitor query failed'
+timeout --signal=TERM --kill-after=2s 5s hyprctl monitors >/dev/null ||
+  die 'real Hyprland monitor query failed or timed out'
 
 if [[ "$#" != 1 || "$1" != '--inside' ]]; then
   # Prove the original session's existing notification daemon keeps ownership.
@@ -98,7 +99,7 @@ EOF
 # Capture a private baseline before the QA layer surface exists.
 # The desktop may already contain the chosen color in wallpaper or apps:
 # require a *change from that baseline*, not an absolute pixel threshold.
-grim "$root/baseline.png" ||
+timeout --signal=TERM --kill-after=2s 5s grim "$root/baseline.png" ||
   die 'unable to capture the original Hyprland desktop baseline'
 
 ./target/debug/posthorn --experimental-private-desktop "$root/config" \
@@ -127,7 +128,8 @@ notification_id="$(printf '%s\n' "$result" | awk '{print $2}')"
 
 painted=0
 for _ in {1..25}; do
-  grim "$root/visible.png"
+  timeout --signal=TERM --kill-after=2s 5s grim "$root/visible.png" ||
+    die 'visible popup screenshot timed out'
   if ./target/debug/examples/qa_png_probe \
       "$root/visible.png" '#193FA7' 500 increase "$root/baseline.png" >/dev/null 2>&1; then
     painted=1
@@ -145,7 +147,8 @@ busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   org.freedesktop.Notifications CloseNotification 'u' "$notification_id" >/dev/null
 removed=0
 for _ in {1..25}; do
-  grim "$root/after-close.png"
+  timeout --signal=TERM --kill-after=2s 5s grim "$root/after-close.png" ||
+    die 'closed popup screenshot timed out'
   if ./target/debug/examples/qa_png_probe \
       "$root/after-close.png" '#193FA7' 60 restored "$root/baseline.png" >/dev/null 2>&1; then
     removed=1
