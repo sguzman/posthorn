@@ -1045,6 +1045,39 @@ async fn category_sound_command_routing_and_quiet_mode_preserve_notifications()
 }
 
 #[tokio::test]
+async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Mako v1.11 create_notification runs before stack-tag lookup even
+    // when the replacement ultimately returns an existing notification ID.
+    let (conn,_runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let tagged:HashMap<String,OwnedValue>=[(
+        "x-dunst-stack-tag".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("progress"))?
+    )].into();
+    let ordinary:HashMap<String,OwnedValue>=HashMap::new();
+    let notify=|replace:u32,title:&str,hints:HashMap<String,OwnedValue>|(
+        "tag-counter-fixture",replace,"",title.to_string(),"",
+        Vec::<String>::new(),hints,-1i32
+    );
+    let first:u32=desktop.call("Notify",&notify(0,"Initial",tagged.clone())).await?;
+    let same:u32=desktop.call("Notify",&notify(0,"First update",tagged.clone())).await?;
+    assert_eq!(same,first);
+    let same:u32=desktop.call("Notify",&notify(0,"Second update",tagged)).await?;
+    assert_eq!(same,first);
+    let next:u32=desktop.call("Notify",&notify(0,"Ordinary",ordinary.clone())).await?;
+    assert_eq!(next,first+3,
+        "tag replacements must advance the next D-Bus notification ID");
+    let reset:u32=desktop.call("Notify",&notify(next,"Direct update",ordinary.clone())).await?;
+    assert_eq!(reset,next);
+    let next_after_direct:u32=desktop.call("Notify",&notify(0,"After direct",ordinary)).await?;
+    assert_eq!(next_after_direct,next+1,
+        "a direct ID replacement must not advance the counter");
+    Ok(())
+}
+
+#[tokio::test]
 async fn id_and_tag_replacements_have_distinct_group_lifecycle_over_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {

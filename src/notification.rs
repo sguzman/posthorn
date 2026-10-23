@@ -254,6 +254,11 @@ impl NotificationStore {
                 n.app_name==request.app_name && n.tag==request.tag)
         };
         if let Some(index)=tag_replace {
+            // Mako v1.11 dbus/xdg.c creates a new notification before
+            // searching for a matching tag. create_notification increments
+            // state->last_id even when the tag then reuses the prior ID.
+            // Consume that unused ID so the next ordinary Notify agrees.
+            let _discarded=self.allocate_id();
             let id=self.active[index].id;
             self.active[index]=Notification::from_request(id,request);
             self.record_new_instance(id);
@@ -477,6 +482,37 @@ mod tests {
         assert_eq!(first,store.push(c));
         assert_eq!(store.active().len(),2);
     }
+    #[test]
+    fn stack_tag_replacement_consumes_a_fresh_id_but_direct_replacement_does_not() {
+        // dbus/xdg.c calls create_notification before discovering a tag
+        // match, then rewrites the new object's ID with the old one's ID.
+        // That discarded allocation must still advance state->last_id.
+        let mut store=NotificationStore::new(5);
+        let tagged=Request {
+            app_name:"updates".into(),tag:"job".into(),
+            ..Request::default()
+        };
+        let first=store.push(tagged.clone());
+        assert_eq!(store.push(tagged.clone()),first);
+        assert_eq!(store.push(tagged),first);
+        let after_tags=store.push(Request::default());
+        assert_eq!(after_tags,first+3,
+            "two tag updates must consume two internal notification IDs");
+
+        // Existing-ID replacement invokes reset_notification in place and
+        // never creates an object, so it must NOT consume an ID.
+        assert_eq!(store.push(Request {
+            replaces_id:first, ..Request::default()
+        }),first);
+        assert_eq!(store.push(Request::default()),after_tags+1);
+
+        // An unmatched nonzero replaces_id does create exactly one object.
+        let unmatched=store.push(Request {
+            replaces_id:0x7fff_ffff,..Request::default()
+        });
+        assert_eq!(unmatched,after_tags+2);
+    }
+
     #[test]
     fn instance_identity_changes_on_same_payload_replacement_and_restore(){
         let mut store=NotificationStore::new(5);
