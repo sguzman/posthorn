@@ -384,6 +384,37 @@ tokens. They still do **not** prove production Hyprland action focus,
 compositor touch behavior, exact fractional-buffer negotiation, physical
 audio, or the reversible Mako replacement gate.
 
+## Compositor-assigned output criteria versus requested placement
+
+Pinned Mako v1.11 `criteria.c:criteria_matches` compares an
+`[output=...]` selector with
+`notif->surface->surface_output->name`; its `render.c` rematches
+criteria immediately before painting, after the compositor can
+automatically assign a monitor. The global `output=` config key is
+only a layer-shell placement request. Previously Posthorn used that
+configured string for `Traits.output`, incorrectly applying a
+monitor-specific style before the actual surface had entered any output
+and missing output criteria altogether with automatic placement.
+
+Posthorn now keeps the compositor-observed `wl_surface.enter` output
+separate from configured placement, invalidates its style revision and
+reapplies active grouping when that observed monitor changes.
+`LivePresenter.current_output_name` resolves the entered `wl_output`
+proxy against the advertised Wayland names. An unmapped surface has
+no matching output selector; a remapped surface retains its last known
+name until its replacement receives a new enter event, avoiding
+temporary style oscillations.
+
+The private test config deliberately omits global `output=`, sends
+a scoped category notification, then checks screenshot colors for
+the real `HEADLESS-1` output and rejects a deliberately mismatched
+`NONEXISTENT` output. Rust/private D-Bus and the 1×, 1.25×, and
+2× headless compositor suites passed at
+[commit 5fa0e6b](https://github.com/sguzman/posthorn/actions/runs/40005894396).
+Real Hyprland monitor reassignment, multiple independent notification
+surfaces, and complete output-sensitive timeout/grouping behavior are
+not yet accepted.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
