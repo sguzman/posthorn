@@ -312,9 +312,16 @@ PY
   }
   # A click outside the input region and the default unbound middle button
   # must leave both existing popups untouched, over real compositor input.
+  # Neither should waste a compositor XDG activation-token request.
+  activation_requests_before="$(grep -Ec 'xdg_activation_v1@[^ ]+[.]get_activation_token' "$root/posthorn.log" || true)"
   POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer 100 25 1280 720 273
   POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720 274
   sleep 0.2
+  activation_requests_after="$(grep -Ec 'xdg_activation_v1@[^ ]+[.]get_activation_token' "$root/posthorn.log" || true)"
+  if [[ "$activation_requests_before" != "$activation_requests_after" ]]; then
+    echo 'A non-action click unexpectedly requested a compositor activation token'
+    exit 1
+  fi
   grim "$root/after-noop-clicks.png"
   /usr/bin/python3 "$root/check-dismissed.py" "$root/after-noop-clicks.png" || {
     echo 'Click outside the popup or unbound middle button unexpectedly dismissed a notification'
