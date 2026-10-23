@@ -41,7 +41,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 - 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `██████████ 96%`
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `██████████ 99%`
-- 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `█████████░ 87%`
+- 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `█████████░ 88%`
 
 ### 🎛️ P5 — CLI and exact workstation parity — `█████░░░░░ 54%`
 
