@@ -404,7 +404,13 @@ fn choose_from_menu(
         .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
     if let Some(mut input)=child.stdin.take(){
         for (_,label) in actions{
-            writeln!(input,"{label}")?;
+            if let Err(error)=writeln!(input,"{label}") {
+                // Mako's fprintf/fclose path ignores write errors: a
+                // menu that exits immediately after selecting its first
+                // line can close stdin before we finish offering labels.
+                if error.kind()==std::io::ErrorKind::BrokenPipe {break;}
+                return Err(error.into());
+            }
         }
     }
     // Mako calls getline once, closes the child stdout pipe, and then
