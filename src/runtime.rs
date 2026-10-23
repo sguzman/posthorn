@@ -686,6 +686,9 @@ mod tests {
         ).unwrap());
         let id=runtime.store.lock().unwrap().push(Request::default());
         let now=Instant::now();
+        // Output rules apply when the actual surface enters the monitor,
+        // not merely because the target output name was configured.
+        runtime.set_surface_output(Some("DP-2")).unwrap();
         runtime.schedule_without_hook(id,now).unwrap();
         assert_eq!(runtime.next_deadline().unwrap(),
             Some(now+std::time::Duration::from_millis(210)));
