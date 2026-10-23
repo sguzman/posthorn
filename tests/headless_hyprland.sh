@@ -3,7 +3,9 @@
 set -euo pipefail
 [[ "${POSTHORN_HEADLESS_HYPRLAND_TEST:-}" == "1" ]] || { echo 'Headless QA guard missing'; exit 1; }
 [[ "${GITHUB_ACTIONS:-}" == "true" ]] || { echo 'CI-only experimental harness'; exit 1; }
-root="$(mktemp -d)"
+# Hyprland's nested IPC socket includes a long instance signature:
+# use a very short isolated XDG_RUNTIME_DIR to stay under sun_path limits.
+root="$(mktemp -d /tmp/pq.XXXXXX)"
 hypr_pid=""
 posthorn_pid=""
 cleanup(){
@@ -12,8 +14,7 @@ cleanup(){
   rm -rf -- "$root"
 }
 trap cleanup EXIT
-export XDG_RUNTIME_DIR="$root/runtime"
-mkdir -p "$XDG_RUNTIME_DIR"
+export XDG_RUNTIME_DIR="$root"
 chmod 700 "$XDG_RUNTIME_DIR"
 export HYPRLAND_NO_RT=1 HYPRLAND_NO_SD_NOTIFY=1 AQ_NO_KMS_REQUIREMENT=1
 export LIBGL_ALWAYS_SOFTWARE=1 XDG_CURRENT_DESKTOP=Hyprland XDG_SESSION_TYPE=wayland
