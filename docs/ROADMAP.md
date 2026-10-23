@@ -5,7 +5,7 @@ Progress is the average of documented atomic task percentages. A task at 100%
 requires acceptance evidence; partial work stays below 100%. Future ideas
 do not count toward Mako MVP. No runtime parity is claimed yet.
 
-## 📯 M0 — Mako parity and MVP inauguration — `█████████░ 86%`
+## 📯 M0 — Mako parity and MVP inauguration — `█████████░ 87%`
 **Acceptance gate:** Full upstream parity + Hyprland end-to-end QA
 
 ### 🧭 P0 — Source baseline and safeguards — `██████████ 99%`
@@ -37,11 +37,11 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `██████████ 97%`
 - 🔄 T303 — Correct startup, bus ownership and config reload behavior — `███████░░░ 74%`
 
-### 🪟 P4 — Wayland protocol and rendering — `█████████░ 94%`
+### 🪟 P4 — Wayland protocol and rendering — `██████████ 95%`
 
 - 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `██████████ 96%`
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `██████████ 99%`
-- 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `█████████░ 88%`
+- 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `█████████░ 89%`
 
 ### 🎛️ P5 — CLI and exact workstation parity — `█████░░░░░ 54%`
 

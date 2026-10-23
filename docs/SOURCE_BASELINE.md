@@ -409,6 +409,38 @@ These prove additional *headless Sway* input and D-Bus behavior only;
 no physical Hyprland pointer/touch or production session ownership is
 implied.
 
+## Grouped pointer dismissal and click-instance isolation
+
+A scoped `group-by=app-name` and
+`on-button-right=dismiss-group` fixture creates two live notifications
+from one sender. A compositor-originated right click on the visible
+group leader must emit two `NotificationClosed` signals, remove both
+members from `ListNotifications`, and preserve unrelated popups.
+It must not request an XDG activation token. The full private Rust/D-Bus
+and isolated Sway suite passed at
+[commit e6ce960](https://github.com/sguzman/posthorn/actions/runs/40010258132).
+
+There was also a dispatch race: the private Wayland thread originally
+hit-tested a pointer event to decide whether to request XDG activation,
+waited asynchronously for the compositor's reply, then sent bare
+coordinates to the D-Bus thread, which hit-tested *again*. A new popup
+appearing during the token wait could steal the original click.
+Posthorn now captures the originally hit-tested notification ID,
+binding and internal active incarnation. Before dispatch, it verifies
+that this **same incarnation** is still active and unchanged, never
+retargeting a stale click. Every Notify replacement (explicit ID or
+app-scoped stack tag), including byte-identical replacements, gets a
+fresh internal incarnation; restoring history also starts a new active
+incarnation while preserving the external Freedesktop ID. The input
+handoff avoids cloning every notification and inline image by snapshotting
+small (ID, incarnation) pairs first.
+
+Unit acceptance checks concurrent-new-popup stability, removed targets,
+changed and byte-identical replacements, stack-tag replacement and
+history restoration. The full Rust/private D-Bus and isolated Sway suite
+passed at [commit 915a07a](https://github.com/sguzman/posthorn/actions/runs/40011789720).
+No real Hyprland touch or focus handoff is claimed.
+
 ## Compositor-assigned output criteria versus requested placement
 
 Pinned Mako v1.11 `criteria.c:criteria_matches` compares an
