@@ -341,6 +341,38 @@ pointer/touch or compositor-issued XDG activation acceptance.
 No production D-Bus name was taken and no installed Mako configuration
 was changed.
 
+## Scaled compositor pointer and activation-token acceptance
+
+The guarded compositor test now emits real right-button input against
+independent isolated Sway outputs at 1× and 1.25×, with the fractional
+output's pointer coordinates expressed in **logical** dimensions
+(1536×864 from the 1920×1080, 1.25× configured mode), not in screenshot
+pixels. Both Rust/private D-Bus and compositor CI passed at
+[commit 68570a7](https://github.com/sguzman/posthorn/actions/runs/40000871778).
+The independent 2× smoke retains its Freedesktop CloseNotification
+regression and additionally injects a right-click with a 960×540
+logical output. That 2× compositor job passed at
+[commit 19d749c](https://github.com/sguzman/posthorn/actions/runs/40001253136);
+the separate Rust job was pending at the time of this documentation.
+
+A real compositor-originated left-button click on a notification with
+a sender-provided `default` action now exercises the full activation
+path. `WAYLAND_DEBUG=client` shows `xdg_activation_v1.get_activation_token`,
+`set_serial`, `set_surface`, `commit`, and an asynchronous
+`xdg_activation_token_v1.done` containing a nonempty compositor-issued
+token. The isolated D-Bus monitor checks that **the exact same token**
+appears in Freedesktop `ActivationToken` *before* `ActionInvoked`
+and `NotificationClosed`; screenshots check that the action popup
+disappears while older notifications remain. This acceptance passed the
+1× headless compositor job at [commit 19d749c](https://github.com/sguzman/posthorn/actions/runs/40001253136).
+Clicks outside a popup and unbound middle clicks are also checked for
+non-dismissal and absence of an unnecessary activation request.
+
+These are authentic **headless Sway** protocol observations, not mocked
+tokens. They still do **not** prove production Hyprland action focus,
+compositor touch behavior, exact fractional-buffer negotiation, physical
+audio, or the reversible Mako replacement gate.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
