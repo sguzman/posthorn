@@ -377,6 +377,68 @@ PY
     echo 'Click outside the popup or unbound middle button unexpectedly dismissed a notification'
     exit 1
   }
+
+  # Mako requests a real activation token for a matching sender action,
+  # even when actions=0 prevents the ActivationToken/ActionInvoked signals.
+  # The notification must still dismiss. Exercise that precise edge case
+  # via real compositor input and a separate private D-Bus monitor.
+  cat >> "$root/mako.conf" <<'EOF'
+[category=disabled-action]
+background-color=#715536
+actions=0
+EOF
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" monitor org.posthorn.Development \
+    >"$root/disabled-action-signals.log" 2>&1 &
+  monitor_pid=$!
+  sleep 0.2
+  disabled_result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn disabled action' 0 '' 'No action signals' '' \
+    2 'default' 'Open' 1 'category' 's' 'disabled-action' 30000)"
+  [[ "$disabled_result" == u\ * ]] || { echo 'Invalid disabled-action Notify result'; exit 1; }
+  disabled_visible=0
+  for _ in {1..15}; do
+    sleep 0.1
+    grim "$root/disabled-action-before.png"
+    if /usr/bin/python3 - "$root/disabled-action-before.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+colors = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if colors[(113,85,54)] >= 300 else 1)
+PY
+    then disabled_visible=1; break; fi
+  done
+  [[ "$disabled_visible" == 1 ]] || { echo 'Disabled-action popup was not painted'; exit 1; }
+  prior_requests="$(grep -Ec 'xdg_activation_v1@[^ ]+[.]get_activation_token' "$root/posthorn.log" || true)"
+  POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720 272
+  disabled_closed=0
+  for _ in {1..20}; do
+    if grep -q 'Member=NotificationClosed' "$root/disabled-action-signals.log"; then
+      disabled_closed=1
+      break
+    fi
+    sleep 0.1
+  done
+  latest_requests="$(grep -Ec 'xdg_activation_v1@[^ ]+[.]get_activation_token' "$root/posthorn.log" || true)"
+  if [[ "$disabled_closed" != 1 ]] ||
+     grep -Eq 'Member=(ActivationToken|ActionInvoked)' "$root/disabled-action-signals.log" ||
+     (( latest_requests != prior_requests + 1 )); then
+    echo 'actions=0 did not suppress signals while preserving token request and dismissal'
+    cat "$root/disabled-action-signals.log"
+    exit 1
+  fi
+  kill "$monitor_pid" 2>/dev/null || true
+  wait "$monitor_pid" 2>/dev/null || true
+  monitor_pid=""
+  grim "$root/disabled-action-after.png"
+  /usr/bin/python3 "$root/check-dismissed.py" "$root/disabled-action-after.png" || {
+    echo 'actions=0 left-click failed to remove only the target popup'
+    exit 1
+  }
 fi
 # Exercise timer-driven expiry through the full private D-Bus / Wayland path.
 # Use a distinct warning color so visual removal can be distinguished from
