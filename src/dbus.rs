@@ -126,8 +126,12 @@ impl FreedesktopNotifications {
             crate::icons::decode_raw_image(
                 data.0,data.1,data.2,data.3,data.4,data.5,&data.6)
         });
+        // Mako unconditionally overwrites app_icon when image-path is
+        // present, even if its value is empty. An empty hint deliberately
+        // removes an icon; it must not resurrect the Notify app_icon.
         let icon_path = ["image-path","image_path"].into_iter()
-            .map(text_hint).find(|s|!s.is_empty())
+            .find(|name|hints.contains_key(*name))
+            .map(text_hint)
             .unwrap_or_else(||app_icon.to_string());
         let request = Request {
             replaces_id,
