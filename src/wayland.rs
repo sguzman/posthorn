@@ -141,9 +141,10 @@ impl PopupBounds {
 
 /// Mako v1.11 calls wl_fixed_to_int() at pointer enter/motion and touch
 /// down/motion. Wayland f64 coordinates represent 24.8 fixed-point values;
-/// arithmetic right shift rounds negative subpixels down, not toward zero.
+/// wayland-util.h defines wl_fixed_to_int(f) as f / 256, with C integer
+/// division truncating toward zero, including for negative coordinates.
 fn mako_fixed_coordinate(position:f64)->f64 {
-    position.floor()
+    position.trunc()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -942,8 +943,8 @@ mod tests {
         assert_eq!(mako_fixed_coordinate(31.99609375),31.0);
         assert_eq!(mako_fixed_coordinate(32.0),32.0);
         assert_eq!(mako_fixed_coordinate(32.00390625),32.0);
-        assert_eq!(mako_fixed_coordinate(-0.00390625),-1.0);
-        assert_eq!(mako_fixed_coordinate(-1.00390625),-2.0);
+        assert_eq!(mako_fixed_coordinate(-0.00390625),0.0);
+        assert_eq!(mako_fixed_coordinate(-1.00390625),-1.0);
         // The surface stores the already-quantized coordinate for later
         // button/touch release events, matching Mako's wl_fixed_to_int.
         let mut state=ConfigureState::default();
