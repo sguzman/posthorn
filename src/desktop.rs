@@ -444,6 +444,17 @@ mod tests {
         // click; the original notification still exists unchanged.
         assert!(click_target_is_current(&runtime,&snapshot,original_instance).unwrap());
         assert_ne!(old,newer);
+        // Even byte-for-byte identical replacements renew the instance.
+        // Notification value equality alone cannot defend this race.
+        assert_eq!(runtime.store.lock().unwrap().push(Request{
+            replaces_id:old,summary:"Original clicked popup".into(),
+            ..Request::default()
+        }),old);
+        let identical=runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==old).unwrap().clone();
+        assert_eq!(identical,snapshot);
+        assert!(!click_target_is_current(&runtime,&snapshot,original_instance).unwrap(),
+            "an identical Notify replacement must invalidate the old click");
         // Freedesktop replaces_id keeps the numeric ID. Identity must still
         // distinguish the new payload from the clicked one.
         assert_eq!(runtime.store.lock().unwrap().push(Request{
