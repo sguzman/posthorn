@@ -367,9 +367,12 @@ impl NotificationStore {
         Some(id)
     }
 
+    /// Mako 1.11's configuration reload replaces the limit but does not
+    /// prune the existing history list. Its close_notification() enforces
+    /// the new limit only after a history-eligible insertion; at zero it
+    /// simply discards the newly closed notification.
     pub fn set_max_history(&mut self, max_history: usize) {
         self.max_history = max_history;
-        self.history.truncate(max_history);
     }
 }
 

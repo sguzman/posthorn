@@ -652,6 +652,46 @@ mod tests {
     }
 
     #[test]
+    fn reload_history_limit_preserves_existing_entries_until_next_addition() {
+        // Mako's reload_config plus reapply_config never walks history.
+        // Only close_notification prunes after adding a new history entry.
+        let dir=tempfile::tempdir().unwrap();
+        let path=dir.path().join("config");
+        std::fs::write(&path,"max-history=3\n").unwrap();
+        let runtime=SharedRuntime::from_path(&path).unwrap();
+        let mut old=Vec::new();
+        for _ in 0..3 {
+            let id=runtime.store.lock().unwrap().push(Request::default());
+            assert!(runtime.close(id,CloseReason::Dismissed,true).unwrap());
+            old.push(id);
+        }
+        let ids=|runtime:&SharedRuntime| {
+            runtime.store.lock().unwrap().history().iter()
+                .map(|n|n.id).collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&runtime),vec![old[2],old[1],old[0]]);
+
+        std::fs::write(&path,"max-history=1\n").unwrap();
+        runtime.reload().unwrap();
+        assert_eq!(ids(&runtime),vec![old[2],old[1],old[0]],
+            "reducing the limit must not prune stored history during reload");
+
+        let added=runtime.store.lock().unwrap().push(Request::default());
+        assert!(runtime.close(added,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(ids(&runtime),vec![added],
+            "the next saved dismissal must apply the reduced history cap");
+
+        std::fs::write(&path,"max-history=0\n").unwrap();
+        runtime.reload().unwrap();
+        assert_eq!(ids(&runtime),vec![added],
+            "disabling future history must not delete prior entries");
+        let ignored=runtime.store.lock().unwrap().push(Request::default());
+        assert!(runtime.close(ignored,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(ids(&runtime),vec![added],
+            "a dismissal at max-history=0 does not delete old history");
+    }
+
+    #[test]
     fn reload_reapplies_existing_history_without_resetting_deadlines() {
         let dir=tempfile::tempdir().unwrap();
         let path=dir.path().join("config");
