@@ -194,6 +194,15 @@ impl NotificationStore {
             note.surface_associated=true;
         }
     }
+    /// A later Mako criteria pass can relocate a notification onto a
+    /// previously created matching surface. Keep association and anchor
+    /// changes together, independent of the compositor frame renderer.
+    pub fn reassign_surface_anchor(&mut self,id:u32,anchor:&str) {
+        if let Some(note)=self.active.iter_mut().find(|n|n.id==id){
+            note.surface_associated=true;
+            note.surface_anchor=Some(anchor.to_owned());
+        }
+    }
     pub fn history(&self) -> &VecDeque<Notification> { &self.history }
 
     /// Instance numbers are internal only: notification identity on D-Bus

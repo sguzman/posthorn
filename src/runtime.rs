@@ -26,6 +26,11 @@ pub struct SharedRuntime {
     // The compositor's wl_surface.enter output name, not config.output.
     // Unknown until the layer surface is mapped and the compositor replies.
     surface_output: Arc<RwLock<Option<String>>>,
+    /// Mako criteria.c retains mako_surface objects keyed by configured
+    /// output, layer and anchor, even when their wl_surface is unmapped.
+    /// This records only that matching identity. A true multi-surface
+    /// renderer with independent entered outputs remains future work.
+    known_surface_specs: Arc<Mutex<Vec<(String,String,String)>>>,
     source_path: Option<Arc<PathBuf>>,
     revision: Arc<AtomicU64>,
     modes: Arc<Mutex<Vec<String>>>,
@@ -42,6 +47,7 @@ impl SharedRuntime {
             pending_notify_bindings: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(RwLock::new(Arc::new(config))),
             surface_output: Arc::new(RwLock::new(None)),
+            known_surface_specs: Arc::new(Mutex::new(Vec::new())),
             source_path: None,
             revision: Arc::new(AtomicU64::new(0)),
             modes: Arc::new(Mutex::new(vec!["default".into()])),
@@ -132,6 +138,34 @@ impl SharedRuntime {
         self.reapply_active_history_policies()
     }
 
+    /// Mako v1.11 criteria.c:apply_each_criteria searches all existing
+    /// mako_surfaces for the newly selected (output,layer,anchor) triplet.
+    /// A match overrides a direct replacement's old association; without
+    /// a match it retains its old surface, or creates a new one if NULL.
+    /// This is the identity decision, not multi-layer rendering itself.
+    fn associate_selected_surface(
+        &self,store:&mut NotificationStore,id:u32,
+        style:&crate::config::Options,
+    )->Result<(),String>{
+        let key=(
+            style.get("output").cloned().unwrap_or_default(),
+            style.get("layer").cloned().unwrap_or_else(||"top".into()),
+            style.get("anchor").cloned().unwrap_or_else(||"top-right".into()),
+        );
+        let mut known=self.known_surface_specs.lock()
+            .map_err(|_|"surface identity lock poisoned")?;
+        let has_match=known.contains(&key);
+        let has_old=store.active().iter().find(|n|n.id==id)
+            .ok_or("notification is not active")?.surface_anchor.is_some();
+        if has_match{
+            store.reassign_surface_anchor(id,&key.2);
+        }else if !has_old{
+            known.push(key.clone());
+            store.associate_surface(id,&key.2);
+        }
+        Ok(())
+    }
+
     /// Recalculate active notification history eligibility after Mako-style
     /// mode/config reapplication. This does not reschedule timers or trigger
     /// on-notify bindings, which upstream also leaves alone.
@@ -150,8 +184,7 @@ impl SharedRuntime {
         unassociated.surface_anchor=None;
         let style=crate::desktop::style_for_note_index(
             self,&unassociated,&modes,note.group_index);
-        store.associate_surface(id,
-            style.get("anchor").map(String::as_str).unwrap_or("top-right"));
+        self.associate_selected_surface(&mut store,id,&style)?;
         Ok(())
     }
 
@@ -283,8 +316,8 @@ impl SharedRuntime {
         }
         // Mako associates the chosen surface after applying initial style.
         // Direct-ID replacement inherits it; fresh/tag replacements do not.
-        store.associate_surface(id,
-            style.get("anchor").map(String::as_str).unwrap_or("top-right"));
+        self.associate_selected_surface(&mut store,id,&style)
+            .map_err(|_|"surface identity association failed")?;
         Ok(())
     }
 
@@ -1004,6 +1037,56 @@ mod tests {
         assert_eq!(runtime.store.lock().unwrap().active().iter()
             .find(|n|n.id==fresh).unwrap().surface_anchor.as_deref(),
             Some("top-right"));
+    }
+
+    #[test]
+    fn existing_matching_surface_reassigns_direct_replacement_but_mismatched_tuple_does_not() {
+        // Upstream searches (configured_output, layer, anchor), not just
+        // the desired anchor. All surfaces persist in its state->surfaces.
+        let runtime=SharedRuntime::new(Config::parse(
+            "default-timeout=4000\n[category=left]\nanchor=bottom-left\n\
+             [category=right]\nanchor=top-right\noutput=DP-2\nlayer=overlay\n\
+             [anchor=top-right]\ndefault-timeout=1000\n"
+        ).unwrap());
+        let now=Instant::now();
+        let left=runtime.store.lock().unwrap().push(Request{
+            category:"left".into(),..Request::default()
+        });
+        runtime.schedule_without_hook(left,now).unwrap();
+        let mismatched=runtime.store.lock().unwrap().push(Request{
+            category:"right".into(),..Request::default()
+        });
+        runtime.schedule_without_hook(mismatched,now).unwrap();
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .find(|n|n.id==mismatched).unwrap().surface_anchor.as_deref(),
+            Some("top-right"));
+        // The right anchor surface has a different output/layer; a
+        // normal replacement must still keep the bottom-left surface.
+        assert_eq!(runtime.store.lock().unwrap().push(Request {
+            replaces_id:left,..Request::default()
+        }),left);
+        runtime.schedule_without_hook(left,now+std::time::Duration::from_millis(10)).unwrap();
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .find(|n|n.id==left).unwrap().surface_anchor.as_deref(),
+            Some("bottom-left"));
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+std::time::Duration::from_millis(4000)));
+        // Now a root top-right surface is actually present.
+        let root=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(root,now+std::time::Duration::from_millis(20)).unwrap();
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .find(|n|n.id==root).unwrap().surface_anchor.as_deref(),
+            Some("top-right"));
+        assert_eq!(runtime.store.lock().unwrap().push(Request {
+            replaces_id:left,..Request::default()
+        }),left);
+        runtime.schedule_without_hook(left,now+std::time::Duration::from_millis(30)).unwrap();
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .find(|n|n.id==left).unwrap().surface_anchor.as_deref(),
+            Some("top-right"),"an existing matching surface wins over old association");
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+std::time::Duration::from_millis(1030)),
+            "newly associated top-right surface influences later criteria, not initial timer");
     }
 
     #[test]

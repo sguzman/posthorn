@@ -1078,6 +1078,53 @@ async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_d
 }
 
 #[tokio::test]
+async fn replacement_reassigns_to_preexisting_matching_surface_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "default-timeout=4000\n[category=left]\nanchor=bottom-left\n\
+         [anchor=top-right]\ndefault-timeout=1000\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let left_hint:HashMap<String,OwnedValue>=[(
+        "category".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("left"))?
+    )].into();
+    let id:u32=desktop.call("Notify",&(
+        "surface-match",0u32,"","Left","",Vec::<String>::new(),
+        left_hint,-1i32
+    )).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).unwrap().surface_anchor.as_deref(),
+        Some("bottom-left"));
+    // No right surface existed, so first replacement must stay left.
+    let no_hints=HashMap::<String,OwnedValue>::new();
+    let replaced:u32=desktop.call("Notify",&(
+        "surface-match",id,"","First replacement","",Vec::<String>::new(),
+        no_hints.clone(),-1i32
+    )).await?;
+    assert_eq!(replaced,id);
+    assert_eq!(runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).unwrap().surface_anchor.as_deref(),
+        Some("bottom-left"));
+    // A different notification creates a compatible top-right surface.
+    let _:u32=desktop.call("Notify",&(
+        "surface-match",0u32,"","Root","",Vec::<String>::new(),
+        no_hints.clone(),-1i32
+    )).await?;
+    let again:u32=desktop.call("Notify",&(
+        "surface-match",id,"","Second replacement","",Vec::<String>::new(),
+        no_hints,-1i32
+    )).await?;
+    assert_eq!(again,id);
+    assert_eq!(runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).unwrap().surface_anchor.as_deref(),
+        Some("top-right"),
+        "Mako picks the existing right-side surface for direct replacement");
+    Ok(())
+}
+
+#[tokio::test]
 async fn history_restore_reapplies_category_anchor_without_timer_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
