@@ -515,10 +515,16 @@ mod tests {
             "anchor=bottom-left\n             [anchor=bottom-left]\nbackground-color=#715536\n"
         ).unwrap());
         let id=runtime.store.lock().unwrap().push(Request::default());
-        let note=runtime.store.lock().unwrap().active()
-            .iter().find(|n|n.id==id).unwrap().clone();
         let mode=vec!["default".to_string()];
-        let style=style_for_note(&runtime,&note,&mode);
+        let fresh=runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==id).unwrap().clone();
+        assert_ne!(style_for_note(&runtime,&fresh,&mode)
+            .get("background-color").map(String::as_str),Some("#715536"),
+            "Mako cannot match anchor criteria before surface association");
+        runtime.schedule_without_hook(id,std::time::Instant::now()).unwrap();
+        let associated=runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==id).unwrap().clone();
+        let style=style_for_note(&runtime,&associated,&mode);
         assert_eq!(style.get("background-color").map(String::as_str),Some("#715536"));
     }
 
@@ -534,6 +540,9 @@ mod tests {
         let before=style_for_note(&runtime,&note,&modes);
         assert_ne!(before.get("background-color").map(String::as_str),
             Some("#305747"),"configured output is not a compositor enter event");
+        runtime.schedule_without_hook(id,std::time::Instant::now()).unwrap();
+        let note=runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==id).unwrap().clone();
         runtime.set_surface_output(Some("DP-2")).unwrap();
         let style=style_for_note(&runtime,&note,&modes);
         assert_eq!(style.get("background-color").map(String::as_str),
@@ -553,6 +562,9 @@ mod tests {
         let before=style_for_note(&runtime,&note,&modes);
         assert_ne!(before.get("background-color").map(String::as_str),
             Some("#305747"));
+        runtime.schedule_without_hook(id,std::time::Instant::now()).unwrap();
+        let note=runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==id).unwrap().clone();
         let revision=runtime.revision();
         assert!(runtime.set_surface_output(Some("HEADLESS-1")).unwrap());
         assert_eq!(runtime.revision(),revision+1);
@@ -601,6 +613,11 @@ mod tests {
             category:"urgent".into(),..Request::default()
         });
         let newest=runtime.store.lock().unwrap().push(Request::default());
+        // Real Notify assigns a surface to each new notification after the
+        // first criteria pass. Exercise that transition before repainting.
+        for id in [older,middle,newest] {
+            runtime.schedule_without_hook(id,std::time::Instant::now()).unwrap();
+        }
         assert_eq!(visible_notifications(&runtime).unwrap().len(),1,
             "configured output is not a compositor assignment");
         runtime.set_surface_output(Some("DP-1")).unwrap();
