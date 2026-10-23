@@ -83,6 +83,23 @@ impl SharedRuntime {
         Ok(true)
     }
 
+    /// Receive the compositor-observed output for one independently
+    /// associated notification. The legacy one-surface presenter continues
+    /// to call set_surface_output; this does not yet create a second popup.
+    pub fn set_notification_surface_output(
+        &self,id:u32,name:Option<&str>
+    )->Result<bool,String>{
+        let changed=self.store.lock()
+            .map_err(|_|"notification store lock poisoned")?
+            .set_note_surface_output(id,name)
+            .map_err(str::to_owned)?;
+        if changed{
+            self.reapply_active_history_policies()?;
+            self.revision.fetch_add(1,Ordering::Release);
+        }
+        Ok(changed)
+    }
+
     pub fn from_path(path:&Path)->Result<Self,crate::config::ConfigError>{
         let mut runtime=Self::new(Config::from_path(path)?);
         runtime.source_path=Some(Arc::new(path.to_path_buf()));
@@ -287,7 +304,9 @@ impl SharedRuntime {
                 ).unwrap_or("top-right")
             }else{""},
             output: if note.surface_associated {
-                observed_output.as_deref().unwrap_or("")
+                note.surface_output_override.as_ref()
+                    .map(|value|value.as_deref().unwrap_or(""))
+                    .unwrap_or(observed_output.as_deref().unwrap_or(""))
             }else{""},
             modes: &mode_views,
             requested_timeout_ms: note.requested_timeout_ms,
@@ -1094,6 +1113,47 @@ mod tests {
         assert_eq!(runtime.next_deadline().unwrap(),
             Some(now+std::time::Duration::from_millis(4000)),
             "surface relocation happens after timeout selection, not before");
+    }
+
+    #[test]
+    fn independent_notification_outputs_do_not_borrow_single_presenter_monitor() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "default-timeout=0\n[output=DP-1]\nbackground-color=#42617B\n\
+             [output=DP-2]\nbackground-color=#8C642D\ndefault-timeout=200\n"
+        ).unwrap());
+        runtime.set_surface_output(Some("DP-1")).unwrap();
+        let first=runtime.store.lock().unwrap().push(Request::default());
+        let second=runtime.store.lock().unwrap().push(Request::default());
+        let now=Instant::now();
+        runtime.schedule_without_hook(first,now).unwrap();
+        runtime.schedule_without_hook(second,now).unwrap();
+        assert!(runtime.set_notification_surface_output(second,Some("DP-2")).unwrap());
+        assert!(!runtime.set_notification_surface_output(second,Some("DP-2")).unwrap());
+        let colors=||{
+            let store=runtime.store.lock().unwrap();
+            let modes=vec!["default".into()];
+            store.active().iter().map(|note|{
+                crate::desktop::style_for_note_index(
+                    &runtime,note,&modes,note.group_index)
+                .get("background-color").cloned()
+            }).collect::<Vec<_>>()
+        };
+        // Store order is newest-first under Mako's default descending time.
+        assert_eq!(colors(),vec![Some("#8C642D".into()),Some("#42617B".into())]);
+        runtime.set_surface_output(Some("DP-3")).unwrap();
+        let colors_after=colors();
+        assert_eq!(colors_after[0].as_deref(),Some("#8C642D"));
+        assert_ne!(colors_after[1].as_deref(),Some("#42617B"));
+        assert_eq!(runtime.store.lock().unwrap().push(Request {
+            replaces_id:second,..Request::default()
+        }),second);
+        runtime.schedule_without_hook(second,now+std::time::Duration::from_millis(10)).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+std::time::Duration::from_millis(210)),
+            "direct replacement reuses its own DP-2 output for timeout criteria");
+        runtime.set_notification_surface_output(second,None).unwrap();
+        assert_ne!(colors()[0].as_deref(),Some("#8C642D"),
+            "explicitly unmapped surface cannot borrow DP-3");
     }
 
     #[test]

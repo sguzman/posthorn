@@ -67,7 +67,9 @@ pub fn style_for_note_index(
             ).unwrap_or("top-right")
         }else{""},
         output:if n.surface_associated {
-            observed_output.as_deref().unwrap_or("")
+            n.surface_output_override.as_ref()
+                .map(|value|value.as_deref().unwrap_or(""))
+                .unwrap_or(observed_output.as_deref().unwrap_or(""))
         }else{""},
         modes:&mode_views,
         requested_timeout_ms:n.requested_timeout_ms,

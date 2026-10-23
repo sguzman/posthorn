@@ -80,6 +80,10 @@ pub struct Notification {
     /// Anchor of the already attached Mako surface, not necessarily the
     /// configured root anchor. Direct-ID reset retains this association.
     pub surface_anchor:Option<String>,
+    /// None uses the single-surface presenter's observed output. Some(None)
+    /// denotes an explicitly unmapped independent surface; Some(Some(name))
+    /// denotes that specific surface's compositor-entered monitor.
+    pub surface_output_override:Option<Option<String>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -116,7 +120,8 @@ impl Notification {
             progress: request.progress, requested_timeout_ms: request.requested_timeout_ms,
             actions: request.actions,
             group_index:-1,group_count:1,grouping_applied:false,
-            surface_associated:false,surface_anchor:None }
+            surface_associated:false,surface_anchor:None,
+            surface_output_override:None }
     }
 
     /// Returns None for a persistent notification, otherwise its timeout.
@@ -209,7 +214,24 @@ impl NotificationStore {
         for note in &mut self.active{
             note.surface_associated=false;
             note.surface_anchor=None;
+            note.surface_output_override=None;
         }
+    }
+    /// Override the output identity for one mapped notification.
+    /// The outer Option distinguishes a known-unmapped surface from
+    /// the shared single-surface renderer's legacy output observation.
+    pub fn set_note_surface_output(&mut self,id:u32,name:Option<&str>)
+        ->Result<bool,&'static str>
+    {
+        let note=self.active.iter_mut().find(|n|n.id==id)
+            .ok_or("notification is not active")?;
+        if !note.surface_associated{
+            return Err("notification has no associated surface");
+        }
+        let next=Some(name.map(str::to_owned));
+        if note.surface_output_override==next{return Ok(false);}
+        note.surface_output_override=next;
+        Ok(true)
     }
     pub fn history(&self) -> &VecDeque<Notification> { &self.history }
 
@@ -277,9 +299,10 @@ impl NotificationStore {
         if let Some(index)=direct_replace {
             let id=self.active[index].id;
             let old=&self.active[index];
-            let (group_index,group_count,grouping_applied,surface_associated,surface_anchor)=
+            let (group_index,group_count,grouping_applied,surface_associated,surface_anchor,surface_output_override)=
                 (old.group_index,old.group_count,old.grouping_applied,
-                 old.surface_associated,old.surface_anchor.clone());
+                 old.surface_associated,old.surface_anchor.clone(),
+                 old.surface_output_override.clone());
             self.active[index]=Notification::from_request(id,request);
             self.active[index].group_index=group_index;
             self.active[index].group_count=group_count;
@@ -287,6 +310,7 @@ impl NotificationStore {
             // reset_notification leaves the prior surface association.
             self.active[index].surface_associated=surface_associated;
             self.active[index].surface_anchor=surface_anchor;
+            self.active[index].surface_output_override=surface_output_override;
             self.record_new_instance(id);
             return id;
         }
@@ -398,6 +422,7 @@ impl NotificationStore {
         // Mako nulls notif->surface when saving a historical notification.
         notification.surface_associated=false;
         notification.surface_anchor=None;
+        notification.surface_output_override=None;
         if save_history && history_enabled && self.max_history != 0 {
             self.history.push_front(notification.clone());
             self.history.truncate(self.max_history);

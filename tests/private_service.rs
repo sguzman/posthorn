@@ -1078,6 +1078,41 @@ async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_d
 }
 
 #[tokio::test]
+async fn separate_notification_output_matches_do_not_bleed_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "default-timeout=0\n[output=DP-1]\nbackground-color=#42617B\n\
+         [output=DP-2]\nbackground-color=#8C642D\ndefault-timeout=200\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let notify=|summary:&str|( "output-identity".to_owned(),0u32,"",
+        summary.to_owned(),"",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32);
+    let a:u32=desktop.call("Notify",&notify("First")).await?;
+    let b:u32=desktop.call("Notify",&notify("Second")).await?;
+    runtime.set_notification_surface_output(a,Some("DP-1"))?;
+    runtime.set_notification_surface_output(b,Some("DP-2"))?;
+    let modes=vec!["default".into()];
+    let notes=runtime.store.lock().unwrap().active().clone();
+    let style=|id|->Result<String,Box<dyn std::error::Error+Send+Sync>>{
+        let note=notes.iter().find(|n|n.id==id).ok_or("missing note")?;
+        Ok(posthorn::desktop::style_for_note_index(&runtime,note,&modes,-1)
+            .get("background-color").ok_or("missing color")?.clone())
+    };
+    assert_eq!(style(a)?,"#42617B");
+    assert_eq!(style(b)?,"#8C642D");
+    let replaced:u32=desktop.call("Notify",&(
+        "output-identity",b,"","Replaced","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_eq!(replaced,b);
+    assert!(runtime.next_deadline()?.is_some(),
+        "DP-2 scoped timeout must apply to this replacement");
+    Ok(())
+}
+
+#[tokio::test]
 async fn modes_rebuild_associated_surface_without_rearming_timer_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
