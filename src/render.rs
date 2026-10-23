@@ -930,6 +930,19 @@ mod tests {
     }
 
     #[test]
+    fn c_strtoul_color_variants_reach_configured_progress_source_pixels() {
+        let config=crate::config::Config::parse(
+            "background-color=#000000\nprogress-color=source #+fffff\n             border-size=0\nwidth=120\nheight=90\n"
+        ).unwrap();
+        let mut note=fixture();
+        note.progress=100;
+        let frame=render_notification(&note,&config.global).unwrap();
+        let offset=(frame.height as usize-3)*frame.stride as usize+10*4;
+        assert_eq!(&frame.pixels[offset..offset+4],&[255,255,15,255],
+            "Mako source #+fffff must paint the parsed 0x0fffffff value");
+    }
+
+    #[test]
     fn group_count_substitutions_affect_pango_measurement_and_rendering() {
         let mut note=fixture();
         note.summary="Task".into();
