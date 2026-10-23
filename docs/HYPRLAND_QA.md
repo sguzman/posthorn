@@ -45,6 +45,33 @@ installed Mako or Hyprland configuration, alter autostart, or issue a
 production cutover. The screenshot probe uses Rust/GDK-Pixbuf rather than
 Python.
 
+## Optional native-compositor CI experiment
+
+The separate `Experimental Headless Hyprland` workflow uses a disposable
+Arch Linux container to compile Posthorn against a current Hyprland package.
+The test harness in `tests/headless_hyprland.sh` is explicitly CI-guarded,
+runs under a disposable unprivileged account, uses a private
+`dbus-run-session`, and does not connect to the workstation.
+It attempts to initialize Hyprland over a nested software-rendered
+Sway Wayland backend (rather than requiring a GPU passed through the
+container) and then checks a private D-Bus notification's appearance
+and dismissal via real compositor screenshots.
+
+This experiment is **nonblocking** and deliberately runs only when its
+workflow or test script changes, or through explicit workflow dispatch.
+Until its specific `Private D-Bus notification lifecycle` step passes,
+the overall GitHub workflow conclusion is **not acceptance evidence**:
+`continue-on-error` can leave a green workflow wrapper around a failed
+experimental job.
+
+Hyprland 0.55+ uses
+[Lua configuration](https://wiki.hypr.land/Configuring/Start/);
+its [virtual-headless-output documentation](https://wiki.hypr.land/Configuring/Extra/Virtual-GPU/)
+describes the general virtual display capability. CI host setup, including
+the available Wayland backend and security sandbox, is not guaranteed
+by those documents. Failed compositor bootstrap attempts are
+environment findings, not Posthorn feature failures.
+
 ## Remaining acceptance
 
 Successful execution would establish only real Hyprland private
