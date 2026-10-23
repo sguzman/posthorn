@@ -28,7 +28,7 @@ change how they call the Freedesktop Notification protocol. Until parity:
 
 | Upstream source | Posthorn scope | State |
 | --- | --- | --- |
-| `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; stricter Mako selector validation (bare booleans only, anchor names, last repeated field wins, byte-oriented line/value whitespace and Mako LP64 strtol parsing (including empty values and signed 32-bit narrowing) shared by validation, rendering, hit-testing, limits and timeout scheduling), legacy/XDG default configuration lookup, signed max-history disabling, format/group validation, POSIX ERE newline matching and glibc escaped-letter \\d/\\D behavior, Mako progress-color tokenization and blend operators, and transactional reload |
+| `config.c`, `criteria.c`, `types.c` | Config parser, criteria, styles, types | Partial; stricter Mako selector validation (bare booleans only, anchor names, last repeated field wins, byte-oriented line/value whitespace and Mako LP64 strtol parsing (including empty values and signed 32-bit narrowing) shared by validation, rendering, hit-testing, limits and timeout scheduling), legacy/XDG default configuration lookup, signed max-history disabling, format/group validation, POSIX ERE newline and glibc escaped-ASCII-letter/bracket behavior, plus rejection of Rust-only inline group extensions, Mako progress-color tokenization and blend operators, and transactional reload |
 | `notification.c` | IDs, replace, close, timeout, history, groups, format | Timers, dismiss/restore with persistent restored notifications and live mode/reload history-policy reapplication; insertion-time group-by passes with persisted indices/counts, physical ListNotifications grouping order under ascending/descending time sort, regrouping on close/expiration and mode/reload, Mako's bounded [-1,2] priority insertion search (including invalid raw urgencies) with private D-Bus acceptance, indexed grouped visibility (including scoped category group-by and explicit secondary-member overrides), per-output/anchor limits and overflow placeholders tested; replacement-time regrouping and exact surface association remain partial |
 | `dbus/xdg.c`, `dbus/mako.c`, `dbus/dbus.c` | Desktop interface, Mako control interface | Private development bus with image-data, image-path, progress, reload, Chromium uint32/int32 urgency, missing-hint unknown urgency (wire byte 255), and strict known-hint type validation, strict typed DismissNotifications variant rejection and arrival-ordered Notify aliases (including empty image-path and duplicate hints), signed raw urgency y/u/i including out-of-range values, control urgency bytes, and urgency-criteria matching verified on an isolated D-Bus session, Mako superstyle-based GetCapabilities, including built-in grouped body and scoped criteria, ActivationToken ordering, Mako-style actions=0 signal suppression and dynamic mode re-enablement, and on-notify action/dismiss signal tests; full protocol parity pending |
 | `wayland.c`, `surface.c`, `pool-buffer.c` | Wayland, layer-shell, compositor surfaces | Private desktop has stacked SHM layer-shell surfaces with redraw reuse and release-aware SHM buffers, dynamic named-output registration/removal, native-resolution integer-scaled Cairo/Pango popups, XDG activation token requests, pointer/touch, anchors, and outer-margin placement; live compositor QA pending |
@@ -60,6 +60,31 @@ constructing the internal options map. Both the parser unit test and the
 [private D-Bus duplicate-key regression](https://github.com/sguzman/posthorn/actions/runs/39896396119)
 passed Rust and headless Wayland CI at commit `e362363`. This fixes
 dismissal input parity, **not** the separate lossy `Notifications` property.
+
+## POSIX ERE criteria compatibility
+
+Mako 1.11 calls glibc's regcomp with REG_EXTENDED | REG_NOSUB
+(no REG_NEWLINE). Posthorn now preserves dot-matches-newline without
+multiline anchors, rejects Rust-only inline groups such as (?i), and
+normalizes glibc's escaped ASCII-letter semantics before Rust compilation:
+outside bracket classes only \b, \B, \w, \W, \s and \S retain their
+GNU special meanings; within classes all escaped ASCII letters are literal.
+Nested POSIX character-class delimiters are handled independently.
+Tests cover format selectors, class membership, and actual private D-Bus
+on-notify matching. The latest regression passed
+[full CI](https://github.com/sguzman/posthorn/actions/runs/39946521970).
+This is **not** full POSIX ERE parity: glibc accepts capture backreferences
+such as (ab)\1 that the Rust regex crate does not. Locale-sensitive
+character classes and other grammar differences still need acceptance tests.
+
+## Style interaction acceptance gap
+
+Mako's config.c clamps left/right padding to at least corresponding
+border-radius values when both are specified in the same style, accounting
+for parse order; applying a separate scoped border-radius without padding
+does not necessarily re-clamp the inherited root padding. Posthorn's
+style-map/rendering implementation has not yet reproduced that
+order-and-scope-specific behavior. Do not apply an unconditional clamp.
 
 ## Explicit nonclaims
 
