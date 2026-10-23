@@ -177,6 +177,34 @@ struct ConfigureState {
     pending_activation_token: Option<xdg_activation_token_v1::XdgActivationTokenV1>,
 }
 
+// Keep touch-contact transitions testable without a physical touchscreen.
+// The headless wlroots virtual-pointer protocol does not inject wl_touch;
+// unit tests below therefore establish only protocol-event bookkeeping,
+// not real compositor touch delivery or Hyprland acceptance.
+impl ConfigureState {
+    fn touch_down(&mut self,id:i32,x:f64,y:f64){
+        if id>=0 {
+            self.touch_contacts.insert(id,(mako_fixed_coordinate(x),mako_fixed_coordinate(y)));
+        }
+    }
+
+    fn touch_motion(&mut self,id:i32,x:f64,y:f64){
+        if let Some(position)=self.touch_contacts.get_mut(&id){
+            *position=(mako_fixed_coordinate(x),mako_fixed_coordinate(y));
+        }
+    }
+
+    fn touch_up(&mut self,id:i32,serial:u32){
+        if let Some((x,y))=self.touch_contacts.remove(&id){
+            self.clicks.push(PointerClick{x,y,button:0,serial});
+        }
+    }
+
+    fn touch_cancel(&mut self){
+        self.touch_contacts.clear();
+    }
+}
+
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for ConfigureState {
     fn event(
         state: &mut Self,registry: &wl_registry::WlRegistry,
@@ -351,20 +379,12 @@ impl Dispatch<wl_touch::WlTouch, ()> for ConfigureState {
         match event {
             wl_touch::Event::Down{surface,id,x,y,..}=>{
                 if state.active_surface.as_ref()==Some(&surface){
-                    state.touch_contacts.insert(id,(mako_fixed_coordinate(x),mako_fixed_coordinate(y)));
+                    state.touch_down(id,x,y);
                 }
             }
-            wl_touch::Event::Motion{id,x,y,..}=>{
-                if let Some(position)=state.touch_contacts.get_mut(&id){
-                    *position=(mako_fixed_coordinate(x),mako_fixed_coordinate(y));
-                }
-            }
-            wl_touch::Event::Up{id,serial,..}=>{
-                if let Some((x,y))=state.touch_contacts.remove(&id){
-                    state.clicks.push(PointerClick{x,y,button:0,serial});
-                }
-            }
-            wl_touch::Event::Cancel=>state.touch_contacts.clear(),
+            wl_touch::Event::Motion{id,x,y,..}=>state.touch_motion(id,x,y),
+            wl_touch::Event::Up{id,serial,..}=>state.touch_up(id,serial),
+            wl_touch::Event::Cancel=>state.touch_cancel(),
             _=>{}
         }
     }
@@ -973,6 +993,45 @@ mod tests {
         state.clicks.push(PointerClick{x,y,button:0,serial:11});
         assert_eq!(state.clicks.remove(0).button,0);
         assert!(state.touch_contacts.is_empty());
+    }
+
+    #[test]
+    fn touch_contacts_track_independent_fingers_and_release_serials(){
+        let mut state=ConfigureState::default();
+        state.touch_down(0,12.99609375,20.99609375);
+        state.touch_down(1,42.99609375,50.99609375);
+        state.touch_motion(0,16.00390625,24.00390625);
+        state.touch_up(1,47);
+        state.touch_up(0,49);
+        assert_eq!(state.clicks.len(),2);
+        assert_eq!((state.clicks[0].x,state.clicks[0].y,state.clicks[0].serial),
+            (42.0,50.0,47));
+        assert_eq!((state.clicks[1].x,state.clicks[1].y,state.clicks[1].serial),
+            (16.0,24.0,49));
+        assert!(state.clicks.iter().all(|click|click.button==0));
+        assert!(state.touch_contacts.is_empty());
+        // Duplicate and unknown release events cannot generate extra clicks.
+        state.touch_up(0,51);
+        state.touch_up(17,52);
+        assert_eq!(state.clicks.len(),2);
+    }
+
+    #[test]
+    fn touch_cancel_or_unmap_drops_pending_gestures_without_clicks(){
+        let mut state=ConfigureState::default();
+        state.touch_down(0,27.0,12.0);
+        state.touch_motion(1,99.0,99.0); // unknown contact ignored
+        state.touch_cancel();
+        state.touch_up(0,17);
+        assert!(state.clicks.is_empty(),"cancelled touch must not dismiss a popup");
+        state.touch_down(-1,27.0,12.0); // invalid signed Wayland ID
+        state.touch_up(-1,19);
+        assert!(state.clicks.is_empty(),"invalid touch IDs must not dispatch");
+        state.touch_down(2,33.0,19.0);
+        // LivePresenter.clear() and surface recreation cancel contacts.
+        state.touch_cancel();
+        state.touch_up(2,23);
+        assert!(state.clicks.is_empty(),"old-surface contact must not reach replacement popup");
     }
 
     #[test]
