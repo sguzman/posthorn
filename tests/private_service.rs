@@ -837,6 +837,77 @@ async fn category_exec_hook_and_quiet_mode_are_isolated_over_dbus()
 }
 
 #[tokio::test]
+async fn category_sound_command_routing_and_quiet_mode_preserve_notifications()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Mako implements sounds via on-notify=exec, not a built-in audio
+    // transport. A local file-backed command proves category selection and
+    // quiet-mode suppression without depending on a working sound device.
+    let dir=tempfile::tempdir()?;
+    let marker=dir.path().join("sound-command-events");
+    let config=Config::parse(&format!(
+        "[category=success]\nbackground-color=#305747\non-notify=exec printf 'success:%s\\n' \"$id\" >> '{}'\n\
+         [category=failure]\nbackground-color=#684148\non-notify=exec printf 'failure:%s\\n' \"$id\" >> '{}'\n\
+         [category=warning]\nbackground-color=#715536\non-notify=exec printf 'warning:%s\\n' \"$id\" >> '{}'\n\
+         [mode=quiet]\non-notify=none\n",
+        marker.display(),marker.display(),marker.display(),
+    ))?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let category_color=[
+        ("success","#305747"),("failure","#684148"),("warning","#715536")
+    ];
+    let mut expected=Vec::new();
+    for (category,color) in category_color {
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".to_owned(),
+            OwnedValue::try_from(zbus::zvariant::Value::from(category))?,
+        )].into();
+        let id:u32=desktop.call("Notify",&(
+            "sound-router",0u32,"","Category","",
+            Vec::<String>::new(),hints,-1i32,
+        )).await?;
+        expected.push(format!("{category}:{id}"));
+        let note=runtime.store.lock().unwrap().active().iter()
+            .find(|note|note.id==id).cloned().ok_or("missing routed note")?;
+        let style=posthorn::desktop::style_for_note(
+            &runtime,&note,&["default".to_owned()]);
+        assert_eq!(style["background-color"],color);
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(3),async {
+        loop {
+            if std::fs::read_to_string(&marker).unwrap_or_default()
+                .lines().count()==3 {break;}
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }).await?;
+    expected.sort();
+    let text=std::fs::read_to_string(&marker)?;
+    let mut observed=text.lines().map(str::to_owned).collect::<Vec<_>>();
+    observed.sort();
+    assert_eq!(observed,expected,
+        "each category must select its own sound hook once");
+    let _:()=control.call("SetMode",&("quiet",)).await?;
+    for (category,_) in category_color {
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".to_owned(),
+            OwnedValue::try_from(zbus::zvariant::Value::from(category))?,
+        )].into();
+        let _:u32=desktop.call("Notify",&(
+            "sound-router",0u32,"","Quiet category","",
+            Vec::<String>::new(),hints,-1i32,
+        )).await?;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(160)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,text,
+        "quiet mode must suppress all category sound commands");
+    assert_eq!(runtime.store.lock().unwrap().active().len(),6,
+        "muting notification hooks must not discard the notifications");
+    Ok(())
+}
+
+#[tokio::test]
 async fn id_and_tag_replacements_have_distinct_group_lifecycle_over_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
