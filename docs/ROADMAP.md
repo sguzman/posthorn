@@ -18,7 +18,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 ### 🧩 P1 — Config, criteria and types port — `█████████░ 87%`
 
 - 📄 T101 — Parse Mako configuration sections and ordered overrides — `██████████ 100%`
-- 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `█████████░ 94%`
+- 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `██████████ 95%`
 - 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `████████░░ 78%`
 - 📂 T104 — Include files with Mako-compatible path behavior — `████████░░ 83%`
 - 📐 T105 — Type/layout/style parity for all Mako config settings — `████████░░ 79%`
@@ -39,7 +39,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 ### 🪟 P4 — Wayland protocol and rendering — `█████████░ 94%`
 
-- 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `██████████ 95%`
+- 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `██████████ 96%`
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `██████████ 99%`
 - 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `█████████░ 87%`
 
