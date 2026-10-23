@@ -414,6 +414,7 @@ PY
   done
   [[ "$disabled_visible" == 1 ]] || { echo 'Disabled-action popup was not painted'; exit 1; }
   prior_requests="$(grep -Ec 'xdg_activation_v1@[^ ]+[.]get_activation_token' "$root/posthorn.log" || true)"
+  prior_replies="$(grep -Ec 'xdg_activation_token_v1@[^ ]+[.]done' "$root/posthorn.log" || true)"
   POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720 272
   disabled_closed=0
   for _ in {1..20}; do
@@ -424,9 +425,10 @@ PY
     sleep 0.1
   done
   latest_requests="$(grep -Ec 'xdg_activation_v1@[^ ]+[.]get_activation_token' "$root/posthorn.log" || true)"
+  latest_replies="$(grep -Ec 'xdg_activation_token_v1@[^ ]+[.]done' "$root/posthorn.log" || true)"
   if [[ "$disabled_closed" != 1 ]] ||
      grep -Eq 'Member=(ActivationToken|ActionInvoked)' "$root/disabled-action-signals.log" ||
-     (( latest_requests != prior_requests + 1 )); then
+     (( latest_requests != prior_requests + 1 || latest_replies != prior_replies + 1 )); then
     echo 'actions=0 did not suppress signals while preserving token request and dismissal'
     cat "$root/disabled-action-signals.log"
     exit 1
