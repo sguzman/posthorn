@@ -35,7 +35,7 @@ change how they call the Freedesktop Notification protocol. Until parity:
 | `render.c`, `icon.c`, `cairo-pixbuf.c` | Pango/Cairo rendering, layout and icons | Cairo/Pango markup/colors/file and inline icons with Mako-style HiDPI theme selection using the maximum scale across attached outputs, independently of the popup monitor scale (verified with synthetic 1x/2x PNG assets), progress fill, measured heights, group counts, directional text/icon padding, per-corner border radius, icon clipping, signed-margin overlap and ARGB composition; fractional-scale-specific presentation and exact Mako Pango metrics remain incomplete |
 | `event-loop.c`, `main.c`, `mode.c`, `makoctl.c` | Runtime, modes, timers, control CLI | Private live/headless services, post-grouping on-notify hooks and quiet-mode sound tests, Mako-style `mode -s`, GNU getopt compact arguments, printed mode results, duplicate suppression and mutually exclusive -a/-r/-t validation, text history/list and upstream-style JSON formatting, transactional reload, dynamic group/list reapplication on SetMode/Reload, Mako-style suppression of action and activation signals when actions=0; XDG token protocol covered headlessly, GNU getopt lone-dash handling, strtoumax uint64 negative-wrap ID parsing and C-whitespace handling, getline-compatible menu selection; exact control parity incomplete |
 
-## Known action dictionary limitation
+## Ordered actions and map-backed fallback
 
 Mako 1.11 writes action entries in internal linked-list order, including repeated
 keys, into its `a{ss}` control D-Bus field. Posthorn now preserves those
@@ -142,6 +142,33 @@ passed at [commit 614055e](https://github.com/sguzman/posthorn/actions/runs/3995
 No workstation session bus, Mako service, or user configuration was touched.
 These startup safeguards do **not** authorize production name acquisition;
 that still requires the explicit reversible MVP inauguration gate.
+## Makoctl CLI option and menu parity
+
+Mako v1.11 `makoctl.c` parses notification IDs using C
+`strtoumax(...,10)`. Posthorn now accepts its leading whitespace,
+single optional sign, uint64 negative wrap and empty-input cases,
+while rejecting repeated signs such as `++1` and `-+0`.
+Regression tests cover direct IDs and all three `-n` command forms:
+`dismiss`, `invoke` and `menu`.
+
+Mako's GNU `getopt("a:r:t:s")` consumes mixed short-option clusters
+one option at a time. Posthorn now handles consecutive `-s` switches
+followed by argument-taking `-a`/`-r`/`-t` flags, including attached
+arguments and the existing mutual-exclusion rule.
+
+Upstream `makoctl menu` reads only the first line from the menu
+program's stdout via `getline`, closes stdout before `waitpid`,
+and ignores failed label writes to an already-closed child stdin.
+Posthorn now does the same with buffered first-line byte reads, not
+whole-output UTF-8 conversion. Both invalid bytes after a valid
+selection and early child stdin closure are covered by real subprocess
+tests; an isolated private D-Bus acceptance test verifies that the
+selected action emits `ActionInvoked`.
+
+These cases passed Rust, D-Bus integration and headless Wayland CI
+at [commit 3c04c97](https://github.com/sguzman/posthorn/actions/runs/39959346678).
+Exact CLI output and error wording still have outstanding parity cases.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.

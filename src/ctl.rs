@@ -363,9 +363,9 @@ impl<'de> Deserialize<'de> for OrderedControlRecord {
     }
 }
 
-/// Read a{ss} entries deterministically without converting to a HashMap.
-/// The current zvariant representation sorts keys and collapses duplicates.
-/// Mako's original action-list order remains an explicitly tracked parity gap.
+/// Lossy map-backed fallback for programmatic notification_text/json helpers.
+/// Live posthornctl uses OrderedControlRecord's wire deserializer instead,
+/// retaining repeated action keys in original Mako list order.
 fn action_pairs(map:&HashMap<String,OwnedValue>)->Vec<(String,String)>{
     let Some(value)=map.get("actions") else{return Vec::new()};
     let Value::Dict(dict)=&**value else{return Vec::new()};
@@ -375,8 +375,8 @@ fn action_pairs(map:&HashMap<String,OwnedValue>)->Vec<(String,String)>{
     }).collect()
 }
 
-/// Resolve a selected menu label against the first matching wire entry.
-/// The exact Mako list order is not yet preserved by zvariant::Dict.
+/// Resolve a menu label against the first wire-order matching action.
+/// Live posthornctl passes ordered pairs, not the lossy zvariant::Dict.
 fn selected_action_key(
     actions:&[(String,String)],selected:&str,
 )->Option<String>{
