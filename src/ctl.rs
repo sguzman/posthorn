@@ -859,7 +859,8 @@ mod tests {
         assert!(parse_mako_id("-1").is_err());
         assert_eq!(parse_mako_id("-18446744073709551615"),Ok(1));
         assert_eq!(parse_mako_id(" -18446744073709551614"),Ok(2));
-        assert_eq!(parse_mako_id("-18446744073705257216"),Ok(4294964400));
+        assert_eq!(parse_mako_id("-18446744069414584321"),Ok(u32::MAX));
+        assert!(parse_mako_id("-18446744069414584320").is_err());
         assert!(parse_mako_id("-18446744073709551616").is_err());
         assert!(parse_mako_id("18446744073709551615").is_err());
         assert_eq!(parse_command(&v(&["invoke","-n","-18446744073709551615"])).unwrap(),
