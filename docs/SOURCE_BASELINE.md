@@ -169,6 +169,24 @@ These cases passed Rust, D-Bus integration and headless Wayland CI
 at [commit 3c04c97](https://github.com/sguzman/posthorn/actions/runs/39959346678).
 Exact CLI output and error wording still have outstanding parity cases.
 
+## Category sound-hook routing and quiet-mode verification
+
+Mako v1.11 implements notification sounds via configured
+`on-notify=exec` bindings rather than a built-in audio engine.
+The isolated private D-Bus regression now sends success, failure and
+warning notifications, verifies each resolves its own configured
+background color and subprocess hook, and records exactly one command
+per category. After switching to `quiet` through the Mako control
+interface, all three command hooks are suppressed while their
+notification objects and category colors are retained.
+
+The test uses file-backed shell commands rather than sound hardware.
+It proves category routing and quiet-mode suppression, **not** speaker,
+PipeWire or live Hyprland audio acceptance. Both Rust/D-Bus and
+headless Wayland CI passed at
+[commit b57ff88](https://github.com/sguzman/posthorn/actions/runs/39960413355).
+Actual sound-player integration and workstation cutover remain open.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
