@@ -127,6 +127,31 @@ mod tests {
     }
 
     #[test]
+    fn configured_hook_inherits_stdin() {
+        const MARKER:&str="POSTHORN_HOOK_STDIN_FIXTURE";
+        if std::env::var_os(MARKER).is_some() {
+            NotifyBinding::Exec(
+                "IFS= read -r value; printf 'POSTHORN_STDIN:%s' \"$value\"".into()
+            ).run_exec(713).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            return;
+        }
+        use std::io::Write;
+        let mut child=std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact","hooks::tests::configured_hook_inherits_stdin","--nocapture"])
+            .env(MARKER,"1")
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        let mut input=child.stdin.take().unwrap();
+        writeln!(input,"stdin-passed").unwrap();
+        drop(input);
+        let output=child.wait_with_output().unwrap();
+        assert!(output.status.success(),"stdin fixture failed: {output:?}");
+        assert!(String::from_utf8_lossy(&output.stdout)
+            .contains("POSTHORN_STDIN:stdin-passed"),
+            "exec shell ignored the standard input inherited from its parent");
+    }
+
+    #[test]
     fn none_is_a_safe_noop() {
         NotifyBinding::None.run_exec(8).unwrap();
     }
