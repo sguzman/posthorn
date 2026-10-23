@@ -105,21 +105,24 @@ compositor screenshots to verify category colors, newest-first stacking,
 right-anchor placement, timeout expiry, transactional reload, and
 existing-notification restyling under `SetMode`.
 
-At 1×, the initially pointerless headless compositor receives a
-temporary wlroots virtual pointer from an explicitly guarded Rust QA
-example. Its real compositor-delivered right-button press dismisses
-the top warning popup; a new screenshot must show the warning gone
-while the two older category popups remain. At 1.25× and 2×,
-`CloseNotification` supplies the corresponding repaint check. The
-1× suite also hotplugs a named headless monitor, checks queued output
-rendering, and survives unplugging. Both Rust/private D-Bus and
-headless Wayland CI passed for the guarded pointer test at
-[commit 4003cf2](https://github.com/sguzman/posthorn/actions/runs/39994717557).
+The initially pointerless headless compositor receives a temporary
+wlroots virtual pointer from an explicitly guarded Rust QA example.
+Actual right-button events must dismiss only the targeted popup at
+1× and 1.25×, with 2× testing both real pointer dismissal and the
+independent Freedesktop `CloseNotification` repaint path. At 1×,
+a left-button default action must receive a genuine asynchronous
+compositor XDG activation token and emit the identical D-Bus
+`ActivationToken` ahead of `ActionInvoked` and
+`NotificationClosed`. Clicks outside popups and unbound middle
+buttons must not dismiss notifications or request activation tokens.
+The 1× suite also hotplugs a named headless monitor and verifies
+recovery from output removal. See the [source-level acceptance record](docs/SOURCE_BASELINE.md)
+and [CI run](https://github.com/sguzman/posthorn/actions/runs/40001253136).
 
-This verifies **isolated Sway behavior**, not pixel-perfect Hyprland
-parity, real Hyprland pointer/touch or XDG activation, fractional
-HiDPI protocol parity, or production service ownership. The installed
-Mako daemon is never involved.
+This verifies **isolated Sway behavior**, not real Hyprland
+pointer/touch or action focus, exact fractional-buffer negotiation,
+physical audio, pixel-perfect Mako rendering or production service
+ownership. The installed Mako daemon is never involved.
 
 ## License
 
