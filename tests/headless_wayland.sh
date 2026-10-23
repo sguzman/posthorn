@@ -267,6 +267,22 @@ PY
     cat "$root/action-signal.log"
     exit 1
   fi
+  # In addition to the action signal, observe the compositor's actual
+  # XDG activation-token handshake. This tests the asynchronous Done path
+  # rather than inferring success from a synthetic action-dispatch token.
+  activation_done=0
+  for _ in {1..10}; do
+    if grep -Eq 'xdg_activation_token_v1@.*\\.done' "$root/posthorn.log"; then
+      activation_done=1
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ "$activation_done" != 1 ]]; then
+    echo 'Action click did not receive compositor XDG activation token Done'
+    grep -E 'xdg_activation(_token)?_v1@' "$root/posthorn.log" | tail -35 || true
+    exit 1
+  fi
   kill "$monitor_pid" 2>/dev/null || true
   wait "$monitor_pid" 2>/dev/null || true
   monitor_pid=""
