@@ -24,13 +24,16 @@ the original bus, even if address strings are misleading.
 Before launching Posthorn, the runner captures an ephemeral baseline
 screenshot. It sends a Freedesktop `Notify`, verifies the resulting
 ID and active private control entry, then requires the distinct popup
-color to **increase relative to the original screenshot**. After
-`CloseNotification`, it verifies both that the control entry disappears
-and that the matched pixel count returns close to its original baseline.
-These comparisons reject false positives from an existing wallpaper or
-application that already uses the QA color. Compositor queries and
-screenshot captures have explicit timeouts; the runner terminates its
-child process and deletes temporary captures on exit.
+color to **increase relative to the original screenshot**. While the original notification remains active, the harness edits only
+its disposable private config and calls `fr.emersion.Mako.Reload`. It
+checks that the existing popup acquires the new background color and
+loses the old one. After `CloseNotification`, it verifies both that the
+control entry disappears and that the final matched pixel count returns
+close to its original baseline. These comparisons reject false positives
+from an existing wallpaper or application that already uses the QA
+colors. Compositor queries and screenshot captures have explicit timeouts;
+the runner terminates its child process and deletes temporary captures
+on exit.
 
 An opt-in `POSTHORN_KEEP_QA=1` preserves artifacts for private
 debugging only; **never commit screenshots or user-session logs to
