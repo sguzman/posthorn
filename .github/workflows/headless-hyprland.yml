@@ -29,6 +29,9 @@ jobs:
         run: |
           useradd --create-home --shell /bin/bash posthornqa
           chmod a+rx /__w /__w/posthorn /__w/posthorn/posthorn
+          # A CI container can forbid Sway's packaged cap_sys_nice file
+          # capability; a normal copied binary needs no real-time privilege.
+          install -m 0755 "$(command -v sway)" /usr/local/bin/sway-qa-unprivileged
       - name: Private D-Bus notification lifecycle on actual headless Hyprland
         run: |
           runuser -u posthornqa -- env HOME=/home/posthornqa \
