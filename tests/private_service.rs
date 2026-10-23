@@ -1391,6 +1391,34 @@ async fn posix_dotall_summary_criteria_drive_private_dbus_on_notify()
 }
 
 #[tokio::test]
+async fn posix_literal_backslash_d_criteria_drive_private_dbus_on_notify()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let cfg=Config::parse(
+        "[summary~=\\\\d+]\non-notify=dismiss\n[summary~=\\\\D+]\non-notify=dismiss\n"
+    )?;
+    let (conn,runtime)=open_private_service(cfg).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    for summary in ["ddd","DDD"] {
+        let id:u32=desktop.call("Notify",&(
+            "posix-escaped-letter",0u32,"",summary,"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        let store=runtime.store.lock().unwrap();
+        assert!(store.active().is_empty(),
+            "Mako POSIX ERE treats backslash-d and backslash-D as literal letters");
+        assert_eq!(store.history().front().map(|n|n.id),Some(id));
+    }
+    let id:u32=desktop.call("Notify",&(
+        "posix-escaped-letter",0u32,"","123","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().front().map(|n|n.id),
+        Some(id),"Rust's digit-class interpretation must not trigger a Mako rule");
+    Ok(())
+}
+
+#[tokio::test]
 async fn on_notify_bindings_dismiss_and_invoke_without_replay()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
