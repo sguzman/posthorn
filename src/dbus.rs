@@ -4,6 +4,8 @@
 //! The real session-bus name remains reserved for future MVP inauguration;
 //! do not run a replacement alongside the installed Mako daemon.
 
+use serde::de::{Deserialize,Deserializer,MapAccess,Visitor};
+use std::fmt;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use zbus::{interface, object_server::SignalEmitter, zvariant::OwnedValue};
@@ -14,6 +16,79 @@ use std::time::Instant;
 
 pub const BUS_NAME: &str = "org.freedesktop.Notifications";
 pub const OBJECT_PATH: &str = "/org/freedesktop/Notifications";
+
+/// Mako consumes Notify's a{sv} entries in sender order. An ordinary
+/// HashMap would discard repeated keys and lose the ordering of deprecated
+/// and modern aliases before Mako applies its last-encountered value.
+#[derive(Debug,zbus::zvariant::Type)]
+#[zvariant(signature="a{sv}")]
+struct OrderedNotifyHints(Vec<(String,OwnedValue)>);
+
+impl<'de> Deserialize<'de> for OrderedNotifyHints{
+    fn deserialize<D:Deserializer<'de>>(deserializer:D)->Result<Self,D::Error>{
+        struct Entries;
+        impl<'de> Visitor<'de> for Entries{
+            type Value=OrderedNotifyHints;
+            fn expecting(&self,f:&mut fmt::Formatter)->fmt::Result{
+                f.write_str("ordered freedesktop a{sv} notification hints")
+            }
+            fn visit_map<A:MapAccess<'de>>(self,mut map:A)->Result<Self::Value,A::Error>{
+                let mut entries=Vec::new();
+                while let Some((key,value))=map.next_entry::<String,OwnedValue>()?{
+                    entries.push((key,value));
+                }
+                Ok(OrderedNotifyHints(entries))
+            }
+        }
+        deserializer.deserialize_map(Entries)
+    }
+}
+
+fn hint_has_valid_type(name:&str,value:&OwnedValue)->bool{
+    match name {
+        "category"|"desktop-entry"|"image-path"|"image_path"
+            |"x-dunst-stack-tag"|"x-canonical-private-synchronous"=>
+            String::try_from(value.clone()).is_ok(),
+        "value"=>i32::try_from(value).is_ok(),
+        "urgency"=>u8::try_from(value).is_ok()
+            ||u32::try_from(value).is_ok()
+            ||i32::try_from(value).is_ok(),
+        "image-data"|"image_data"|"icon_data"=>{
+            let tuple:Option<(i32,i32,i32,bool,i32,i32,Vec<u8>)>=
+                value.try_clone().ok().and_then(|v|v.try_into().ok());
+            tuple.is_some()
+        }
+        _=>true,
+    }
+}
+
+impl OrderedNotifyHints{
+    fn into_effective_map(self)->zbus::fdo::Result<HashMap<String,OwnedValue>>{
+        let mut fields=HashMap::new();
+        let (mut image_path,mut image_data,mut stack_tag)=(None,None,None);
+        for (name,value) in self.0 {
+            // Upstream aborts on an invalid known hint *as encountered*.
+            // Validate before collapsing duplicate keys or aliases.
+            if !hint_has_valid_type(&name,&value){
+                return Err(zbus::fdo::Error::InvalidArgs(format!(
+                    "notification hint '{name}' has incorrect D-Bus type"
+                )));
+            }
+            match name.as_str(){
+                "image-path"|"image_path"=>image_path=Some(value),
+                "image-data"|"image_data"|"icon_data"=>image_data=Some(value),
+                "x-dunst-stack-tag"|"x-canonical-private-synchronous"=>
+                    stack_tag=Some(value),
+                _=>{fields.insert(name,value);},
+            }
+        }
+        if let Some(value)=image_path{fields.insert("image-path".into(),value);}
+        if let Some(value)=image_data{fields.insert("image-data".into(),value);}
+        if let Some(value)=stack_tag{fields.insert("x-dunst-stack-tag".into(),value);}
+        Ok(fields)
+    }
+}
+
 
 /// State shared by the desktop D-Bus API and (eventually) the Wayland runtime.
 #[derive(Clone, Debug)]
@@ -62,27 +137,10 @@ impl FreedesktopNotifications {
             })
             .collect();
 
-        // Upstream Mako reads known hint variants with their exact wire type.
-        // Reject mismatches *before* mutating a live or replaced notification.
-        // Unknown extension hints are ignored, as in the C implementation.
-        for (name,value) in &hints {
-            let valid=match name.as_str(){
-                "category"|"desktop-entry"|"image-path"|"image_path"
-                    |"x-dunst-stack-tag"|"x-canonical-private-synchronous"=>
-                    String::try_from(value.clone()).is_ok(),
-                "value"=>i32::try_from(value).is_ok(),
-                "urgency"=>u8::try_from(value).is_ok()
-                    ||u32::try_from(value).is_ok()
-                    ||i32::try_from(value).is_ok(),
-                "image-data"|"image_data"|"icon_data"=>{
-                    let tuple:Option<(i32,i32,i32,bool,i32,i32,Vec<u8>)>=
-                        value.try_clone().ok()
-                            .and_then(|v|v.try_into().ok());
-                    tuple.is_some()
-                }
-                _=>true,
-            };
-            if !valid{
+        // Direct in-memory callers also validate known hint types. Live
+        // D-Bus calls validate each arriving entry before aliases collapse.
+        for (name,value) in &hints{
+            if !hint_has_valid_type(name,value){
                 return Err(zbus::fdo::Error::InvalidArgs(
                     format!("notification hint '{name}' has incorrect D-Bus type")
                 ));
@@ -221,10 +279,11 @@ impl FreedesktopNotifications {
         summary: &str,
         body: &str,
         actions: Vec<String>,
-        hints: HashMap<String, OwnedValue>,
+        hints: OrderedNotifyHints,
         expire_timeout: i32,
         #[zbus(connection)] conn: &zbus::Connection,
     ) -> zbus::fdo::Result<u32> {
+        let hints=hints.into_effective_map()?;
         let id = self.apply_notify(
             app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout,
         )?;
@@ -427,6 +486,36 @@ mod tests {
         assert_eq!(second,id);
         assert_eq!(service.store.lock().unwrap().active()[0].app_icon,
             "another-icon");
+    }
+
+    #[test]
+    fn ordered_hints_choose_last_alias_and_validate_discarded_values(){
+        use zbus::zvariant::Value;
+        let txt=|s:&str|OwnedValue::try_from(Value::from(s)).unwrap();
+        let fields=OrderedNotifyHints(vec![
+            ("image_path".into(),txt("legacy")),
+            ("image-path".into(),txt("")),
+            ("x-dunst-stack-tag".into(),txt("first-tag")),
+            ("x-canonical-private-synchronous".into(),txt("last-tag")),
+            ("image_data".into(),OwnedValue::from(4u32)),
+        ]);
+        assert!(fields.into_effective_map().is_err(),
+            "bad earlier image-data must fail before alias collapse");
+        let fields=OrderedNotifyHints(vec![
+            ("image_path".into(),txt("legacy")),
+            ("image-path".into(),txt("")),
+            ("x-dunst-stack-tag".into(),txt("first-tag")),
+            ("x-canonical-private-synchronous".into(),txt("last-tag")),
+        ]).into_effective_map().unwrap();
+        assert_eq!(String::try_from(fields["image-path"].try_clone().unwrap()).unwrap(),"");
+        assert_eq!(String::try_from(fields["x-dunst-stack-tag"].try_clone().unwrap()).unwrap(),
+            "last-tag");
+        let reversed=OrderedNotifyHints(vec![
+            ("image-path".into(),txt("modern")),
+            ("image_path".into(),txt("legacy-last")),
+        ]).into_effective_map().unwrap();
+        assert_eq!(String::try_from(reversed["image-path"].try_clone().unwrap()).unwrap(),
+            "legacy-last");
     }
 
     #[test]
