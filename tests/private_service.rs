@@ -2067,7 +2067,7 @@ async fn on_notify_bindings_dismiss_and_invoke_without_replay()
 }
 
 #[tokio::test]
-async fn grouped_on_notify_exec_runs_after_grouping_but_not_on_restore()
+async fn grouped_on_notify_exec_requires_preexisting_group_on_direct_replace_not_restore()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
     let dir=tempfile::tempdir()?;
@@ -2086,8 +2086,20 @@ async fn grouped_on_notify_exec_runs_after_grouping_but_not_on_restore()
     )).await?;
     assert!(!marker.exists(),"ungrouped first notification must not run group hook");
     let second:u32=desktop.call("Notify",&(
-        "same",0u32,"","Second","",actions,hints,-1i32
+        "same",0u32,"","Second","",actions.clone(),hints.clone(),-1i32
     )).await?;
+    // Mako applies criteria before group_notifications. A fresh second
+    // notification is still ungrouped while its on-notify binding is chosen.
+    // Its post-grouping [grouped] style must not retroactively run exec.
+    assert!(!marker.exists(),"newly formed group must not trigger on-notify");
+    assert_eq!(runtime.store.lock().unwrap().active()
+        .iter().find(|n|n.id==second).unwrap().group_index,0);
+    let replaced:u32=desktop.call("Notify",&(
+        "same",second,"","Direct replacement","",actions,hints,-1i32
+    )).await?;
+    assert_eq!(replaced,second);
+    // Explicit replaces_id preserves the previous group index during
+    // criteria selection, so this time the grouped exec is selected.
     tokio::time::timeout(std::time::Duration::from_secs(3),async{
         while !marker.exists(){
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
