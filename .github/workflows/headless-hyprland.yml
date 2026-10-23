@@ -1,0 +1,31 @@
+name: Experimental Headless Hyprland
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/headless-hyprland.yml'
+      - 'tests/headless_hyprland.sh'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-headless:
+    name: Arch Hyprland native compositor QA (experimental)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    continue-on-error: true
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install current Arch compositor and Rust dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git base-devel pkgconf rust cargo dbus hyprland grim \
+            mesa pango cairo gdk-pixbuf2
+      - uses: actions/checkout@v4
+      - name: Compile private Posthorn daemon and Rust pixel probe
+        run: cargo build --bin posthorn --example qa_png_probe
+      - name: Private D-Bus notification lifecycle on actual headless Hyprland
+        run: dbus-run-session -- bash tests/headless_hyprland.sh
+        env:
+          POSTHORN_HEADLESS_HYPRLAND_TEST: '1'
