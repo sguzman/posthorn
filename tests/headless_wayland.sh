@@ -272,7 +272,7 @@ PY
   # rather than inferring success from a synthetic action-dispatch token.
   activation_done=0
   for _ in {1..10}; do
-    if grep -Eq 'xdg_activation_token_v1@.*\\.done' "$root/posthorn.log"; then
+    if grep -Eq 'xdg_activation_token_v1@[^ ]+[.]done' "$root/posthorn.log"; then
       activation_done=1
       break
     fi
