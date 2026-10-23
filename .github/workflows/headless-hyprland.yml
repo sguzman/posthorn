@@ -20,7 +20,7 @@ jobs:
       - name: Install current Arch compositor and Rust dependencies
         run: |
           pacman -Syu --noconfirm --needed \
-            git base-devel pkgconf rust cargo dbus hyprland grim \
+            git base-devel pkgconf rust cargo dbus hyprland sway grim \
             mesa pango cairo gdk-pixbuf2
       - uses: actions/checkout@v4
       - name: Compile private Posthorn daemon and Rust pixel probe
