@@ -673,3 +673,22 @@ D-Bus and 1×/1.25×/2× Sway CI completed successfully at
 [commit d96b461](https://github.com/sguzman/posthorn/actions/runs/40031933688).
 This is configuration acceptance evidence, **not** physical Hyprland or
 production cutover acceptance.
+
+## Deferred history pruning after max-history reload
+
+Pinned Mako v1.11.0's `config.c:reload_config` and
+`dbus/mako.c:reapply_config` leave the history list untouched. Its
+`notification.c:close_notification` enforces the then-current
+`max_history` only when appending a newly closed notification to
+history. Consequently, lowering `max-history` from 3 to 1 retains
+three earlier entries until the next eligible dismissal. Reloading
+to zero retains old history, while future closes do not append.
+
+Posthorn now mirrors those retention boundaries. Rust lifecycle and
+private D-Bus `Notify`, `DismissNotifications`, `Reload`, and
+`ListHistory` regression cases cover 3 → 1 → 0 transitions.
+The Rust tests, private D-Bus suite, and isolated Sway tests at
+1×, 1.25×, and 2× passed for
+[commit a88bb04](https://github.com/sguzman/posthorn/actions/runs/40032485795)
+(also [preceding store fix](https://github.com/sguzman/posthorn/actions/runs/40032406098)).
+Real Hyprland and production bus behavior remain unverified.
