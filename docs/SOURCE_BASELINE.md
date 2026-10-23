@@ -341,6 +341,31 @@ pointer/touch or compositor-issued XDG activation acceptance.
 No production D-Bus name was taken and no installed Mako configuration
 was changed.
 
+## Compositor-originated right-click dismissal in isolated Sway
+
+Headless Sway starts with a seat that advertises no pointer capability
+(`wl_seat.capabilities(0)`). A prior attempt to send
+`swaymsg seat seat0 cursor press button3` therefore did not deliver
+`wl_pointer.button` to Posthorn; screenshots correctly showed that the
+notification remained visible. This was a QA-device setup failure, not
+a demonstrated hit-testing defect.
+
+The test now builds a small Rust `qa_virtual_pointer` example and
+creates an actual temporary wlroots virtual pointer on the isolated
+headless seat. It moves inside the top warning popup and injects the
+Linux BTN_RIGHT press/release, then checks actual screencopy pixels:
+the warning disappears while the success/failure popups remain. The
+example requires an explicit `POSTHORN_HEADLESS_POINTER_TEST=1`
+opt-in and `WLR_BACKENDS=headless`; the normal installed desktop
+notification server and the user's input seat remain untouched.
+Rust/private D-Bus and all three headless Sway CI scales passed at
+[commit 4003cf2](https://github.com/sguzman/posthorn/actions/runs/39994717557).
+
+Only the 1× compositor smoke drives a pointer; 1.25×/2× still use
+D-Bus close/repaint checks. This is not real Hyprland input acceptance
+and does not yet exercise compositor-originated touch, non-dismiss
+bindings, or action-associated XDG activation tokens.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
