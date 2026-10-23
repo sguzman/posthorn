@@ -423,18 +423,20 @@ fn parse_selectors(text: &str) -> Result<Vec<Selector>, String> {
     Ok(selectors)
 }
 
-/// Upstream parse_int uses strtol: leading whitespace is accepted, but
-/// trailing nonnumeric characters are rejected. Keep i32 bounds safe.
+/// Mako 1.11 parse_int calls (int)strtol(text, &end, 10), then accepts
+/// errno==0 and *end=='\\0'. On 64-bit Linux this parses an i64 and NARROWS
+/// to i32, so values in i64 but outside i32 wrap. Empty input is also
+/// accepted as zero by strtol's end-pointer test; whitespace-only is not.
 pub fn parse_signed_mako(text:&str)->Option<i32>{
-    // C strtol(10) skips isspace(), including vertical tab (0x0B),
-    // unlike Rust's is_ascii_whitespace() predicate.
+    if text.is_empty(){return Some(0);}
+    // C strtol skips all six C isspace bytes, including vertical tab.
     let trimmed=text.trim_start_matches([' ','\t','\n','\r','\x0b','\x0c']);
-    trimmed.parse::<i32>().ok()
+    let wide=trimmed.parse::<i64>().ok()?;
+    Some(wide as i32)
 }
 
-/// Apply the same signed int32 parsing that config validation uses, without
-/// silently losing leading-whitespace values at runtime. Mako parse_int_ge
-/// refuses negative values and limits all these options to signed 32-bit.
+/// Apply the same 64-bit strtol plus narrowing that config validation uses.
+/// Negative narrowed values still fail Mako's parse_int_ge minimum check.
 pub fn parse_nonnegative_mako(text:&str)->Option<u32>{
     u32::try_from(parse_signed_mako(text)?).ok()
 }
@@ -607,9 +609,32 @@ mod tests {
         assert_eq!(parse_signed_mako("\t+42"),Some(42));
         assert_eq!(parse_signed_mako("\u{b}-7"),Some(-7));
         assert_eq!(parse_signed_mako("42 "),None);
-        assert_eq!(parse_signed_mako("2147483648"),None);
+        assert_eq!(parse_signed_mako("2147483648"),Some(i32::MIN));
+        assert_eq!(parse_signed_mako("4294967297"),Some(1));
+        assert_eq!(parse_signed_mako("-2147483649"),Some(i32::MAX));
+        assert_eq!(parse_signed_mako(""),Some(0));
+        assert_eq!(parse_signed_mako(" "),None);
+        assert_eq!(parse_signed_mako("9223372036854775808"),None);
+        assert_eq!(parse_nonnegative_mako("4294967297"),Some(1));
         assert_eq!(parse_nonnegative_mako(" \t+440"),Some(440));
         assert_eq!(parse_nonnegative_mako(" -4"),None);
+    }
+
+    #[test]
+    fn empty_and_wrapped_mako_config_integers_follow_c_strtol(){
+        let config=Config::parse(
+            "default-timeout=\nborder-size=\nmax-history=4294967298\nwidth=4294967297\n"
+        ).unwrap();
+        assert_eq!(config.max_history,2);
+        assert_eq!(parse_nonnegative_mako(&config.global["default-timeout"]),Some(0));
+        assert_eq!(parse_nonnegative_mako(&config.global["width"]),Some(1));
+        assert_eq!(parse_nonnegative_mako(&config.global["border-size"]),Some(0));
+        assert!(Config::parse("width=2147483648\n").is_err(),
+            "strtol accepted it, but narrowing to negative fails min=1");
+        assert!(Config::parse("max-history=9223372036854775808\n").is_err(),
+            "LP64 strtol overflows before narrowing");
+        assert!(Config::parse("default-timeout= \n").is_ok(),
+            "getline strips the single trailing ASCII space");
     }
 
     #[test]
