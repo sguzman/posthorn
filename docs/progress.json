@@ -66,7 +66,7 @@
               "id": "T104",
               "emoji": "📂",
               "name": "Include files with Mako-compatible path behavior",
-              "progress": 84
+              "progress": 87
             },
             {
               "id": "T105",
@@ -159,7 +159,7 @@
               "id": "T403",
               "emoji": "🖱️",
               "name": "Pointer, touch, button bindings and XDG activation",
-              "progress": 90
+              "progress": 92
             }
           ]
         },

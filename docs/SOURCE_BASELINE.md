@@ -598,6 +598,36 @@ passed for [reload at commit 9edc1cc](https://github.com/sguzman/posthorn/action
 and [history restoration at commit 6412755](https://github.com/sguzman/posthorn/actions/runs/40026782751).
 These test Mako's on-notify arrival semantics, **not physical audio**.
 
+## Included fragment live repaint and invalid rollback
+
+A 1× isolated headless Sway acceptance uses the real Mako `include=`
+path to import a disposable `[category=qa-include]` rule, delivers a
+real Freedesktop `Notify`, and validates its color in compositor PNG
+pixels through the Rust `qa_png_probe`. Editing the included source
+and calling `fr.emersion.Mako.Reload` must repaint the **already active**
+popup in the new color and remove the previous color. Replacing the
+fragment with an invalid color must reject `Reload` and preserve the
+last valid rendered popup. This checks actual live compositor behavior,
+not just `Config::from_path` unit parsing. The Rust/private D-Bus,
+1×, 1.25× and 2× headless Sway CI jobs passed at
+[commit 7876ca0](https://github.com/sguzman/posthorn/actions/runs/40028600770).
+
+## Fractional and HiDPI compositor action activation
+
+The separate 1.25× (1536×864 logical) and 2× (960×540 logical) headless
+Sway tests now deliver a real virtual wl_pointer **left** click onto a
+notification containing a sender-provided default action. Each checks
+an additional asynchronous compositor `xdg_activation_token_v1.done`,
+extracts the nonempty token and verifies that the exact token is
+forwarded on the private D-Bus `ActivationToken` signal **before**
+`ActionInvoked` and `NotificationClosed`. A real compositor PNG
+must also show dismissal of the targeted popup while older messages
+remain visible. Both scales passed at
+[commit 7876ca0](https://github.com/sguzman/posthorn/actions/runs/40028600770).
+This is evidence of scaled **logical pointer routing and XDG token
+handshake**, not real Hyprland focus activation, physical input,
+fractional protocol buffer negotiation, touch, or installed Mako cutover.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
