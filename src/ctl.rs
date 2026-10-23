@@ -229,38 +229,32 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                         positional.extend(rest[i+1..].iter().cloned());
                         break;
                     }
-                    "-s"=>{set=true;i+=1;}
-                    "-a"|"-r"|"-t"=>{
-                        let flag=rest[i].as_str();
-                        let op=flag.as_bytes()[1] as char;
+                    other if other.starts_with('-') && other.len()>1=>{
+                        // GNU getopt("a:r:t:s") processes every short
+                        // option in a cluster, not only all-s clusters.
+                        // -s takes no argument; -a/-r/-t consume the
+                        // remaining suffix (or the next argv element).
+                        let mut pos=1;
+                        while pos<other.len() {
+                            let option=other.as_bytes()[pos] as char;
+                            match option {
+                                's'=>{set=true;pos+=1;}
+                                'a'|'r'|'t'=>{
+                                    let mode=if pos+1<other.len(){
+                                        other[pos+1..].to_owned()
+                                    }else{
+                                        i+=1;
+                                        rest.get(i).cloned().ok_or_else(||
+                                            format!("missing value after -{option}"))?
+                                    };
+                                    edits.push((option,mode));
+                                    break;
+                                }
+                                _=>return Err(format!("unknown mode option -{option}")),
+                            }
+                        }
                         i+=1;
-                        let mode=rest.get(i).ok_or_else(||
-                            format!("missing value after {flag}"))?;
-                        // GNU getopt accepts a required option argument even
-                        // when its first character is '-'. Do not mistake a
-                        // valid mode name for another flag.
-                        edits.push((op,mode.clone()));
-                        i+=1;
-                    }
-                    other if other.len()>2 && other.starts_with('-')
-                        && other[1..].bytes().all(|ch|ch==b's')=>{
-                        // getopt("a:r:t:s") accepts clustered -ss and -sss
-                        // as repeated no-argument -s options.
-                        set=true;
-                        i+=1;
-                    }
-                    other if other.len()>2
-                        && other.starts_with('-')
-                        && matches!(other.as_bytes()[1],b'a'|b'r'|b't')=>
-                    {
-                        // getopt("a:r:t:s") permits compact -aquiet,
-                        // -rquiet and -tquiet forms as well.
-                        let op=other.as_bytes()[1] as char;
-                        edits.push((op,other[2..].to_owned()));
-                        i+=1;
-                    }
-                    other if other.starts_with('-') && other.len()>1=>
-                        return Err(format!("unknown mode option {other}")),
+                    },
                     value=>{positional.push(value.to_owned());i+=1;}
                 }
             }
@@ -721,6 +715,22 @@ mod tests {
             Command::Modes{edit:vec![('s',"".into())]});
         assert_eq!(parse_command(&v(&["mode","-sss","quiet"])).unwrap(),
             Command::Modes{edit:vec![('s',"".into()),('S',"quiet".into())]});
+        assert_eq!(parse_command(&v(&["mode","-ss","--","quiet"])).unwrap(),
+            Command::Modes{edit:vec![('s',"".into()),('S',"quiet".into())]});
+        // GNU getopt splits no-argument -s flags from following attached
+        // argument-taking options, then applies the normal conflict check.
+        for args in [
+            vec!["mode","-saquiet"],vec!["mode","-ssaquiet"],
+            vec!["mode","-ssrquiet"],vec!["mode","-st","quiet"],
+            vec!["mode","-srquiet"],vec!["mode","-ssta"],
+        ] {
+            assert!(parse_command(&v(&args)).is_err(),
+                "getopt cluster mixed -s with -a/-r/-t: {args:?}");
+        }
+        assert_eq!(parse_command(&v(&["mode","-aquiet"])).unwrap(),
+            Command::Modes{edit:vec![('a',"quiet".into())]});
+        assert_eq!(parse_command(&v(&["mode","-atquiet"])).unwrap(),
+            Command::Modes{edit:vec![('a',"tquiet".into())]});
         assert_eq!(parse_command(&v(&["mode","-ss"])).unwrap(),
             Command::Modes{edit:vec![('s',"".into())]});
         assert!(parse_command(&v(&["mode","quiet"])).is_err());
