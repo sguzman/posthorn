@@ -97,15 +97,29 @@ verified on a real Hyprland session. Do not autostart it.
 
 ## Automated compositor acceptance (development only)
 
-CI runs `tests/headless_wayland.sh` inside a new `dbus-run-session` and an
-isolated headless Sway compositor (wlroots). It launches the private
-`org.posthorn.Development` desktop service, calls Freedesktop `Notify`,
-observes layer-shell `configure` and `wl_surface.attach` protocol traffic,
-then uses wlroots screencopy to capture the headless output and verify
-that all three success/failure/warning category colors actually appear in newest-first order near the configured right anchor, and that an existing popup changes color and changes back under Mako SetMode. After a Freedesktop CloseNotification, a second screenshot must show the closed category gone while other category popups remain. The same screenshot lifecycle runs at 1x and 2x scale and checks timer-driven expiration. The 1x suite also hotplugs a named headless monitor after startup and verifies that its queued popup appears and the service survives unplugging. This proves
-basic compositor rendering and category color propagation, **not** pixel-perfect
-Hyprland parity, fractional HiDPI, or production service ownership. The installed Mako daemon is never
-involved.
+CI runs `tests/headless_wayland.sh` inside a new `dbus-run-session`
+and an isolated headless Sway compositor (wlroots). It launches the
+private `org.posthorn.Development` service, sends Freedesktop `Notify`,
+checks layer-shell configuration and attached SHM buffers, and uses
+compositor screenshots to verify category colors, newest-first stacking,
+right-anchor placement, timeout expiry, transactional reload, and
+existing-notification restyling under `SetMode`.
+
+At 1×, the initially pointerless headless compositor receives a
+temporary wlroots virtual pointer from an explicitly guarded Rust QA
+example. Its real compositor-delivered right-button press dismisses
+the top warning popup; a new screenshot must show the warning gone
+while the two older category popups remain. At 1.25× and 2×,
+`CloseNotification` supplies the corresponding repaint check. The
+1× suite also hotplugs a named headless monitor, checks queued output
+rendering, and survives unplugging. Both Rust/private D-Bus and
+headless Wayland CI passed for the guarded pointer test at
+[commit 4003cf2](https://github.com/sguzman/posthorn/actions/runs/39994717557).
+
+This verifies **isolated Sway behavior**, not pixel-perfect Hyprland
+parity, real Hyprland pointer/touch or XDG activation, fractional
+HiDPI protocol parity, or production service ownership. The installed
+Mako daemon is never involved.
 
 ## License
 
