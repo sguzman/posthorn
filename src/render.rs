@@ -1102,7 +1102,7 @@ mod tests {
             cr.fill().unwrap();
             drop(cr);
             image.flush();
-            image.with_data(|pixels|pixels.to_vec()).unwrap()
+            image.data().unwrap().to_vec()
         };
         assert_eq!(draw(true),draw(false),
             "Mako never caps each corner radius at half the rectangle");
