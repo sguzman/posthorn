@@ -46,7 +46,12 @@ impl NotifyBinding {
             let script = format!("id=\"$1\"\n{command}");
             let mut child = Command::new("sh")
                 .arg("-c").arg(script).arg("sh").arg(id.to_string())
-                .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+                // Upstream Mako execvp("sh", ...) inherits all three
+                // standard descriptors, including diagnostics. A silent
+                // redirect to /dev/null loses command output and errors.
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
                 .spawn()?;
             // Reap detached notification hooks without blocking D-Bus.
             std::thread::spawn(move || { let _ = child.wait(); });
@@ -94,6 +99,31 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(found, "configured hook failed to receive the ID");
+    }
+
+    #[test]
+    fn configured_hook_inherits_stdout_and_stderr() {
+        const MARKER:&str="POSTHORN_HOOK_STDIO_FIXTURE";
+        if std::env::var_os(MARKER).is_some() {
+            NotifyBinding::Exec(
+                "printf 'POSTHORN_STDOUT:%s' \"$id\"; printf 'POSTHORN_STDERR:%s' \"$id\" >&2".into()
+            ).run_exec(712).unwrap();
+            // Wait for the detached helper to finish its pipe writes before
+            // the fixture process exits. Its stream handles remain inherited.
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            return;
+        }
+        // Spawn this one test in a real child process with captured OS pipes:
+        // Cargo's ordinary Rust test-output capture alone does not intercept
+        // inherited shell file descriptors.
+        let output=std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact","hooks::tests::configured_hook_inherits_stdout_and_stderr","--nocapture"])
+            .env(MARKER,"1").output().unwrap();
+        assert!(output.status.success(),"stdio fixture failed: {output:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("POSTHORN_STDOUT:712"),
+            "exec shell stdout was swallowed instead of inherited");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("POSTHORN_STDERR:712"),
+            "exec shell stderr was swallowed instead of inherited");
     }
 
     #[test]
