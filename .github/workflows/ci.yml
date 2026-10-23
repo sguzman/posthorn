@@ -13,6 +13,27 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq libpango1.0-dev libcairo2-dev libgdk-pixbuf-2.0-dev
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --all-targets
+      - name: Verify private Hyprland QA safety guards
+        run: |
+          bash -n tests/hyprland_private.sh
+          output="$(mktemp)"
+          trap 'rm -f "$output"' EXIT
+          if env -u POSTHORN_HYPRLAND_QA bash tests/hyprland_private.sh >"$output" 2>&1; then
+            echo 'Unguarded Hyprland QA unexpectedly succeeded'
+            exit 1
+          fi
+          grep -q 'explicit POSTHORN_HYPRLAND_QA=1 guard required' "$output"
+          if POSTHORN_HYPRLAND_QA=0 bash tests/hyprland_private.sh >"$output" 2>&1; then
+            echo 'Disabled Hyprland QA unexpectedly succeeded'
+            exit 1
+          fi
+          grep -q 'Hyprland QA not authorized' "$output"
+          if env -u HYPRLAND_INSTANCE_SIGNATURE POSTHORN_HYPRLAND_QA=1 \
+              bash tests/hyprland_private.sh >"$output" 2>&1; then
+            echo 'QA without a Hyprland session unexpectedly succeeded'
+            exit 1
+          fi
+          grep -q 'real Hyprland Wayland session is required' "$output"
       - run: dbus-run-session -- cargo test --tests --features dbus-integration -- --test-threads=1
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
       - run: python3 tools/render_roadmap.py && git diff --exit-code -- docs/ROADMAP.md
