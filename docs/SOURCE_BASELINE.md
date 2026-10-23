@@ -205,6 +205,24 @@ shell. The tests and existing private D-Bus/headless Wayland suites passed
 This is standard-stream fidelity, **not** real audio-player or Hyprland
 speaker acceptance.
 
+## Icon theme scale selection from Mako's source path
+
+Mako v1.11 `icon.c:resolve_icon` searches `root/*/*/name.*`. It first
+tries to parse the icon's nominal size from the first wildcard path
+component and uses the second component only when the first is
+unsized. Importantly, Mako reads the `@scale` suffix from that same
+size-bearing component, not from whichever component happens to
+contain an `@`.
+
+Posthorn now follows this ordering, including C `strtol`-style
+positive decimal prefixes for icon size and scale. Unit tests cover
+both directory layouts and confirm that `64x64/apps@2` does not
+incorrectly outrank `64x64@2/apps` on a 2× display. Rust and headless
+Wayland CI passed at
+[commit 543f7c7](https://github.com/sguzman/posthorn/actions/runs/39966123186).
+The new acceptance case does not prove complete monitor-hotplug,
+Hyprland, or pixel-equivalent icon placement behavior.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
