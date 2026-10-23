@@ -1,10 +1,7 @@
 name: Experimental Headless Hyprland
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/headless-hyprland.yml'
-      - 'tests/headless_hyprland.sh'
+  # Requires an intentionally selected runner with a functioning graphics
+  # backend. Generic GitHub Arch containers cannot initialize Aquamarine.
   workflow_dispatch:
 permissions:
   contents: read
@@ -13,7 +10,6 @@ jobs:
     name: Arch Hyprland native compositor QA (experimental)
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    continue-on-error: true
     container:
       image: archlinux:latest
     steps:
