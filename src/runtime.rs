@@ -193,7 +193,9 @@ impl SharedRuntime {
             .active().iter().find(|n|n.id==id)
             .ok_or("notification is not active")?.clone();
         let modes=self.modes.lock().map_err(|_|"mode state lock poisoned")?.clone();
-        let style=crate::desktop::style_for_note_index(self,&note,&modes,-1);
+        // reset_notification retains group_index for an explicit ID replacement.
+        // Source Mako resolves that index before regrouping its new payload.
+        let style=crate::desktop::style_for_note_index(self,&note,&modes,note.group_index);
         let spec=crate::grouping::GroupSpec::parse(
             style.get("group-by").map(String::as_str).unwrap_or("none")
         ).map_err(|_|"invalid group-by style")?;
@@ -219,7 +221,10 @@ impl SharedRuntime {
             output: observed_output.as_deref().unwrap_or(""),
             modes: &mode_views,
             requested_timeout_ms: note.requested_timeout_ms,
-            actionable: !note.actions.is_empty(), group_index: -1, hidden: false,
+            // Mako applies criteria to the preserved group-index on direct ID
+            // replacement, before running group_notifications. A newly
+            // created/tagged notification starts with group_index = -1.
+            actionable: !note.actions.is_empty(), group_index: note.group_index, hidden: false,
         };
         let style = config.style_for(&traits);
         let default_ms = style.get("default-timeout")
@@ -365,6 +370,75 @@ mod tests {
         assert!(runtime.expire(first + Duration::from_millis(2000)).unwrap().is_empty());
         assert_eq!(runtime.expire(second + Duration::from_millis(2000)).unwrap(), vec![id]);
         assert_eq!(runtime.store.lock().unwrap().history().len(), 1);
+    }
+
+    #[test]
+    fn direct_id_replacement_uses_preserved_group_index_for_initial_timeout() {
+        // Mako dbus/xdg.c resets the existing notification in place, keeping
+        // its index. apply_each_criteria evaluates that index before the
+        // next group_notifications call. A tagged replacement instead
+        // constructs a new object with group_index = -1.
+        let config=Config::parse(
+            "group-by=app-name\ndefault-timeout=0\n\
+             [group-index=1]\ndefault-timeout=240\n"
+        ).unwrap();
+        let runtime=SharedRuntime::new(config);
+        let now=Instant::now();
+        let old=runtime.store.lock().unwrap().push(Request {
+            app_name:"same-app".into(),..Request::default()
+        });
+        runtime.schedule(old,now).unwrap();
+        let newer=runtime.store.lock().unwrap().push(Request {
+            app_name:"same-app".into(),..Request::default()
+        });
+        runtime.schedule(newer,now).unwrap();
+        assert_eq!(runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==old).unwrap().group_index,1);
+        assert_eq!(runtime.next_deadline().unwrap(),None);
+
+        assert_eq!(runtime.store.lock().unwrap().push(Request {
+            replaces_id:old,app_name:"same-app".into(),
+            ..Request::default()
+        }),old);
+        let replaced=now+Duration::from_millis(20);
+        runtime.schedule(old,replaced).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(replaced+Duration::from_millis(240)),
+            "replaced group-index=1 must apply its indexed timeout");
+
+        // Even if regrouping changes the group after replacement, the timer
+        // established before regrouping retains the pre-grouping style.
+        assert!(runtime.expire(replaced+Duration::from_millis(239))
+            .unwrap().is_empty());
+        assert_eq!(runtime.expire(replaced+Duration::from_millis(240))
+            .unwrap(),vec![old]);
+    }
+
+    #[test]
+    fn tag_replacement_starts_ungrouped_when_selecting_timeout() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=app-name\ndefault-timeout=0\n\
+             [group-index=1]\ndefault-timeout=240\n"
+        ).unwrap());
+        let now=Instant::now();
+        let tagged=Request {
+            app_name:"tag-app".into(),tag:"job".into(),
+            ..Request::default()
+        };
+        let first=runtime.store.lock().unwrap().push(tagged.clone());
+        runtime.schedule(first,now).unwrap();
+        let second=runtime.store.lock().unwrap().push(Request {
+            app_name:"tag-app".into(),..Request::default()
+        });
+        runtime.schedule(second,now).unwrap();
+        assert_eq!(runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==first).unwrap().group_index,1);
+        assert_eq!(runtime.store.lock().unwrap().push(tagged),first);
+        assert_eq!(runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==first).unwrap().group_index,-1);
+        runtime.schedule(first,now+Duration::from_millis(10)).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),None,
+            "new stack-tag object must not inherit the replaced indexed timeout");
     }
 
     #[test]

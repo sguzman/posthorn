@@ -1078,6 +1078,40 @@ async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_d
 }
 
 #[tokio::test]
+async fn direct_id_replacement_preserves_pre_regroup_group_index_timeout_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // The daemon's private development bus is used exclusively here.
+    let config=Config::parse(
+        "group-by=app-name\ndefault-timeout=0\n\
+         [group-index=1]\ndefault-timeout=5000\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let options=HashMap::<String,OwnedValue>::new();
+    let first:u32=desktop.call("Notify",&(
+        "same-app",0u32,"","First","",Vec::<String>::new(),options.clone(),-1i32
+    )).await?;
+    let _:u32=desktop.call("Notify",&(
+        "same-app",0u32,"","Second","",Vec::<String>::new(),options.clone(),-1i32
+    )).await?;
+    assert_eq!(runtime.store.lock().unwrap().active()
+        .iter().find(|n|n.id==first).unwrap().group_index,1);
+    assert_eq!(runtime.next_deadline()?,None);
+    let replaced:u32=desktop.call("Notify",&(
+        "same-app",first,"","Replaced","",Vec::<String>::new(),options,-1i32
+    )).await?;
+    assert_eq!(replaced,first);
+    let deadline=runtime.next_deadline()?;
+    assert!(deadline.is_some(),
+        "Mako must arm [group-index=1] timeout before replacement regrouping");
+    let remaining=deadline.unwrap().saturating_duration_since(std::time::Instant::now());
+    assert!(remaining>Duration::from_secs(1)&&remaining<=Duration::from_secs(5),
+        "unexpected direct replacement timeout: {remaining:?}");
+    Ok(())
+}
+
+#[tokio::test]
 async fn id_and_tag_replacements_have_distinct_group_lifecycle_over_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
