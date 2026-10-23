@@ -878,6 +878,40 @@ mod tests {
     }
 
     #[test]
+    fn nested_include_precedence_and_criteria_remain_in_source_order(){
+        let dir=tempfile::tempdir().unwrap();
+        let root=dir.path().join("root.conf");
+        let first=dir.path().join("first.conf");
+        let second=dir.path().join("second.conf");
+        std::fs::write(&second,
+            "width=380\n[category=warning]\nbackground-color=#334455\n"
+        ).unwrap();
+        std::fs::write(&first,format!(
+            "include={}\nwidth=420\n[category=success]\nbackground-color=#111111\n",
+            second.display()
+        )).unwrap();
+        std::fs::write(&root,format!(
+            "width=310\ninclude={}\nwidth=460\n\
+             [category=success]\nbackground-color=#222222\n",
+            first.display()
+        )).unwrap();
+        let config=Config::from_path(&root).unwrap();
+        assert_eq!(config.global["width"],"460",
+            "outer root styles after include override included defaults");
+        assert_eq!(config.rules.len(),3,
+            "inlined nested criteria retain their original positions");
+        assert!(config.rules[0].source.starts_with(&second.display().to_string()));
+        assert!(config.rules[1].source.starts_with(&first.display().to_string()));
+        assert!(config.rules[2].source.starts_with(&root.display().to_string()));
+        let warn=config.style_for(&note("warning",&["default"]));
+        assert_eq!(warn["background-color"],"#334455");
+        assert_eq!(warn["width"],"460");
+        let success=config.style_for(&note("success",&["default"]));
+        assert_eq!(success["background-color"],"#222222",
+            "later outer criteria win over the same selector in included file");
+    }
+
+    #[test]
     fn mako_config_lookup_prefers_legacy_then_xdg_then_home_fallback() {
         let root=tempfile::tempdir().unwrap();
         let home=root.path().join("home");
