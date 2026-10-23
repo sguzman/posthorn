@@ -872,6 +872,33 @@ mod tests {
     }
 
     #[test]
+    fn file_url_with_non_utf8_linux_filename_renders_image() {
+        use std::os::unix::ffi::OsStringExt;
+        let dir=tempfile::tempdir().unwrap();
+        let source=dir.path().join("source.png");
+        let mut non_utf8=dir.path().to_path_buf();
+        non_utf8.push(std::ffi::OsString::from_vec(b"icon\xff.png".to_vec()));
+        let pixbuf=gdk_pixbuf::Pixbuf::new(
+            gdk_pixbuf::Colorspace::Rgb,true,8,12,12
+        ).unwrap();
+        pixbuf.fill(0xFF0000FF);
+        pixbuf.savev(&source,"png",&[]).unwrap();
+        std::fs::rename(&source,&non_utf8).unwrap();
+        let mut note=fixture();
+        note.app_icon=format!("file://{}/icon%FF.png",dir.path().display());
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","160"),("height","70"),("padding","4"),
+            ("border-size","0"),("icon-location","left"),
+            ("max-icon-size","16"),("background-color","#305747")
+        ] {style.insert(key.into(),value.into());}
+        let frame=render_notification(&note,&style).unwrap();
+        let at=(frame.height as usize/2)*frame.stride as usize+6*4;
+        assert_eq!(&frame.pixels[at..at+4],&[0,0,255,255],
+            "Mako file URL must load Linux filename bytes outside UTF-8");
+    }
+
+    #[test]
     fn icon_lookup_uses_maximum_monitor_scale_without_scaling_popup(){
         let dir=tempfile::tempdir().unwrap();
         for (name,rgba) in [
