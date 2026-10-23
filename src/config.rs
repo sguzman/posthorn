@@ -30,27 +30,54 @@ fn err(location: impl Into<String>, message: impl Into<String>) -> ConfigError {
     ConfigError { location: location.into(), message: message.into() }
 }
 
-/// glibc's POSIX REG_EXTENDED treats many escaped ASCII letters as
-/// literals. Rust regex instead gives them meanings (digit classes, hex/Unicode
-/// escapes and end-of-input anchors), or rejects them. Preserve the tested
-/// glibc spellings while retaining GNU POSIX extensions \\w, \\s, \\b.
-/// This is not a complete POSIX regex implementation.
+/// In glibc's POSIX REG_EXTENDED, escaped ASCII letters are literals
+/// except the GNU word/whitespace operators \b, \B, \w, \W, \s, \S.
+/// Within bracket expressions *all* escaped ASCII letters are literals.
+/// Rust regex assigns extra semantics to \A, \d, \x, \u, \z, etc. Apply
+/// the source-tested glibc rule before passing the expression to Rust regex.
+/// Other POSIX-versus-Rust regex differences remain an MVP parity gap.
 fn mako_posix_ere_escapes(pattern: &str) -> String {
     let mut normalized = String::with_capacity(pattern.len());
-    let mut chars = pattern.chars();
+    let mut chars = pattern.chars().peekable();
+    let mut in_class = false;
     while let Some(ch) = chars.next() {
-        if ch != '\\' {
-            normalized.push(ch);
-            continue;
-        }
-        match chars.next() {
-            Some(letter @ ('A' | 'd' | 'D' | 'x' | 'u' | 'z' | 'Q' | 'E' |
-                'p' | 'P' | 'v' | 'h' | 'H' | 'R' | 'C')) => normalized.push(letter),
-            Some(other) => {
-                normalized.push('\\');
-                normalized.push(other);
+        match ch {
+            '\\' => match chars.next() {
+                Some(letter) if letter.is_ascii_alphabetic() &&
+                    (in_class || !matches!(letter, 'b'|'B'|'w'|'W'|'s'|'S')) =>
+                        normalized.push(letter),
+                Some(other) => {
+                    normalized.push('\\');
+                    normalized.push(other);
+                }
+                None => normalized.push('\\'),
+            },
+            '[' if !in_class => {
+                in_class = true;
+                normalized.push(ch);
             }
-            None => normalized.push('\\'),
+            '[' if in_class => {
+                normalized.push(ch);
+                // POSIX [[:alpha:]], [[.ch.]] and [[=a=]] are nested
+                // bracket elements, not the end of the surrounding class.
+                if let Some(delimiter @ (':' | '.' | '=')) = chars.peek().copied() {
+                    chars.next();
+                    normalized.push(delimiter);
+                    let mut previous = '\0';
+                    for next in chars.by_ref() {
+                        normalized.push(next);
+                        if previous == delimiter && next == ']' {
+                            break;
+                        }
+                        previous = next;
+                    }
+                }
+            }
+            ']' if in_class => {
+                in_class = false;
+                normalized.push(ch);
+            }
+            _ => normalized.push(ch),
         }
     }
     normalized
@@ -815,6 +842,43 @@ mod tests {
         assert!(digit.matches(&fields));
         // Escaped backslashes represent literal backslashes, not an escape.
         assert_eq!(mako_posix_ere_escapes(r"\\x41"), r"\\x41");
+    }
+
+    #[test]
+    fn posix_ere_letter_escapes_are_literal_except_gnu_operators() {
+        let mut fields = note("normal", &["default"]);
+        for (pattern, yes, no) in [
+            (r"\n+", "nn", "\n"),
+            (r"\t+", "tt", "\t"),
+            (r"\Afoo", "Afoo", "foo"),
+            (r"\Zfoo", "Zfoo", "foo"),
+            (r"\d+", "ddd", "123"),
+            (r"\x41", "x41", "A"),
+            (r"\u0041", "u0041", "A"),
+            (r"[\w]+", "www", "123"),
+            (r"[\s]+", "sss", " "),
+            (r"[\b]+", "bbb", "abc"),
+            (r"[\d]+", "ddd", "123"),
+            (r"[[:digit:]\w]+", "www", "abc"),
+        ] {
+            let rule=Selector::new("summary~",pattern).unwrap();
+            fields.summary=yes;
+            assert!(rule.matches(&fields), "glibc {pattern} did not match {yes:?}");
+            fields.summary=no;
+            assert!(!rule.matches(&fields), "glibc {pattern} matched {no:?}");
+        }
+        // Outside classes glibc's GNU ERE shortcuts remain active.
+        for (pattern, yes, no) in [
+            (r"\w+", "alpha_1", "#"),
+            (r"\s+", "\t ", "alpha"),
+            (r"\bfoo\b", "foo!", "seafood"),
+        ] {
+            let rule=Selector::new("summary~",pattern).unwrap();
+            fields.summary=yes;
+            assert!(rule.matches(&fields), "{pattern} failed to match {yes:?}");
+            fields.summary=no;
+            assert!(!rule.matches(&fields), "{pattern} incorrectly matched {no:?}");
+        }
     }
 
     #[test]
