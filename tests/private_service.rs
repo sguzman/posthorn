@@ -1243,6 +1243,74 @@ async fn reload_rebuilds_live_grouping_and_preserves_timer_deadline()
 }
 
 #[tokio::test]
+async fn private_dbus_reload_defers_history_retention_pruning_until_new_close()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Pinned Mako v1.11 reloads max-history without walking existing
+    // history. The next close that archives an entry enforces the cap.
+    use posthorn::service::open_private_service_from_path;
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("config");
+    std::fs::write(&path,"max-history=3\n")?;
+    let (conn,_runtime)=open_private_service_from_path(&path).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    for num in 0..3 {
+        let id:u32=desktop.call("Notify",&(
+            "history-cap-fixture",0u32,"",format!("Before {num}"),"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        let options:HashMap<String,OwnedValue>=[
+            ("id".into(),OwnedValue::from(id))
+        ].into();
+        let _:()=control.call("DismissNotifications",&(options,)).await?;
+    }
+    let before:Vec<HashMap<String,OwnedValue>>=
+        control.call("ListHistory",&()).await?;
+    assert_eq!(before.len(),3);
+
+    std::fs::write(&path,"max-history=1\n")?;
+    let _:()=control.call("Reload",&()).await?;
+    let preserved:Vec<HashMap<String,OwnedValue>>=
+        control.call("ListHistory",&()).await?;
+    assert_eq!(preserved.len(),3,
+        "Reload must not prematurely prune the existing Mako history");
+
+    let id:u32=desktop.call("Notify",&(
+        "history-cap-fixture",0u32,"","After shrink","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let options:HashMap<String,OwnedValue>=[
+        ("id".into(),OwnedValue::from(id))
+    ].into();
+    let _:()=control.call("DismissNotifications",&(options,)).await?;
+    let shrunk:Vec<HashMap<String,OwnedValue>>=
+        control.call("ListHistory",&()).await?;
+    assert_eq!(shrunk.len(),1);
+    assert_eq!(u32::try_from(shrunk[0].get("id").ok_or("no history ID")?)?,id);
+
+    std::fs::write(&path,"max-history=0\n")?;
+    let _:()=control.call("Reload",&()).await?;
+    let remaining:Vec<HashMap<String,OwnedValue>>=
+        control.call("ListHistory",&()).await?;
+    assert_eq!(remaining.len(),1);
+    let later:u32=desktop.call("Notify",&(
+        "history-cap-fixture",0u32,"","Not archived","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let options:HashMap<String,OwnedValue>=[
+        ("id".into(),OwnedValue::from(later))
+    ].into();
+    let _:()=control.call("DismissNotifications",&(options,)).await?;
+    let still:Vec<HashMap<String,OwnedValue>>=
+        control.call("ListHistory",&()).await?;
+    assert_eq!(still.len(),1,
+        "max-history=0 must preserve old history and skip new archive");
+    assert_eq!(u32::try_from(still[0].get("id").ok_or("no history ID")?)?,id);
+    Ok(())
+}
+
+#[tokio::test]
 async fn reload_dbus_updates_active_history_without_rearming_expiry()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
