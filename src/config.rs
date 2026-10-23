@@ -757,7 +757,11 @@ mod tests {
             assert_eq!(config.max_history,0);
         }
         assert_eq!(Config::parse("max-history=7\n").unwrap().max_history,7);
-        assert!(Config::parse("max-history=2147483648\n").is_err());
+        assert_eq!(Config::parse("max-history=2147483648\n")
+            .unwrap().max_history,0,
+            "LP64 strtol accepts the number, then Mako narrows it to i32::MIN");
+        assert!(Config::parse("max-history=9223372036854775808\n").is_err(),
+            "true 64-bit strtol range overflow is rejected");
     }
 
     #[test]
