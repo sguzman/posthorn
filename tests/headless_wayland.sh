@@ -181,7 +181,7 @@ if [[ "$test_scale" == 1 ]]; then
   # A headless Sway seat initially has no pointer capability. Create a
   # temporary virtual device with the wlroots protocol; it advertises the
   # capability to Posthorn and then emits actual Wayland pointer events.
-  ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720
+  POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720
 else
   busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
     /org/freedesktop/Notifications org.freedesktop.Notifications CloseNotification \
