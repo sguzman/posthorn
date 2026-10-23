@@ -160,6 +160,27 @@ if [[ "$painted" != 1 ]]; then
   die 'real Hyprland screenshot never contained private popup color'
 fi
 
+# Reload must restyle the *existing* notification on the real compositor,
+# not just future ones. Only the disposable private QA configuration changes.
+sed -i 's/background-color=#193FA7/background-color=#307E47/' "$root/config"
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+restyled=0
+for _ in {1..25}; do
+  timeout --signal=TERM --kill-after=2s 5s grim "$root/reloaded.png" ||
+    die 'reloaded popup screenshot timed out'
+  if ./target/debug/examples/qa_png_probe \
+       "$root/reloaded.png" '#307E47' 500 increase "$root/baseline.png" >/dev/null 2>&1 &&
+     ./target/debug/examples/qa_png_probe \
+       "$root/reloaded.png" '#193FA7' 60 restored "$root/baseline.png" >/dev/null 2>&1; then
+    restyled=1
+    break
+  fi
+  sleep 0.15
+done
+[[ "$restyled" == 1 ]] ||
+  die 'private config reload did not repaint the existing popup on Hyprland'
+
 busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   org.posthorn.Development /org/freedesktop/Notifications \
   org.freedesktop.Notifications CloseNotification 'u' "$notification_id" >/dev/null
@@ -168,7 +189,7 @@ for _ in {1..25}; do
   timeout --signal=TERM --kill-after=2s 5s grim "$root/after-close.png" ||
     die 'closed popup screenshot timed out'
   if ./target/debug/examples/qa_png_probe \
-      "$root/after-close.png" '#193FA7' 60 restored "$root/baseline.png" >/dev/null 2>&1; then
+      "$root/after-close.png" '#307E47' 60 restored "$root/baseline.png" >/dev/null 2>&1; then
     removed=1
     break
   fi
@@ -179,4 +200,4 @@ listed_after="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListNotifications)"
 [[ "$listed_after" != *'Temporary QA popup'* ]] ||
   die 'closed notification remains active on the private control API'
-printf 'PASS: private Hyprland popup appeared and disappeared on screenshots and control bus\n'
+printf 'PASS: private Hyprland popup appeared, restyled, and disappeared on screenshots and control bus\n'
