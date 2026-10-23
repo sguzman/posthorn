@@ -483,6 +483,64 @@ busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   org.posthorn.Development /org/freedesktop/Notifications \
   org.freedesktop.Notifications CloseNotification 'u' "$output_probe_id" >/dev/null
 
+# After the compositor assigned HEADLESS-1, a new notification's
+# output-scoped timeout and history policy must be selected from that real
+# monitor. Its sender timeout is -1, so the category's short default wins.
+if [[ "$test_scale" == 1 ]]; then
+  cat >> "$root/mako.conf" <<'EOF'
+[category=output-policy output=HEADLESS-1]
+background-color=#9E6235
+default-timeout=1800
+history=0
+EOF
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn scoped-policy test' 0 '' 'Output-scoped expiry fixture' '' \
+    0 1 'category' 's' 'output-policy' -1)"
+  [[ "$result" == u\ * ]] || { echo 'Invalid output policy notification ID'; exit 1; }
+  policy_seen=0
+  for _ in {1..10}; do
+    sleep 0.1
+    grim "$root/output-policy-visible.png"
+    if /usr/bin/python3 - "$root/output-policy-visible.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+counts=Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if counts[(158,98,53)] >= 300 else 1)
+PY
+    then policy_seen=1; break; fi
+  done
+  [[ "$policy_seen" == 1 ]] || {
+    echo 'Output-scoped expiration policy popup never painted'
+    exit 1
+  }
+  sleep 1.8
+  policy_expired=0
+  for _ in {1..16}; do
+    sleep 0.15
+    grim "$root/output-policy-expired.png"
+    if /usr/bin/python3 - "$root/output-policy-expired.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+counts=Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if counts[(158,98,53)] < 100 else 1)
+PY
+    then policy_expired=1; break; fi
+  done
+  [[ "$policy_expired" == 1 ]] || { echo 'Output-scoped default timeout did not expire'; exit 1; }
+  policy_history="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListHistory)"
+  if [[ "$policy_history" == *'Output-scoped expiry fixture'* ]]; then
+    echo 'Output-scoped history=0 incorrectly preserved expired notification'
+    exit 1
+  fi
+fi
+
 # Exercise timer-driven expiry through the full private D-Bus / Wayland path.
 # Use a distinct warning color so visual removal can be distinguished from
 # ordinary notification closure in the compositor capture.
