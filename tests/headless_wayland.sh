@@ -238,7 +238,7 @@ if [[ "$test_scale" == 2 ]]; then
     org.freedesktop.Notifications Notify 'susssasa{sv}i' \
     'Posthorn HiDPI pointer fixture' 0 '' 'Right click at 2x' '' \
     0 1 'category' 's' 'warning' 30000)"
-  [[ "$result" == u\\ * ]] || { echo 'Invalid 2x action fixture ID'; exit 1; }
+  [[ "$result" == u\ * ]] || { echo 'Invalid 2x action fixture ID'; exit 1; }
   hidpi_appeared=0
   for _ in {1..20}; do
     sleep 0.1
