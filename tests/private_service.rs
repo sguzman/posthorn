@@ -1032,11 +1032,15 @@ async fn id_and_tag_replacements_have_distinct_group_lifecycle_over_dbus()
     )).await?;
     assert_eq!(runtime.store.lock().unwrap().active()
         .iter().find(|n|n.id==direct).unwrap().group_index,1);
+    let before_explicit=runtime.store.lock().unwrap().active_instance(direct)
+        .ok_or("missing initial direct Notify lifetime")?;
     let replaced:u32=desktop.call("Notify",&(
         "direct-app",direct,"","ID reset","",Vec::<String>::new(),
         ordinary.clone(),-1i32
     )).await?;
     assert_eq!(replaced,direct);
+    assert_ne!(runtime.store.lock().unwrap().active_instance(direct),
+        Some(before_explicit),"explicit D-Bus replacement must invalidate stale clicks");
     let direct_note=runtime.store.lock().unwrap().active()
         .iter().find(|n|n.id==direct).unwrap().clone();
     assert_eq!(direct_note.group_index,1,
@@ -1057,11 +1061,15 @@ async fn id_and_tag_replacements_have_distinct_group_lifecycle_over_dbus()
     )).await?;
     assert_eq!(runtime.store.lock().unwrap().active()
         .iter().find(|n|n.id==old).unwrap().group_index,1);
+    let before_tag=runtime.store.lock().unwrap().active_instance(old)
+        .ok_or("missing initial stack-tag lifetime")?;
     let tag_replacement:u32=desktop.call("Notify",&(
         "tag-app",0u32,"","New tag object","",Vec::<String>::new(),
         tagged,-1i32
     )).await?;
     assert_eq!(tag_replacement,old);
+    assert_ne!(runtime.store.lock().unwrap().active_instance(old),Some(before_tag),
+        "tag replacement through D-Bus must invalidate stale pointer events");
     let tag_note=runtime.store.lock().unwrap().active()
         .iter().find(|n|n.id==old).unwrap().clone();
     assert_eq!((tag_note.group_index,tag_note.group_count),(-1,1),
