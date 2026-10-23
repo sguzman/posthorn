@@ -985,25 +985,30 @@ mod tests {
             ("progress-color","source #FF0000FF"),
         ] {style.insert(key.into(),value.into());}
         let mut note=fixture();
-        for value in [1,33,49,66,99,100] {
-            note.progress=value;
-            for scale in [1u32,2] {
-                let frame=render_notification_group_scaled(&note,&style,0,scale).unwrap();
-                let logical_filled=101*(value as usize)/100;
-                let y=(frame.height as usize).saturating_sub(3*scale as usize);
-                let color_at=|physical_x:usize| {
-                    let start=y*(frame.stride as usize)+physical_x*4;
-                    frame.pixels[start..start+4].to_vec()
-                };
-                if logical_filled>0 {
-                    assert_eq!(color_at(logical_filled*scale as usize-1),
-                        [0,0,255,255],
-                        "last filled pixel must remain solid at {value}% and {scale}x");
-                }
-                if logical_filled<101 {
-                    assert_eq!(color_at(logical_filled*scale as usize),
-                        [255,0,0,255],
-                        "first unfilled pixel must have no fractional Cairo blend at {value}% and {scale}x");
+        for border in [0usize,2] {
+            style.insert("border-size".into(),border.to_string());
+            let inner_width=101-2*border;
+            for value in [1,33,49,66,99,100] {
+                note.progress=value;
+                for scale in [1u32,2] {
+                    let factor=scale as usize;
+                    let frame=render_notification_group_scaled(&note,&style,0,scale).unwrap();
+                    let logical_filled=inner_width*(value as usize)/100;
+                    let y=(frame.height as usize).saturating_sub((border+3)*factor);
+                    let color_at=|physical_x:usize| {
+                        let start=y*(frame.stride as usize)+physical_x*4;
+                        frame.pixels[start..start+4].to_vec()
+                    };
+                    if logical_filled>0 {
+                        assert_eq!(color_at((border+logical_filled)*factor-1),
+                            [0,0,255,255],
+                            "last fill pixel not solid at {value}% border={border} {scale}x");
+                    }
+                    if logical_filled<inner_width {
+                        assert_eq!(color_at((border+logical_filled)*factor),
+                            [255,0,0,255],
+                            "unexpected antialiasing at {value}% border={border} {scale}x");
+                    }
                 }
             }
         }
