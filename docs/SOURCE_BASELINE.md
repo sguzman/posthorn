@@ -269,6 +269,31 @@ Both CI jobs passed at
 These are isolated renderer and protocol tests, **not** proof of
 complete live Hyprland presentation, interaction or cutover parity.
 
+## Overlapping mouse hotspots and 24.8-bit Wayland input coordinates
+
+Pinned Mako v1.11 `wayland.c:pointer_handle_button` and
+`wayland.c:touch_handle_up` iterate the active notification list,
+selecting the **first full rectangular hotspot match**. Posthorn
+previously stopped on a Y-axis match even when X missed a narrow
+topmost notification. It now continues to the next hotspot, allowing
+a wider overlapping notification underneath to receive the click.
+A unit test verifies both the fallback target and first-match
+precedence; a private D-Bus test sends two differently sized
+overlapping notifications, dispatches the click, and checks that
+only the intended underlying notification enters history.
+
+Mako converts Wayland's 24.8 fixed-point coordinates via
+`wl_fixed_to_int` on pointer enter/motion and touch down/motion.
+The underlying `wayland-util.h` operation is `f / 256`, i.e.
+integer truncation toward zero even for negative fractions.
+Posthorn now quantizes incoming Wayland coordinates identically,
+with positive and negative boundary tests. Full Rust/private D-Bus
+and headless Wayland CI passed at
+[commit 701e3a0](https://github.com/sguzman/posthorn/actions/runs/39988108025).
+
+These tests do **not** replace compositor-originated Hyprland
+pointer, touch, or XDG activation acceptance; those remain open.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
