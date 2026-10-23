@@ -59,6 +59,27 @@ async fn accepts_notify_then_exposes_control_list_and_history() -> Result<(), Bo
 }
 
 #[tokio::test]
+async fn private_service_does_not_queue_behind_an_unrelated_owner()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::{open_private_service,PRIVATE_BUS_NAME};
+    // Simulate another application holding the private development name.
+    // The service must neither replace that owner nor join its queue.
+    let owner=connection::Builder::session()?
+        .name(PRIVATE_BUS_NAME)?
+        .build().await?;
+    let owner_name=owner.unique_name().ok_or("owner has no unique name")?.to_string();
+    let dbus=zbus::fdo::DBusProxy::new(&owner).await?;
+    let attempt=tokio::time::timeout(std::time::Duration::from_secs(2),
+        open_private_service(Config::default())).await
+        .expect("Posthorn blocked on a name already held by another process");
+    assert!(matches!(attempt,Err(zbus::Error::NameTaken)));
+    assert_eq!(dbus.get_name_owner(PRIVATE_BUS_NAME.try_into()?).await?.as_str(),
+        owner_name,"Posthorn must not replace an unrelated D-Bus owner");
+    Ok(())
+}
+
+#[tokio::test]
 async fn standard_name_collision_fails_without_queueing_or_replacing_owner()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
