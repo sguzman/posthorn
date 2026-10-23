@@ -845,6 +845,33 @@ mod tests {
     }
 
     #[test]
+    fn file_url_relative_icon_path_renders_sender_provided_image() {
+        // CI runs this in a scratch test checkout. Materializing the
+        // fixture below cwd avoids mutating any user's Mako icon theme.
+        let cwd=std::env::current_dir().unwrap();
+        let dir=tempfile::tempdir_in(&cwd).unwrap();
+        let file=dir.path().join("relative-fixture.png");
+        let pixbuf=gdk_pixbuf::Pixbuf::new(
+            gdk_pixbuf::Colorspace::Rgb,true,8,12,12
+        ).unwrap();
+        pixbuf.fill(0xFF0000FF);
+        pixbuf.savev(&file,"png",&[]).unwrap();
+        let relative=file.strip_prefix(&cwd).unwrap();
+        let mut note=fixture();
+        note.app_icon=format!("file://{}",relative.display());
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","160"),("height","70"),("padding","4"),
+            ("border-size","0"),("icon-location","left"),
+            ("max-icon-size","16"),("background-color","#305747")
+        ] {style.insert(key.into(),value.into());}
+        let frame=render_notification(&note,&style).unwrap();
+        let at=(frame.height as usize/2)*frame.stride as usize+6*4;
+        assert_eq!(&frame.pixels[at..at+4],&[0,0,255,255],
+            "relative file:// URLs must render actual pixels like Mako");
+    }
+
+    #[test]
     fn icon_lookup_uses_maximum_monitor_scale_without_scaling_popup(){
         let dir=tempfile::tempdir().unwrap();
         for (name,rgba) in [
