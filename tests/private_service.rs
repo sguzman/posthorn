@@ -615,6 +615,53 @@ async fn action_dictionary_wire_conversion_has_deterministic_keys()
 }
 
 #[tokio::test]
+async fn overlapping_different_width_hotspots_dispatch_to_lower_dbus_notification()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::desktop::{visible_members_indexed,style_for_note_index};
+    use posthorn::input::{dispatch_click,hit_test};
+    use posthorn::wayland::PointerClick;
+    let cfg=Config::parse(
+        "width=160\nheight=90\nmargin=0,0,-20,0\n         on-button-right=dismiss\n         [category=top]\nwidth=80\n         [category=lower]\nmargin=-20,0,0,0\n"
+    )?;
+    let (conn,runtime)=open_private_service(cfg).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let send=|category:&str|{
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from(category)).unwrap()
+        )].into();
+        (
+            "overlap-click-fixture",0u32,"",category,"",
+            Vec::<String>::new(),hints,-1i32
+        )
+    };
+    let lower:u32=desktop.call("Notify",&send("lower")).await?;
+    let upper:u32=desktop.call("Notify",&send("top")).await?;
+    let members=visible_members_indexed(&runtime)?;
+    assert_eq!(members[0].notification.id,upper);
+    let style=style_for_note_index(
+        &runtime,&members[0].notification,&["default".to_owned()],
+        members[0].group_index
+    );
+    let height=posthorn::render::measure_notification_height_group(
+        &members[0].notification,&style,0
+    )?;
+    let click=PointerClick{x:20.0,y:f64::from(height)-10.0,button:273,serial:29};
+    assert_eq!(hit_test(&runtime,click)?.map(|(id,_)|id),Some(lower),
+        "wider lower popup must remain hittable outside narrow top X hotspot");
+    dispatch_click(&conn,&runtime,click).await?;
+    let active:Vec<HashMap<String,OwnedValue>>=ctl.call("ListNotifications",&()).await?;
+    assert_eq!(active.len(),1);
+    assert_eq!(u32::try_from(active[0].get("id").unwrap())?,upper);
+    let history:Vec<HashMap<String,OwnedValue>>=ctl.call("ListHistory",&()).await?;
+    assert_eq!(history.len(),1);
+    assert_eq!(u32::try_from(history[0].get("id").unwrap())?,lower);
+    Ok(())
+}
+
+#[tokio::test]
 async fn pointer_button_bindings_dispatch_through_private_desktop_bus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
