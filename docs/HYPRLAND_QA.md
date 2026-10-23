@@ -57,12 +57,20 @@ Sway Wayland backend (rather than requiring a GPU passed through the
 container) and then checks a private D-Bus notification's appearance
 and dismissal via real compositor screenshots.
 
-This experiment is **nonblocking** and deliberately runs only when its
-workflow or test script changes, or through explicit workflow dispatch.
-Until its specific `Private D-Bus notification lifecycle` step passes,
-the overall GitHub workflow conclusion is **not acceptance evidence**:
-`continue-on-error` can leave a green workflow wrapper around a failed
-experimental job.
+This experiment is **not a required main CI gate** and is now triggered
+**only by explicit workflow dispatch**. Early isolated Arch/GitHub container
+runs compiled Posthorn and installed Hyprland, but Hyprland could not
+initialize its Aquamarine backend (`CBackend::create() failed`).
+Neither a shorter IPC path nor a software-rendered nested Sway host
+resolved that container graphics limitation. This is **not** a failed
+Posthorn compositor test, because the Hyprland Wayland socket never
+became available.
+
+The experimental workflow no longer suppresses failures with
+`continue-on-error`. When explicitly dispatched on a suitable
+graphics-capable runner, only a completed **successful native compositor
+lifecycle step** may become acceptance evidence. A green ordinary Rust/Sway
+workflow does not imply that this step passed.
 
 Hyprland 0.55+ uses
 [Lua configuration](https://wiki.hypr.land/Configuring/Start/);
