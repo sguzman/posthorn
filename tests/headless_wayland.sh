@@ -171,19 +171,22 @@ assert top_rows["warning"] < top_rows["failure"] < top_rows["success"], (
     f"Mako newest-first stack order changed: {top_rows}"
 )
 PY
-# At 1x, use a compositor-originated pointer button event rather than a
-# synthetic Rust hit-test or D-Bus CloseNotification. The nested Sway seat
-# moves to the newest right-aligned warning popup (width=300, margin=8) and
-# sends BTN_RIGHT through wl_pointer. This NEVER touches the user's seat.
-# Other scales retain the existing D-Bus repaint check; at fractional scale
-# screenshot pixels do not correspond directly to seat logical coordinates.
-if [[ "$test_scale" == 1 ]]; then
+# Exercise compositor-originated right-click dismissal at 1× and 1.25×.
+# The virtual pointer uses logical output coordinates (native mode/scale),
+# not physical PNG pixel positions; it never touches the user's input seat.
+# The 2× smoke retains independent D-Bus close/repaint coverage.
+if [[ "$test_scale" == 1 || "$test_scale" == 1.25 ]]; then
   ipc_socket="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'sway-ipc.*.sock' -print -quit)"
   [[ -S "$ipc_socket" ]] || { echo "Could not find isolated Sway IPC socket"; exit 1; }
-  # A headless Sway seat initially has no pointer capability. Create a
-  # temporary virtual device with the wlroots protocol; it advertises the
-  # capability to Posthorn and then emits actual Wayland pointer events.
-  POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720
+  if [[ "$test_scale" == 1 ]]; then
+    click_x=1100; logical_width=1280; logical_height=720
+  else
+    click_x=1350; logical_width=1536; logical_height=864
+  fi
+  # Sway starts without any physical pointer. Register a temporary wlroots
+  # virtual device, then deliver actual wl_pointer enter/press/release events.
+  POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer \
+    "$click_x" 25 "$logical_width" "$logical_height"
 else
   busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
     /org/freedesktop/Notifications org.freedesktop.Notifications CloseNotification \
