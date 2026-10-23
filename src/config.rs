@@ -56,6 +56,39 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
     normalized
 }
 
+/// POSIX REG_EXTENDED rejects constructs beginning with unescaped "(?".
+/// Rust regex accepts inline flags and non-capturing/lookaround-style groups.
+/// A bare "(?" inside a bracket expression or an escaped "(" is not a group.
+/// POSIX collating/equivalence/character-class elements may contain brackets.
+fn has_rust_only_group_extension(pattern: &str) -> bool {
+    let mut chars = pattern.chars().peekable();
+    let mut in_class = false;
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                chars.next();
+            }
+            '[' if !in_class => in_class = true,
+            '[' if in_class => {
+                if let Some(delimiter @ (':' | '.' | '=')) = chars.peek().copied() {
+                    chars.next();
+                    let mut previous = '\0';
+                    for next in chars.by_ref() {
+                        if previous == delimiter && next == ']' {
+                            break;
+                        }
+                        previous = next;
+                    }
+                }
+            }
+            ']' if in_class => in_class = false,
+            '(' if !in_class && chars.peek() == Some(&'?') => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 #[derive(Clone, Debug)]
 pub struct Selector {
     pub key: String,
@@ -77,6 +110,9 @@ impl Selector {
             // Mako uses POSIX REG_EXTENDED|REG_NOSUB without REG_NEWLINE.
             // Unlike Rust regex's default, POSIX '.' matches a newline in
             // that mode. Dot-all must NOT also enable multiline anchors.
+            if has_rust_only_group_extension(value) {
+                return Err("POSIX ERE does not support (? group extensions".into());
+            }
             let pattern = mako_posix_ere_escapes(value);
             Some(Regex::new(&format!("(?s:{pattern})"))
                 .map_err(|e| format!("invalid regex: {e}"))?)
@@ -778,6 +814,24 @@ mod tests {
         assert!(digit.matches(&fields));
         // Escaped backslashes represent literal backslashes, not an escape.
         assert_eq!(mako_posix_ere_escapes(r"\\x41"), r"\\x41");
+    }
+
+    #[test]
+    fn posix_ere_rejects_rust_only_inline_groups_outside_character_classes() {
+        for invalid in ["(?i)hello", "(?:hello)", "(?P<word>hello)", "a(?s:.)"] {
+            assert!(has_rust_only_group_extension(invalid));
+            assert!(Selector::new("summary~",invalid).is_err(),
+                "glibc regcomp rejects {invalid:?}");
+        }
+        assert!(Config::parse("[summary~=(?i)hello]\nwidth=440\n").is_err());
+        for legal in ["[(?]", r"\(?i)", "[(?]a", r"abc\(?",
+            "[[:digit:](?i)]"] {
+            assert!(!has_rust_only_group_extension(legal),
+                "group detection cannot reject literal {legal:?}");
+        }
+        assert!(!has_rust_only_group_extension("[[:digit:]]"));
+        assert!(has_rust_only_group_extension("[[:digit:]](?i)"));
+        assert!(Selector::new("summary~","[(?]").is_ok());
     }
 
     #[test]
