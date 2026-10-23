@@ -1,7 +1,8 @@
 //! Explicitly opt-in **headless** D-Bus daemon test harness.
 //!
-//! This deliberately takes org.posthorn.Development, never
-//! org.freedesktop.Notifications, so it cannot replace Mako by accident.
+//! Normal invocations take only org.posthorn.Development, never
+//! org.freedesktop.Notifications. The latter is exercised solely by the
+//! explicitly called CI helper under an isolated dbus-run-session.
 //! Display integration and final compositor behavior remain future MVP work.
 
 use std::path::Path;

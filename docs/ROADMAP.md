@@ -5,7 +5,7 @@ Progress is the average of documented atomic task percentages. A task at 100%
 requires acceptance evidence; partial work stays below 100%. Future ideas
 do not count toward Mako MVP. No runtime parity is claimed yet.
 
-## 📯 M0 — Mako parity and MVP inauguration — `█████████░ 85%`
+## 📯 M0 — Mako parity and MVP inauguration — `█████████░ 86%`
 **Acceptance gate:** Full upstream parity + Hyprland end-to-end QA
 
 ### 🧭 P0 — Source baseline and safeguards — `██████████ 99%`
@@ -31,11 +31,11 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `██████████ 98%`
 - 🔤 T205 — Pango markup/escaping, format specifiers and actions — `████████░░ 82%`
 
-### 🚌 P3 — D-Bus protocol and control surface — `█████████░ 88%`
+### 🚌 P3 — D-Bus protocol and control surface — `█████████░ 89%`
 
 - 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `██████████ 97%`
 - 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `██████████ 97%`
-- 🔄 T303 — Correct startup, bus ownership and config reload behavior — `███████░░░ 69%`
+- 🔄 T303 — Correct startup, bus ownership and config reload behavior — `███████░░░ 74%`
 
 ### 🪟 P4 — Wayland protocol and rendering — `█████████░ 90%`
 

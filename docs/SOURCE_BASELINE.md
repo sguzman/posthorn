@@ -123,6 +123,25 @@ The regression suite passed both CI jobs at
 These findings do not close remaining POSIX grammar, properties, or
 real Hyprland parity gates.
 
+## Fail-fast D-Bus name acquisition
+
+Upstream Mako v1.11 registers its interfaces in `dbus/dbus.c` before
+requesting `org.freedesktop.Notifications` with `sd_bus_request_name(..., 0)`.
+Posthorn now builds both notification and control objects, installs its
+ordered `Properties.Get`/`GetAll` serializer, and only then requests
+its selected well-known name with `RequestNameFlags::DoNotQueue`.
+Default queued-name behavior is prohibited: an already-owned bus name
+returns `NameTaken` immediately and does not replace the current owner.
+
+On an isolated `dbus-run-session`, integration tests exercise simultaneous
+standard-name requests from two Posthorn instances and collisions against
+an unrelated owner of `org.posthorn.Development`. They verify that the
+original owner remains unchanged and that the second service fails instead
+of joining the name queue. Both Rust/private D-Bus and headless Wayland CI
+passed at [commit 614055e](https://github.com/sguzman/posthorn/actions/runs/39955644267).
+No workstation session bus, Mako service, or user configuration was touched.
+These startup safeguards do **not** authorize production name acquisition;
+that still requires the explicit reversible MVP inauguration gate.
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
