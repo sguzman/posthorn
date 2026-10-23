@@ -6,7 +6,7 @@
 
 use pangocairo::{cairo, pango};
 use crate::config::Options;
-use crate::format::{decode_format, escape_markup, render_notification_format, FormatNotification};
+use crate::format::{decode_format, render_notification_format, FormatNotification};
 use crate::notification::Notification;
 use crate::raster::{Color,ProgressBlend,parse_progress_color_mako};
 use crate::icons::{IconPixels,load_note_icon,load_note_icon_scaled};
@@ -38,6 +38,17 @@ fn validated_leading_whitespace_width_and_border_size_reach_renderer(){
 fn color_option(style: &Options, key: &str, fallback: &str) -> Result<Color, String> {
     Color::parse_mako(style.get(key).map(String::as_str).unwrap_or(fallback))
         .map_err(|e| format!("{key}: {e}"))
+}
+
+/// Mako's render_notification() falls back to pango_layout_set_text()
+/// on malformed *final* template markup. It does not discard the template
+/// and reconstruct summary/body. Keep measurement and painting identical.
+fn set_mako_formatted_text(layout:&pango::Layout,rendered:&str){
+    if pango::parse_markup(rendered,'\0').is_ok(){
+        layout.set_markup(rendered);
+    }else{
+        layout.set_text(rendered);
+    }
 }
 
 fn set_color(cr: &cairo::Context, c: Color) {
@@ -201,11 +212,6 @@ fn measure_height_with_icon(
     let text=render_notification_format(&decoded,&FormatNotification{
         id:note.id,app_name:&note.app_name,summary:&note.summary,body:&note.body,group_count,
     },markup&&pango::parse_markup(&note.body,'\0').is_ok());
-    let safe=if pango::parse_markup(&text,'\0').is_ok(){
-        text
-    }else{
-        escape_markup(&format!("{}\\n{}",note.summary,note.body))
-    };
     let dummy=cairo::ImageSurface::create(cairo::Format::ARgb32,1,1)
         .map_err(|e|e.to_string())?;
     let context=cairo::Context::new(&dummy).map_err(|e|e.to_string())?;
@@ -217,7 +223,7 @@ fn measure_height_with_icon(
     layout.set_height((text_height as i32).saturating_mul(pango::SCALE));
     layout.set_wrap(pango::WrapMode::WordChar);
     layout.set_ellipsize(pango::EllipsizeMode::End);
-    layout.set_markup(&safe);
+    set_mako_formatted_text(&layout,&text);
     let measured=if layout.character_count()>0{
         layout.pixel_size().1.max(0) as u32
     }else{0};
@@ -345,13 +351,8 @@ pub fn render_notification_group_with_icon_scale(
         id: note.id, app_name: &note.app_name, summary: &note.summary,
         body: &note.body, group_count,
     }, body_is_valid_markup);
-    // If the configured template is malformed, escape *everything* instead of
-    // interpreting unintended markup from a remote notification sender.
-    let safe_markup = if pango::parse_markup(&rendered, '\0').is_ok() {
-        rendered
-    } else {
-        escape_markup(&format!("{}\\n{}", note.summary, note.body))
-    };
+    // Upstream treats invalid final markup as literal *formatted* text,
+    // preserving template prefixes, suffixes and field substitutions.
 
     let interior_w=(f64::from(width)-2.0*border-left-right).max(1.0);
     let interior_h=(f64::from(height)-2.0*border-top-bottom).max(1.0);
@@ -413,7 +414,7 @@ pub fn render_notification_group_with_icon_scale(
         Some("right")=>layout.set_alignment(pango::Alignment::Right),
         _=>layout.set_alignment(pango::Alignment::Left),
     }
-    layout.set_markup(&safe_markup);
+    set_mako_formatted_text(&layout,&rendered);
     pangocairo::functions::show_layout(&context, &layout);
     drop(layout);
     drop(context);
@@ -1076,6 +1077,34 @@ mod tests {
         assert_eq!(&pixels.pixels[bg..bg+4], &[0x47,0x57,0x30,0xff]);
         assert_eq!(&pixels.pixels[0..4], &[0xff,0xff,0xff,0xff]);
         assert!(pixels.pixels.chunks_exact(4).any(|p| p[3] > 0 && p[0] != 0x47 && p[0] != 0xff));
+    }
+
+    #[test]
+    fn malformed_final_markup_preserves_formatted_template_as_plain_text(){
+        let dummy=cairo::ImageSurface::create(cairo::Format::ARgb32,1,1).unwrap();
+        let cr=cairo::Context::new(&dummy).unwrap();
+        let layout=pangocairo::functions::create_layout(&cr);
+        set_mako_formatted_text(&layout,"<b>Alert: First</b>");
+        assert_eq!(layout.text().as_str(),"Alert: First");
+        set_mako_formatted_text(&layout,"<b>Alert: First");
+        assert_eq!(layout.text().as_str(),"<b>Alert: First",
+            "Mako leaves the final malformed template visible literally");
+
+        let mut note=fixture();
+        note.summary="First".into();
+        note.body="Second".into();
+        let mut style=Options::new();
+        style.insert("format".into(),"<b>Alert: %s".into());
+        let decoded=decode_format(&style["format"]).unwrap();
+        let text=render_notification_format(&decoded,&FormatNotification{
+            id:note.id,app_name:&note.app_name,summary:&note.summary,
+            body:&note.body,group_count:0,
+        },false);
+        assert_eq!(text,"<b>Alert: First");
+        set_mako_formatted_text(&layout,&text);
+        assert_eq!(layout.text().as_str(),text);
+        assert!(measure_notification_height(&note,&style).is_ok());
+        assert!(render_notification(&note,&style).is_ok());
     }
 
     #[test]
