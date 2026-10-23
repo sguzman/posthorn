@@ -499,6 +499,35 @@ async fn posthornctl_menu_uses_mako_sender_reversed_action_order()
 }
 
 #[tokio::test]
+async fn menu_selects_valid_first_line_even_with_non_utf8_trailing_stdout()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use futures_util::StreamExt;
+    use posthorn::ctl::{execute,Command};
+    let (conn,_runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let mut signals=desktop.receive_all_signals().await?;
+    let id:u32=desktop.call("Notify",&(
+        "menu-utf8",0u32,"","Menu output","",
+        vec!["confirm".to_owned(),"Open".to_owned()],
+        HashMap::<String,OwnedValue>::new(),-1i32,
+    )).await?;
+    execute(Command::Menu {
+        id,
+        program:vec![
+            "sh".into(),"-c".into(),"printf 'Open\\n\\377\\n'".into()
+        ],
+    }).await?;
+    let message=tokio::time::timeout(std::time::Duration::from_secs(3),
+        signals.next()).await?.ok_or("expected ActionInvoked signal")?;
+    assert_eq!(message.header().member().unwrap().as_str(),"ActionInvoked");
+    let invoked:(u32,String)=message.body().deserialize()?;
+    assert_eq!(invoked,(id,"confirm".to_owned()),
+        "makoctl getline must ignore non-UTF8 bytes after the first line");
+    Ok(())
+}
+
+#[tokio::test]
 async fn action_dictionary_wire_conversion_has_deterministic_keys()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
