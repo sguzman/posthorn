@@ -105,23 +105,38 @@ fn icon_files(dir:&Path,name:&str)->Vec<PathBuf>{
 /// directory and falls back to the second only when the first is unsized.
 /// Its @scale suffix is read from that SAME directory component, not from
 /// any later component that happens to contain an '@'.
-fn nominal_size(component:&str)->Option<u32>{
-    // C strtol(base 10) accepts initial whitespace, a single + and a
-    // decimal prefix followed by nonnumeric suffixes such as "x64".
+fn signed_size_prefix(component:&str)->Option<i32>{
+    // Upstream uses (int32_t)strtol(component, NULL, 10). A completely
+    // nonnumeric component is zero, but a NEGATIVE nonzero first component
+    // still prevents fallback to the second directory. strtol itself
+    // parses a signed 64-bit prefix and then narrows to int32 on Linux.
     let text=component.trim_start_matches([' ','\t','\n','\r','\x0b','\x0c']);
-    let text=text.strip_prefix('+').unwrap_or(text);
-    let digits:String=text.chars().take_while(char::is_ascii_digit).collect();
-    let size=digits.parse::<u32>().ok()?;
-    (size>0).then_some(size)
+    let (negative,rest)=if let Some(x)=text.strip_prefix('-'){(true,x)}
+        else{(false,text.strip_prefix('+').unwrap_or(text))};
+    let digits:String=rest.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty(){return Some(0);}
+    let unsigned=digits.parse::<u64>().ok()?;
+    let wide=if negative{
+        if unsigned==(1u64<<63){i64::MIN}
+        else if unsigned<=i64::MAX as u64{-(unsigned as i64)}
+        else{return None;}
+    }else{
+        i64::try_from(unsigned).ok()?
+    };
+    Some(wide as i32)
 }
 fn theme_icon_size(first:&str,second:&str)->Option<(u32,u32)>{
-    let (nominal,component)=if let Some(size)=nominal_size(first){
-        (size,first)
-    }else{
-        (nominal_size(second)?,second)
+    let from_first=signed_size_prefix(first);
+    let (signed,component)=match from_first{
+        Some(0)|None=>(signed_size_prefix(second)?,second),
+        Some(size)=>(size,first),
     };
+    let nominal=u32::try_from(signed).ok().filter(|size|*size>0)?;
     let scale=component.split_once('@')
-        .map(|(_,suffix)|nominal_size(suffix).unwrap_or(0)).unwrap_or(1);
+        .and_then(|(_,suffix)|signed_size_prefix(suffix))
+        .and_then(|size|u32::try_from(size).ok())
+        .unwrap_or(0);
+    let scale=if component.contains('@'){scale}else{1};
     Some((nominal,scale))
 }
 
@@ -375,6 +390,33 @@ mod tests {
         assert_eq!(theme_icon_size("64x64@garbage","apps"),Some((64,0)));
         assert_eq!(theme_icon_size("64x64@+2stuff","apps"),Some((64,2)));
         assert_eq!(theme_icon_size("apps","+64x64@2"),Some((64,2)));
+    }
+
+    #[test]
+    fn signed_mako_icon_directory_sizes_do_not_fall_back_from_negatives(){
+        assert_eq!(signed_size_prefix("64x64"),Some(64));
+        assert_eq!(signed_size_prefix(" -64x64"),Some(-64));
+        assert_eq!(signed_size_prefix("+64x64"),Some(64));
+        assert_eq!(signed_size_prefix("apps"),Some(0));
+        assert_eq!(signed_size_prefix("4294967360x64"),Some(64),
+            "Mako narrows its 64-bit strtol result to a 32-bit icon size");
+        assert_eq!(signed_size_prefix("9223372036854775808x64"),None,
+            "strtol reports overflow rather than narrowing");
+        assert_eq!(theme_icon_size("-1","64x64"),None,
+            "a nonzero signed first-directory size prevents fallback");
+        assert_eq!(theme_icon_size("apps","64x64"),Some((64,1)));
+        assert_eq!(theme_icon_size("4294967360","apps"),Some((64,1)));
+    }
+
+    #[test]
+    fn negative_first_directory_does_not_claim_a_valid_second_size(){
+        let root=tempfile::tempdir().unwrap();
+        let bad=root.path().join("-1/64x64/posthorn.png");
+        std::fs::create_dir_all(bad.parent().unwrap()).unwrap();
+        std::fs::write(&bad,b"fixture").unwrap();
+        // The first component is negative, not zero; Mako skips this
+        // candidate rather than examining the second 64x64 component.
+        assert_eq!(resolve_icon("posthorn",root.path().to_str().unwrap(),64),None);
     }
 
     #[test]
