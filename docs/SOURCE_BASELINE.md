@@ -494,13 +494,32 @@ and all headless Sway output scales passed at
 Real Hyprland monitor reassignment, multiple independent notification
 surfaces, and complete output-sensitive grouping behavior remain open.
 
+## Touch contact state and notification lifetime safety
+
+The pinned Mako v1.11 `include/wayland.h` tracks at most ten
+touchpoints (IDs 0–9). Posthorn's private Wayland state now bounds
+its contact map to those IDs, quantizes incoming coordinates at the
+same `wl_fixed_to_int` event boundary, tracks independent fingers
+through motion and release, ignores unknown releases, and clears
+outstanding contacts on cancel or layer-surface replacement. Pure
+Wayland-state regressions cover motion, distinct up serials, invalid
+IDs, and non-dispatch after cancellation. These changes and the
+private D-Bus tests for explicit-ID and app-scoped tag replacement
+passed both CI jobs at
+[commit 2a24da7](https://github.com/sguzman/posthorn/actions/runs/40013499836).
+
+A touch test that calls the state transition functions is **not** a
+real `wl_touch` event delivered by Sway or Hyprland: the headless
+wlroots virtual-pointer protocol is pointer-only. Real compositor
+touch delivery and physical Hyprland acceptance remain MVP gates.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
 It is not the workstation's default desktop notification service. The private desktop path
 renders and updates stacked Wayland popups, with basic mouse/touch bindings,
 with layer-shell configure/SHM attachment and success, failure, and warning screenshot colors, newest-first stacking, right-anchor placement, post-CloseNotification popup removal, timed expiry/repaint under isolated 1x/2x headless Sway, and dynamically added/removed named output recovery under isolated 1x Sway; it has not been visually exercised under Hyprland. Exact Mako Pango metrics,
-replacement-time grouping edge cases, live Hyprland monitor hotplug, fractional-scale behavior, compositor-driven XDG activation and touch QA,
+replacement-time grouping edge cases, live Hyprland monitor hotplug, exact fractional-buffer behavior, real Hyprland activation/focus and touch QA,
 complete mode/reload regrouping semantics and control formatting remain. Existing active timeout deadlines are preserved across reloads, as in the pinned Mako source.
 Current parsing is a subset; remaining POSIX vs Rust regex differences and many style options
 still need parity tests. The
