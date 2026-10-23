@@ -955,6 +955,24 @@ EOF
   busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
     org.posthorn.Development /org/freedesktop/Notifications \
     org.freedesktop.Notifications CloseNotification 'u' "$audible_id" >/dev/null
+  # Restoring history is not a new sender Notify and must not repeat the
+  # configured sound hook. Exercise this through the real control interface.
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako RestoreNotification >/dev/null
+  restored="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListNotifications)"
+  [[ "$restored" == *'Configured hook executed'* ]] || {
+    echo 'Sound-hook fixture was not restored through private history control'
+    exit 1
+  }
+  sleep 0.25
+  [[ "$(cat "$root/qa-hook.log")" == "$audible_id" ]] || {
+    echo 'History restore incorrectly replayed the configured sound hook'
+    exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications CloseNotification 'u' "$audible_id" >/dev/null
 
   busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
     org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako SetMode \
