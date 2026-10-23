@@ -608,6 +608,78 @@ assert counts[(104,65,72)] >= 300, "older failure popup disappeared"
 PY
 fi
 
+# Verify a nondefault configured middle-button binding through real wl_pointer
+# delivery. dismiss --no-history must remove the popup and never save it.
+if [[ "$test_scale" == 1 ]]; then
+  cat >> "$root/mako.conf" <<'EOF'
+[category=middle-dismiss]
+background-color=#2B8C9B
+on-button-middle=dismiss --no-history
+EOF
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" monitor org.posthorn.Development \
+    >"$root/middle-binding-signals.log" 2>&1 &
+  monitor_pid=$!
+  sleep 0.2
+  middle_result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn middle binding' 0 '' 'Middle button no history' '' \
+    0 1 'category' 's' 'middle-dismiss' 30000)"
+  [[ "$middle_result" == u\ * ]] || { echo 'Invalid middle-binding Notify result'; exit 1; }
+  middle_visible=0
+  for _ in {1..15}; do
+    sleep 0.1
+    grim "$root/middle-before.png"
+    if /usr/bin/python3 - "$root/middle-before.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+counts=Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if counts[(43,140,155)] >= 300 else 1)
+PY
+    then middle_visible=1; break; fi
+  done
+  [[ "$middle_visible" == 1 ]] || { echo 'Custom middle-binding popup never painted'; exit 1; }
+  before_tokens="$(grep -Ec 'xdg_activation_v1@[^ ]+[.]get_activation_token' "$root/posthorn.log" || true)"
+  POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720 274
+  middle_closed=0
+  for _ in {1..20}; do
+    if grep -q 'Member=NotificationClosed' "$root/middle-binding-signals.log"; then
+      middle_closed=1
+      break
+    fi
+    sleep 0.1
+  done
+  after_tokens="$(grep -Ec 'xdg_activation_v1@[^ ]+[.]get_activation_token' "$root/posthorn.log" || true)"
+  if [[ "$middle_closed" != 1 ]] || [[ "$before_tokens" != "$after_tokens" ]] ||
+     grep -Eq 'Member=(ActivationToken|ActionInvoked)' "$root/middle-binding-signals.log"; then
+    echo 'Custom middle dismiss did not close without action/activation'
+    cat "$root/middle-binding-signals.log"
+    exit 1
+  fi
+  kill "$monitor_pid" 2>/dev/null || true
+  wait "$monitor_pid" 2>/dev/null || true
+  monitor_pid=""
+  grim "$root/middle-after.png"
+  /usr/bin/python3 - "$root/middle-after.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+counts=Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+assert counts[(43,140,155)] < 100, "middle-binding notification remained visible"
+assert counts[(48,87,71)] >= 300 and counts[(104,65,72)] >= 300, \
+    "unrelated popups did not survive middle-button dismissal"
+PY
+  middle_history="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListHistory)"
+  [[ "$middle_history" != *'Middle button no history'* ]] || {
+    echo 'dismiss --no-history unexpectedly saved the notification'
+    exit 1
+  }
+fi
+
 # Exercise timer-driven expiry through the full private D-Bus / Wayland path.
 # Use a distinct warning color so visual removal can be distinguished from
 # ordinary notification closure in the compositor capture.
