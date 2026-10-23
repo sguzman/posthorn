@@ -692,3 +692,23 @@ The Rust tests, private D-Bus suite, and isolated Sway tests at
 [commit a88bb04](https://github.com/sguzman/posthorn/actions/runs/40032485795)
 (also [preceding store fix](https://github.com/sguzman/posthorn/actions/runs/40032406098)).
 Real Hyprland and production bus behavior remain unverified.
+
+## Stack-tag replacement ID allocation order
+
+Pinned Mako v1.11.0's `dbus/xdg.c:handle_notify` calls
+`notification.c:create_notification` when no active explicit
+`replaces_id` is found, **before** it tests stack-tag matching via
+`get_tagged_notification`. A matched tag replaces the new object's
+public ID with the existing notification's ID, but the newly consumed
+`state->last_id` is not rolled back. By contrast, replacing an active
+explicit ID resets that notification in place and consumes no new ID.
+
+Posthorn now consumes the intermediate ID for each stack-tag replacement.
+Source-pinned unit and private development D-Bus regressions verify two
+tagged updates, the next ordinary notification ID, direct-ID replacement,
+and unmatched replacement ID handling. CI run
+[40034166141](https://github.com/sguzman/posthorn/actions/runs/40034166141)
+passed 257 Rust unit tests, 52 private D-Bus integration tests, and
+isolated 1×, 1.25×, and 2× Sway compositor acceptance.
+This does **not** establish real workstation Hyprland parity or authorize
+production notification service ownership.
