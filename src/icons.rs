@@ -130,8 +130,10 @@ pub fn resolve_icon_scaled(
 )->Option<PathBuf>{
     if name.starts_with('/') {return Some(PathBuf::from(name));}
     if let Some(uri)=name.strip_prefix("file://"){
-        let path=url_decode(uri)?;
-        return path.starts_with('/').then_some(PathBuf::from(path));
+        // Mako strips the scheme and URL-decodes the remainder verbatim.
+        // It does not require an absolute path: file://relative.png is
+        // resolved against the daemon's working directory by GdkPixbuf.
+        return Some(PathBuf::from(url_decode(uri)?));
     }
     if !valid_icon_name(name){return None;}
     let max_scale=output_scale.max(1);
@@ -293,6 +295,21 @@ mod tests {
         assert_eq!(max_icon_size(&style),48);
         style.insert("max-icon-size".into(),"2147483648".into());
         assert_eq!(max_icon_size(&style),64);
+    }
+
+    #[test]
+    fn mako_file_url_accepts_relative_paths_after_scheme() {
+        assert_eq!(resolve_icon("file://relative.png","",64),
+            Some(PathBuf::from("relative.png")));
+        assert_eq!(resolve_icon("file://assets/my%20icon.png","",64),
+            Some(PathBuf::from("assets/my icon.png")));
+        assert_eq!(resolve_icon("file:///tmp/my%20icon.png","",64),
+            Some(PathBuf::from("/tmp/my icon.png")));
+        assert_eq!(resolve_icon("file://../one%2Ftwo.png","",64),
+            Some(PathBuf::from("../one/two.png")));
+        // Relative unprefixed names still go through the confined theme
+        // resolver; no general directory-traversal exemption is introduced.
+        assert!(resolve_icon("../one/two.png","",64).is_none());
     }
 
     #[test]
