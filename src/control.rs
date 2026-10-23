@@ -522,6 +522,17 @@ impl OrderedControlProperties {
             _ => Err(zbus::fdo::Error::UnknownProperty(property.into())),
         }
     }
+
+    // The default zbus Properties interface declares this standard signal.
+    // Retain it in introspection even though Posthorn already emits it with
+    // its existing invalidation helper on the same path.
+    #[zbus(signal)]
+    async fn properties_changed(
+        emitter: &zbus::object_server::SignalEmitter<'_>,
+        interface_name: &str,
+        changed_properties: HashMap<&str, Value<'_>>,
+        invalidated_properties: Vec<&str>,
+    ) -> zbus::Result<()>;
 }
 
 #[cfg(test)]

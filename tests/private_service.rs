@@ -370,6 +370,11 @@ async fn control_action_dictionary_preserves_raw_wire_order_with_duplicate_keys(
     let all=props.call_method("GetAll",&(CONTROL_INTERFACE,)).await?;
     assert_eq!(all.body().signature().to_string(),"a{sv}");
     check(all.body().data().bytes());
+    let introspect=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,
+        "org.freedesktop.DBus.Introspectable").await?;
+    let xml:String=introspect.call("Introspect",&()).await?;
+    assert!(xml.contains("name=\"PropertiesChanged\""),
+        "the replacement standard Properties interface must still advertise its signal");
     let all_body=all.body();
     let all_bytes=all_body.data().bytes();
     assert!(all_bytes.windows(b"Modes\0".len()).any(|w|w==b"Modes\0"),
