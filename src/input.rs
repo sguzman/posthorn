@@ -220,11 +220,31 @@ pub fn can_invoke_action(runtime:&SharedRuntime,id:u32,key:&str)->io::Result<boo
         .is_none_or(|v|v=="1"||v.eq_ignore_ascii_case("true")))
 }
 
+/// Mako invokes a matching sender action and closes its notification
+/// synchronously, before returning to its event loop. Do both state
+/// operations before any D-Bus signal await, otherwise the sender could
+/// replace the same public ID after ActionInvoked but before dismissal.
+fn prepare_invocation(
+    runtime:&SharedRuntime,id:u32,key:&str,
+)->Result<Option<bool>,String>{
+    let allowed=can_invoke_action(runtime,id,key).map_err(|e|e.to_string())?;
+    if runtime.close(id,CloseReason::Dismissed,true)? {
+        Ok(Some(allowed))
+    }else{
+        Ok(None)
+    }
+}
+
 async fn invoke(conn:&Connection,runtime:&SharedRuntime,id:u32,key:&str,
     activation_token:Option<&str>)
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
-    if can_invoke_action(runtime,id,key)? {
+    // The notification must be removed before yielding for any signal.
+    // Signal order still matches Mako: ActivationToken, ActionInvoked,
+    // NotificationClosed, then the control properties invalidation.
+    let Some(allowed)=prepare_invocation(runtime,id,key).map_err(error)?
+        else{return Ok(())};
+    if allowed {
         if let Some(token)=activation_token.filter(|token|!token.is_empty()) {
             conn.emit_signal(None::<&str>,OBJECT_PATH,BUS_NAME,
                 "ActivationToken",&(id,token)).await?;
@@ -232,8 +252,10 @@ async fn invoke(conn:&Connection,runtime:&SharedRuntime,id:u32,key:&str,
         conn.emit_signal(None::<&str>,OBJECT_PATH,BUS_NAME,
             "ActionInvoked",&(id,key)).await?;
     }
-    // Match Mako: even the default action with no matching key dismisses.
-    closed(conn,runtime,id,true).await
+    conn.emit_signal(None::<&str>,OBJECT_PATH,BUS_NAME,
+        "NotificationClosed",&(id,CloseReason::Dismissed as u32)).await?;
+    crate::signals::invalidate(conn,"Notifications").await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -244,6 +266,49 @@ mod tests {
     fn click(x:f64,y:f64,button:u32)->PointerClick{
         PointerClick{x,y,button,serial:3}
     }
+    #[test]
+    fn invoking_action_finishes_old_lifetime_before_any_signal_await() {
+        let runtime=SharedRuntime::new(Config::parse("").unwrap());
+        let id=runtime.store.lock().unwrap().push(Request{
+            actions:vec![crate::notification::Action{
+                key:"default".into(),label:"Open".into(),
+            }],..Request::default()
+        });
+        let instance=runtime.store.lock().unwrap().active_instance(id).unwrap();
+        assert_eq!(prepare_invocation(&runtime,id,"default").unwrap(),Some(true));
+        assert!(runtime.store.lock().unwrap().active_instance(id).is_none(),
+            "the clicked incarnation must close before ActionInvoked emits");
+        let replacement=runtime.store.lock().unwrap().push(Request{
+            replaces_id:id,summary:"new message".into(),
+            ..Request::default()
+        });
+        assert_ne!(replacement,id,
+            "closed public IDs are not still eligible for replaces_id");
+        assert_eq!(runtime.store.lock().unwrap().active_instance(id),None);
+        assert_ne!(runtime.store.lock().unwrap().active_instance(replacement),Some(instance));
+        assert_eq!(prepare_invocation(&runtime,id,"default").unwrap(),None,
+            "stale invoke must never close a newer message");
+    }
+
+    #[test]
+    fn missing_or_disabled_action_suppresses_signals_but_still_dismisses(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "[category=disabled]\\nactions=0\\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request{
+            category:"disabled".into(),actions:vec![
+                crate::notification::Action{
+                    key:"default".into(),label:"Open".into()
+                }
+            ],..Request::default()
+        });
+        assert_eq!(prepare_invocation(&runtime,id,"default").unwrap(),Some(false));
+        assert!(runtime.store.lock().unwrap().active_instance(id).is_none());
+        let other=runtime.store.lock().unwrap().push(Request::default());
+        assert_eq!(prepare_invocation(&runtime,other,"default").unwrap(),Some(false),
+            "missing sender action must dismiss without ActionInvoked");
+    }
+
     #[test]
     fn batched_group_dismiss_transitions_all_members_before_signalling() {
         let runtime=SharedRuntime::new(Config::parse("group-by=app-name\n").unwrap());
