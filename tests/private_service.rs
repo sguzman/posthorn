@@ -358,13 +358,34 @@ async fn control_action_dictionary_preserves_raw_wire_order_with_duplicate_keys(
     assert_eq!(records.len(),1);
     assert_eq!(u32::try_from(records[0].get("id").unwrap())?,id);
 
-    // A property getter currently traverses Value::from(...) in the
-    // interface macro, which cannot retain duplicate a{ss} keys. Keep its
-    // type signature stable and track wire ordering as a separate gap.
+    // The control path now uses a custom standard Properties adapter so
+    // both Get(v) and GetAll(a{sv}) preserve the same duplicate keys and
+    // entry ordering as ListNotifications. Check raw bytes before zvariant
+    // turns the dictionary into a key-collapsing HashMap.
     let props=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,
         "org.freedesktop.DBus.Properties").await?;
     let reply=props.call_method("Get",&(CONTROL_INTERFACE,"Notifications")).await?;
     assert_eq!(reply.body().signature().to_string(),"v");
+    check(reply.body().data().bytes());
+    let all=props.call_method("GetAll",&(CONTROL_INTERFACE,)).await?;
+    assert_eq!(all.body().signature().to_string(),"a{sv}");
+    check(all.body().data().bytes());
+    let all_bytes=all.body().data().bytes();
+    assert!(all_bytes.windows(b"Modes\0".len()).any(|w|w==b"Modes\0"),
+        "standard Properties.GetAll must include Modes as well");
+    let missing:zbus::Result<OwnedValue>=props.call("Get",&(
+        CONTROL_INTERFACE,"NotAProperty"
+    )).await;
+    assert!(matches!(missing,Err(zbus::Error::MethodError(_,_,_))),
+        "standard Properties.Get must reject unknown properties");
+    let read_only:zbus::Result<()>=props.call("Set",&(
+        CONTROL_INTERFACE,"Modes",OwnedValue::from(true)
+    )).await;
+    assert!(read_only.is_err(),"Mako control properties are read-only");
+    let other:zbus::Result<OwnedValue>=props.call("Get",&(
+        "no.such.Interface","Modes"
+    )).await;
+    assert!(other.is_err(),"standard Properties must reject unknown interface");
 
     let options:HashMap<String,OwnedValue>=[
         ("id".into(),OwnedValue::from(id))
