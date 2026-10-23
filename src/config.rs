@@ -645,10 +645,9 @@ fn validate_option(key: &str, value: &str) -> Result<(), String> {
             return Ok(());
         }
     } else if COLORS.contains(&key) {
-        let raw = value.strip_prefix('#');
-        if let Some(raw) = raw {
-            if (raw.len()==6 || raw.len()==8) && raw.chars().all(|x|x.is_ascii_hexdigit()) { return Ok(()); }
-        }
+        // This must use the same glibc strtoul-compatible parser as the
+        // renderer; strict per-digit validation would reject Mako config.
+        if crate::raster::Color::parse_mako(value).is_ok() { return Ok(()); }
     } else if key=="progress-color" {
         if crate::raster::parse_progress_color_mako(value).is_ok(){
             return Ok(());
@@ -747,6 +746,20 @@ mod tests {
         let custom=Config::parse("[hidden]\nformat=<b>%h of %t unseen</b>\n").unwrap();
         assert_eq!(custom.style_for(&fields).get("format").map(String::as_str),
             Some("<b>%h of %t unseen</b>"));
+    }
+
+    #[test]
+    fn glibc_color_spellings_validate_and_reach_effective_styles() {
+        let conf=Config::parse(
+            "background-color=#+fffff\nborder-color=#0x1234\n            [category=warning]\ntext-color=#-fffff\n"
+        ).unwrap();
+        let style=conf.style_for(&note("warning",&["default"]));
+        assert_eq!(style["background-color"],"#+fffff");
+        assert_eq!(style["border-color"],"#0x1234");
+        assert_eq!(style["text-color"],"#-fffff");
+        for bad in ["#12345G","#abcdef0","#  " ] {
+            assert!(Config::parse(&format!("background-color={bad}\n")).is_err());
+        }
     }
 
     #[test]

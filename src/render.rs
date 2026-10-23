@@ -680,6 +680,25 @@ mod tests {
     }
 
     #[test]
+    fn legacy_strtoul_color_forms_render_their_exact_background_pixels() {
+        for (value,expected_bgra) in [
+            ("#+fffff",[0xff,0xff,0x0f,0xff]),
+            ("#0x1234",[0x34,0x12,0x00,0xff]),
+            ("#-fffff",[0x01,0x00,0xf0,0xff]),
+        ] {
+            let config=crate::config::Config::parse(&format!(
+                "background-color={value}\nwidth=180\nheight=120\nborder-size=0\n"
+            )).unwrap();
+            let frame=render_notification(&fixture(),&config.global).unwrap();
+            let x=(frame.width as usize)/2;
+            let y=(frame.height as usize).saturating_sub(2);
+            let offset=y*frame.stride as usize+x*4;
+            assert_eq!(&frame.pixels[offset..offset+4],&expected_bgra,
+                "incorrect Cairo background for {value}");
+        }
+    }
+
+    #[test]
     fn directional_padding_affects_actual_notification_height() {
         let mut style=Options::new();
         for (key,value) in [("width","240"),("height","180"),

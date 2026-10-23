@@ -6,19 +6,33 @@
 pub struct Color { pub red: u8, pub green: u8, pub blue: u8, pub alpha: u8 }
 
 impl Color {
-    /// Accept Mako's #RRGGBB and #RRGGBBAA forms.
+    /// Mako 1.11 checks for six or eight bytes after '#', then uses C
+    /// strtoul(base 16), rather than validating each individual hex digit.
+    /// Thus ASCII leading whitespace, a sign, and optional 0x prefix are
+    /// accepted *within* the six/eight-byte limit. A negative value wraps
+    /// to unsigned before Mako narrows it to a 32-bit color.
     pub fn parse_mako(input: &str) -> Result<Self, &'static str> {
-        let hex = input.strip_prefix('#').ok_or("expected a # prefix")?;
-        if hex.len() != 6 && hex.len() != 8 {
-            return Err("expected six or eight hexadecimal digits");
+        let raw = input.strip_prefix('#').ok_or("expected a # prefix")?;
+        if raw.len() != 6 && raw.len() != 8 {
+            return Err("expected six or eight color bytes");
         }
-        let component = |range: std::ops::Range<usize>|
-            u8::from_str_radix(&hex[range], 16).map_err(|_| "invalid hex digit");
+        let trimmed = raw.trim_start_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c']);
+        let (negative, digits) = if let Some(rest) = trimmed.strip_prefix('-') {
+            (true, rest)
+        } else {
+            (false, trimmed.strip_prefix('+').unwrap_or(trimmed))
+        };
+        let digits = digits.strip_prefix("0x")
+            .or_else(|| digits.strip_prefix("0X")).unwrap_or(digits);
+        let number = u32::from_str_radix(digits, 16)
+            .map_err(|_| "invalid hex color")?;
+        let number = if negative { number.wrapping_neg() } else { number };
+        let rgba = if raw.len() == 6 { (number << 8) | 0xff } else { number };
         Ok(Self {
-            red: component(0..2)?,
-            green: component(2..4)?,
-            blue: component(4..6)?,
-            alpha: if hex.len() == 8 { component(6..8)? } else { 255 },
+            red: (rgba >> 24) as u8,
+            green: (rgba >> 16) as u8,
+            blue: (rgba >> 8) as u8,
+            alpha: rgba as u8,
         })
     }
 
@@ -126,6 +140,31 @@ mod tests {
         assert_eq!(Color::parse_mako("#715536").unwrap().blue,0x36);
         assert_eq!(Color::parse_mako("#gggggg"),Err("invalid hex digit"));
         assert!(Color::parse_mako("305747").is_err());
+    }
+
+    #[test]
+    fn source_tested_glibc_strtoul_color_edge_cases() {
+        // Expected values generated with pinned Mako 1.11's exact
+        // (uint32_t)strtoul(base=16), then optional 6-byte alpha append.
+        for (input,rgba) in [
+            ("#123456",0x123456ffu32),
+            ("#+fffff",0x0fffffffu32),
+            ("#-fffff",0xf00001ffu32),
+            ("#0x1234",0x001234ffu32),
+            ("# 12345",0x012345ffu32),
+            ("#+12345",0x012345ffu32),
+            ("#deadBEEF",0xdeadbeefu32),
+            ("#-00000",0x000000ffu32),
+        ] {
+            let color=Color::parse_mako(input).unwrap();
+            let actual=(u32::from(color.red)<<24)
+                |(u32::from(color.green)<<16)
+                |(u32::from(color.blue)<<8)|u32::from(color.alpha);
+            assert_eq!(actual,rgba,"mismatched glibc value for {input}");
+        }
+        for input in ["#12345G","#abcdef0","#0X","#ffffff ","#      ","#\u{a0}1234"] {
+            assert!(Color::parse_mako(input).is_err(),"{input:?} must be rejected");
+        }
     }
 
     #[test]
