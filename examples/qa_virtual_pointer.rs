@@ -29,6 +29,13 @@ delegate_noop!(FixtureState: ignore zwlr_virtual_pointer_manager_v1::ZwlrVirtual
 delegate_noop!(FixtureState: ignore zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1);
 
 fn main()->Result<(),Box<dyn Error>> {
+    // This fixture injects real compositor input. Refuse to run unless the
+    // caller explicitly selects the isolated headless test environment.
+    if std::env::var("POSTHORN_HEADLESS_POINTER_TEST").ok().as_deref()!=Some("1")
+        || std::env::var("WLR_BACKENDS").ok().as_deref()!=Some("headless")
+    {
+        return Err("virtual-pointer fixture is restricted to isolated headless QA".into());
+    }
     // Use the same logical coordinate space as the configured headless output.
     let mut args=std::env::args().skip(1);
     let x:u32=args.next().ok_or("missing X")?.parse()?;
