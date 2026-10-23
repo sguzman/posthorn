@@ -65,12 +65,16 @@ fn parse_mako_id(raw:&str)->Result<u32,&'static str>{
     if raw.is_empty(){return Ok(0);}
     // strtoumax skips C isspace, including vertical tab (0x0B).
     let digits=raw.trim_start_matches([' ','\t','\n','\r','\x0b','\x0c']);
-    // strtoumax permits a minus sign, then negates the parsed unsigned
-    // magnitude. Every spelling of negative zero therefore yields ID zero.
-    if digits.strip_prefix('-').is_some_and(|number|
-        !number.is_empty() && number.bytes().all(|ch|ch==b'0')
-    ){return Ok(0);}
-    digits.parse().map_err(|_|"invalid notification ID")
+    // strtoumax parses the magnitude as uintmax_t before applying the
+    // optional unary minus modulo 2^64. Most negative values still exceed
+    // UINT32_MAX and are rejected, but -UINT64_MAX becomes ID 1.
+    let (negative,numeric)=if let Some(rest)=digits.strip_prefix('-'){
+        (true,rest)
+    }else{(false,digits.strip_prefix('+').unwrap_or(digits))};
+    let magnitude=numeric.parse::<u64>()
+        .map_err(|_|"invalid notification ID")?;
+    let parsed=if negative{0u64.wrapping_sub(magnitude)}else{magnitude};
+    u32::try_from(parsed).map_err(|_|"invalid notification ID")
 }
 
 pub fn parse_command(args: &[String]) -> Result<Command, String> {
@@ -853,6 +857,13 @@ mod tests {
         assert!(parse_mako_id(" ").is_err());
         assert!(parse_mako_id("42 ").is_err());
         assert!(parse_mako_id("-1").is_err());
+        assert_eq!(parse_mako_id("-18446744073709551615"),Ok(1));
+        assert_eq!(parse_mako_id(" -18446744073709551614"),Ok(2));
+        assert_eq!(parse_mako_id("-18446744073705257216"),Ok(4294964400));
+        assert!(parse_mako_id("-18446744073709551616").is_err());
+        assert!(parse_mako_id("18446744073709551615").is_err());
+        assert_eq!(parse_command(&v(&["invoke","-n","-18446744073709551615"])).unwrap(),
+            Command::Invoke{id:1,action:"default".into()});
         assert!(parse_mako_id("4294967296").is_err());
         assert_eq!(parse_command(&v(&["invoke","-n"," 42"])).unwrap(),
             Command::Invoke{id:42,action:"default".into()});
