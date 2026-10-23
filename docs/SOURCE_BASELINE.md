@@ -214,14 +214,16 @@ unsized. Importantly, Mako reads the `@scale` suffix from that same
 size-bearing component, not from whichever component happens to
 contain an `@`.
 
-Posthorn now follows this ordering, including C `strtol`-style
-positive decimal prefixes for icon size and scale. Unit tests cover
-both directory layouts and confirm that `64x64/apps@2` does not
-incorrectly outrank `64x64@2/apps` on a 2× display. An additional
-Cairo-renderer test constructs different-colored PNG assets in conflicting
-directory layouts and verifies the selected pixels at both 1× and 2×,
-without changing popup geometry. Rust and headless Wayland CI passed at
-[commit 6d2c308](https://github.com/sguzman/posthorn/actions/runs/39966794165).
+Posthorn now follows this ordering, including signed C `strtol` decimal
+prefixes and the resulting 64-bit to 32-bit narrowing for nominal sizes.
+A nonzero negative size in the first component prevents fallback to the
+second; an invalid or zero size permits it, as in Mako. Tests cover this
+distinction, overflow, both directory layouts, and ensure that
+`64x64/apps@2` does not incorrectly outrank `64x64@2/apps` at 2×.
+A Cairo-renderer test also paints differently colored PNGs to verify the
+actual selected pixels at 1× and 2× without changing popup geometry.
+Rust, D-Bus integration and headless Wayland CI passed at
+[commit 788b090](https://github.com/sguzman/posthorn/actions/runs/39981803700).
 These acceptance cases do not prove complete monitor-hotplug or live
 Hyprland parity.
 
