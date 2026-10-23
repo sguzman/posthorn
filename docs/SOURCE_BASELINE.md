@@ -712,3 +712,45 @@ passed 257 Rust unit tests, 52 private D-Bus integration tests, and
 isolated 1×, 1.25×, and 2× Sway compositor acceptance.
 This does **not** establish real workstation Hyprland parity or authorize
 production notification service ownership.
+
+## Preserved group index when replacing a live notification
+
+In pinned Mako v1.11.0, `notification.c:reset_notification` clears the
+old payload and timer but preserves `group_index` on a direct
+`replaces_id` update. `dbus/xdg.c:handle_notify` calls
+`apply_each_criteria` before regrouping, so `[group-index=1]`
+timeout criteria apply to the preserved index at scheduling time.
+A stack-tag replacement instead creates a fresh ungrouped object and
+does **not** inherit the former index for timeout selection.
+
+Posthorn's source-pinned unit regressions cover both paths; the private
+D-Bus regression verifies the indexed timeout through the real
+`Notify` method on `org.posthorn.Development`. Both CI jobs passed
+for [commit 50a15c5](https://github.com/sguzman/posthorn/actions/runs/40036657372).
+
+## Selecting on-notify bindings before notification regrouping
+
+Pinned Mako v1.11.0 `dbus/xdg.c:handle_notify` selects the binding
+when `apply_each_criteria` applies the notification style **before**
+`group_notifications`, then runs that stored binding after grouping
+without reapplying criteria. Thus, a newly formed group cannot
+retroactively select a `[grouped] on-notify` hook. A direct-ID
+replacement can select it when its preserved index was already grouped;
+a stack-tag replacement starts ungrouped. Restoring history does not
+replay `on-notify` hooks.
+
+Posthorn now stages the selected binding once per new Notify, dispatches
+it after grouping, and discards the staged value when consumed or when
+the notification is closed/expired. The previous integration test was
+corrected to check pinned Mako semantics rather than expecting a hook
+from the newly grouped style. Unit and private D-Bus integration tests
+passed on [commit 30c2562](https://github.com/sguzman/posthorn/actions/runs/40037106582):
+260 unit tests, 54 private D-Bus tests. The earlier code-only commit
+[503fa7e](https://github.com/sguzman/posthorn/actions/runs/40036902279)
+passed isolated 1×, 1.25×, and 2× Sway compositor acceptance; its
+older integration suite included the corrected historical expectation.
+The latest commit's headless-Sway job was still pending at evidence
+recording and is not claimed as green here.
+
+These checks do not authorize production D-Bus ownership or establish
+real Hyprland pointer, touch, compositor or cutover acceptance.
