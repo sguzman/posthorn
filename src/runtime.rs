@@ -123,12 +123,19 @@ impl SharedRuntime {
             .map_err(|_|"notification store lock poisoned")?;
         let modes=self.modes.lock()
             .map_err(|_|"mode state lock poisoned")?.clone();
+        // Mako dbus/mako.c:reapply_config destroys ALL old mako_surface
+        // objects and clears every notif->surface before reapplying styles.
+        // Rebuild the reusable identity registry in notification-list order.
+        self.known_surface_specs.lock()
+            .map_err(|_|"surface identity lock poisoned")?.clear();
+        store.clear_surface_associations();
         let ids:Vec<u32>=store.active().iter().map(|n|n.id).collect();
         store.clear_recorded_grouping();
         for id in ids {
             let Some(note)=store.active().iter().find(|n|n.id==id).cloned()
                 else{continue};
             let style=crate::desktop::style_for_note_index(self,&note,&modes,-1);
+            self.associate_selected_surface(&mut store,id,&style)?;
             let spec=crate::grouping::GroupSpec::parse(
                 style.get("group-by").map(String::as_str).unwrap_or("none")
             )?;
@@ -1087,6 +1094,34 @@ mod tests {
         assert_eq!(runtime.next_deadline().unwrap(),
             Some(now+std::time::Duration::from_millis(4000)),
             "surface relocation happens after timeout selection, not before");
+    }
+
+    #[test]
+    fn mode_reapplication_discards_surface_registry_and_reselects_anchor() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "default-timeout=3000\n[mode=quiet]\nanchor=bottom-left\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        let now=Instant::now();
+        runtime.schedule_without_hook(id,now).unwrap();
+        let anchor=||runtime.store.lock().unwrap().active().iter()
+            .find(|n|n.id==id).unwrap().surface_anchor.clone();
+        assert_eq!(anchor().as_deref(),Some("top-right"));
+        assert_eq!(runtime.known_surface_specs.lock().unwrap().len(),1);
+        *runtime.modes.lock().unwrap()=vec!["quiet".into()];
+        runtime.reapply_active_grouping().unwrap();
+        assert_eq!(anchor().as_deref(),Some("bottom-left"));
+        assert_eq!(runtime.known_surface_specs.lock().unwrap().len(),1,
+            "Mako destroys the old top-right surface on mode reapplication");
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+std::time::Duration::from_millis(3000)));
+        *runtime.modes.lock().unwrap()=vec!["default".into()];
+        runtime.reapply_active_grouping().unwrap();
+        assert_eq!(anchor().as_deref(),Some("top-right"));
+        assert_eq!(runtime.known_surface_specs.lock().unwrap().len(),1);
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+std::time::Duration::from_millis(3000)),
+            "mode transitions preserve the original expiration deadline");
     }
 
     #[test]

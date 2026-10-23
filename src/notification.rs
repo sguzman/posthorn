@@ -203,6 +203,14 @@ impl NotificationStore {
             note.surface_anchor=Some(anchor.to_owned());
         }
     }
+    /// Pinned Mako destroys all surfaces before reapplying modes/config,
+    /// so each active notification must start its next style pass unattached.
+    pub fn clear_surface_associations(&mut self){
+        for note in &mut self.active{
+            note.surface_associated=false;
+            note.surface_anchor=None;
+        }
+    }
     pub fn history(&self) -> &VecDeque<Notification> { &self.history }
 
     /// Instance numbers are internal only: notification identity on D-Bus

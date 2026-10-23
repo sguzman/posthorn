@@ -1078,6 +1078,32 @@ async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_d
 }
 
 #[tokio::test]
+async fn modes_rebuild_associated_surface_without_rearming_timer_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "default-timeout=4000\n[mode=quiet]\nanchor=bottom-left\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let id:u32=desktop.call("Notify",&(
+        "surface-registry",0u32,"","Normal","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let initial=runtime.next_deadline()?;
+    let anchor=||runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).unwrap().surface_anchor.clone();
+    assert_eq!(anchor().as_deref(),Some("top-right"));
+    let _:()=ctl.call("SetMode",&("quiet",)).await?;
+    assert_eq!(anchor().as_deref(),Some("bottom-left"));
+    assert_eq!(runtime.next_deadline()?,initial);
+    let _:()=ctl.call("SetMode",&("default",)).await?;
+    assert_eq!(anchor().as_deref(),Some("top-right"));
+    assert_eq!(runtime.next_deadline()?,initial);
+    Ok(())
+}
+
+#[tokio::test]
 async fn replacement_reassigns_to_preexisting_matching_surface_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
