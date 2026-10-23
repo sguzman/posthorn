@@ -77,7 +77,11 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
         let n=&entry.notification;
         let style=style_for_note_index(runtime,n,&modes,entry.group_index);
         if click.y >= y && click.y < y+h {
-            if click.x<x || click.x>=x+w {return Ok(None);}
+            // Mako checks the entire rectangle for each notification
+            // before moving to the next. In overlapping stacks, a narrow
+            // top notification can miss the X coordinate while a wider
+            // notification underneath still contains the click.
+            if click.x<x || click.x>=x+w {continue;}
             let fallback=match click.button {
                 272=>"invoke-default-action",
                 273|0=>"dismiss",
@@ -238,6 +242,38 @@ mod tests {
             .unwrap().unwrap().0,newer);
         assert_eq!(hit_test(&runtime,click(12.0,f64::from(height)+2.0,273))
             .unwrap().unwrap().0,older);
+    }
+
+    #[test]
+    fn overlapping_narrow_top_allows_hit_on_wider_notification_below(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=160\nheight=90\nmargin=0,0,-20,0\n             [category=top]\nwidth=80\n             [category=lower]\nmargin=-20,0,0,0\n"
+        ).unwrap());
+        let lower=runtime.store.lock().unwrap().push(Request{
+            category:"lower".into(),summary:"Lower".into(),
+            ..Request::default()
+        });
+        let upper=runtime.store.lock().unwrap().push(Request{
+            category:"top".into(),summary:"Upper".into(),
+            ..Request::default()
+        });
+        let notes=visible_members_indexed(&runtime).unwrap();
+        assert_eq!(notes[0].notification.id,upper);
+        assert_eq!(notes[1].notification.id,lower);
+        let upper_style=style_for_note_index(
+            &runtime,&notes[0].notification,&["default".into()],notes[0].group_index
+        );
+        let top_height=crate::render::measure_notification_height_group(
+            &notes[0].notification,&upper_style,0
+        ).unwrap();
+        let y=f64::from(top_height)-10.0;
+        // Right aligned: the top (80px) begins at x=80 and misses x=20,
+        // while the lower (160px) begins at x=0 and overlaps vertically.
+        assert_eq!(hit_test(&runtime,click(20.0,y,273)).unwrap(),
+            Some((lower,NotifyBinding::Dismiss{save_history:true})));
+        assert_eq!(hit_test(&runtime,click(100.0,y,273)).unwrap(),
+            Some((upper,NotifyBinding::Dismiss{save_history:true})),
+            "first matching Mako hotspot keeps precedence");
     }
 
     #[test]
