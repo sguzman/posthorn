@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::io::Write;
+use std::io::{BufRead,Write};
 use std::process::{Command as ProcessCommand, Stdio};
 use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 use zbus::{zvariant::{DeserializeValue, OwnedValue, Value}, Connection, Proxy};
@@ -407,13 +407,24 @@ fn choose_from_menu(
             writeln!(input,"{label}")?;
         }
     }
-    let output=child.wait_with_output()?;
-    if !output.status.success(){return Err(format!(
-        "menu command exited with {}",output.status
+    // Mako calls getline once, closes the child stdout pipe, and then
+    // waitpid. Waiting for and collecting all stdout can hang on a menu
+    // helper that keeps writing, and does not model the upstream SIGPIPE
+    // behavior after a selection.
+    let mut first_line=Vec::new();
+    if let Some(stdout)=child.stdout.take(){
+        let mut reader=std::io::BufReader::new(stdout);
+        reader.read_until(b'\n',&mut first_line)?;
+        // Closing this reader also closes the pipe before waiting, as in
+        // makoctl's fclose(out). Trailing data is never buffered indefinitely.
+    }
+    let status=child.wait()?;
+    if !status.success(){return Err(format!(
+        "menu command exited with {status}"
     ).into());}
-    let selected=mako_menu_selected_line(&output.stdout).ok_or("no action selected")?;
-    // D-Bus labels are UTF-8; only the selected line needs to decode. Bytes
-    // after its newline are irrelevant to makoctl's getline() semantics.
+    let selected=mako_menu_selected_line(&first_line).ok_or("no action selected")?;
+    // D-Bus labels are UTF-8; decode only the selected line. Bytes after
+    // its newline are irrelevant to makoctl's getline() semantics.
     let selected=std::str::from_utf8(selected)?;
     selected_action_key(actions,selected)
         .ok_or_else(||"menu returned a title not present in notification actions".into())
@@ -648,6 +659,19 @@ mod tests {
             "printf '\\377\\nOpen\\n'".to_string(),
         ];
         assert!(choose_from_menu(&invalid,&actions).is_err());
+    }
+
+    #[test]
+    fn menu_closes_stdout_after_first_line_before_waitpid(){
+        let actions=vec![("selected".into(),"Open".into())];
+        // The first line is a valid selection. A helper that writes more
+        // after its stdout has been closed must fail, just like makoctl,
+        // instead of having Posthorn buffer the second line and succeed.
+        let late=vec![
+            "sh".to_string(),"-c".to_string(),
+            "printf 'Open\\n'; sleep 0.1; printf 'extra\\n'".to_string(),
+        ];
+        assert!(choose_from_menu(&late,&actions).is_err());
     }
 
     #[test]
