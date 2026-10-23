@@ -20,6 +20,8 @@ pub struct SharedRuntime {
     timers: Arc<Mutex<ExpirationScheduler>>,
     /// Category/mode-specific history setting captured when a message arrives.
     history_policies: Arc<Mutex<HashMap<u32,bool>>>,
+    /// A Notify binding is chosen before regrouping but executed afterward.
+    pending_notify_bindings: Arc<Mutex<HashMap<u32,NotifyBinding>>>,
     config: Arc<RwLock<Arc<Config>>>,
     // The compositor's wl_surface.enter output name, not config.output.
     // Unknown until the layer surface is mapped and the compositor replies.
@@ -37,6 +39,7 @@ impl SharedRuntime {
             store: Arc::new(Mutex::new(store)),
             timers: Arc::new(Mutex::new(ExpirationScheduler::default())),
             history_policies: Arc::new(Mutex::new(HashMap::new())),
+            pending_notify_bindings: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(RwLock::new(Arc::new(config))),
             surface_output: Arc::new(RwLock::new(None)),
             source_path: None,
@@ -204,7 +207,7 @@ impl SharedRuntime {
         Ok(())
     }
 
-    fn schedule_impl(&self, id: u32, now: Instant, _run_hook: bool) -> Result<(), &'static str> {
+    fn schedule_impl(&self, id: u32, now: Instant, run_hook: bool) -> Result<(), &'static str> {
         let config=self.config();
         let store = self.store.lock().map_err(|_| "notification store lock poisoned")?;
         let note = store.active().iter().find(|n| n.id == id)
@@ -238,25 +241,29 @@ impl SharedRuntime {
             .is_none_or(|v|v=="1"||v.eq_ignore_ascii_case("true"));
         self.history_policies.lock().map_err(|_| "history policy lock poisoned")?
             .insert(id,history);
-        // Mako executes on-notify AFTER grouping. The Freedesktop D-Bus
-        // adapter performs that step after calling this timer/history setup,
-        // so all binding kinds observe the same final group-index style.
+        // Mako dbus/xdg.c applies criteria before group_notifications,
+        // retaining the chosen notify binding on the style object. It
+        // executes the binding after grouping, without reapplying criteria.
+        // Capture that decision NOW; group-index may change during regroup.
+        let mut pending=self.pending_notify_bindings.lock()
+            .map_err(|_|"on-notify binding state lock poisoned")?;
+        if run_hook {
+            let raw=style.get("on-notify").map(String::as_str).unwrap_or("none");
+            pending.insert(id,NotifyBinding::parse(raw)
+                .map_err(|_|"invalid on-notify binding")?);
+        }else{
+            pending.remove(&id);
+        }
         Ok(())
     }
 
-    /// Select Mako's on-notify binding after group placement. Returning this
-    /// from the runtime leaves all D-Bus signal emission on the async thread.
+    /// Take the pre-regroup Notify binding after group placement. This
+    /// preserves Mako's timing: selected before grouping, executed after.
+    /// The D-Bus adapter emits signals only on its async thread.
     pub fn on_notify_binding(&self,id:u32)->Result<NotifyBinding,&'static str>{
-        let note=self.store.lock().map_err(|_|"notification state lock poisoned")?
-            .active().iter().find(|n|n.id==id)
-            .ok_or("notification is not active")?.clone();
-        let index=crate::grouping::active_group_index(self,id)
-            .map_err(|_|"invalid runtime group-by")?;
-        let modes=self.modes.lock().map_err(|_|"mode state lock poisoned")?
-            .clone();
-        let style=crate::desktop::style_for_note_index(self,&note,&modes,index);
-        let raw=style.get("on-notify").map(String::as_str).unwrap_or("none");
-        NotifyBinding::parse(raw).map_err(|_|"invalid on-notify binding")
+        self.pending_notify_bindings.lock()
+            .map_err(|_|"on-notify binding state lock poisoned")?
+            .remove(&id).ok_or("no staged on-notify binding for ID")
     }
 
     pub fn close(&self, id: u32, reason: CloseReason, save_history: bool)
@@ -285,6 +292,9 @@ impl SharedRuntime {
         drop(policies);
         drop(store);
         if closed {
+            self.pending_notify_bindings.lock()
+                .map_err(|_|"on-notify binding state lock poisoned")?
+                .remove(&id);
             // A surviving member may become ungrouped after its neighbor
             // closes, changing its effective history option.
             self.reapply_active_history_policies()
@@ -318,6 +328,11 @@ impl SharedRuntime {
         drop(policies);
         drop(store);
         if !closed.is_empty() {
+            {
+                let mut pending=self.pending_notify_bindings.lock()
+                    .map_err(|_|"on-notify binding state lock poisoned")?;
+                for id in &closed {pending.remove(id);}
+            }
             self.reapply_active_history_policies()
                 .map_err(|_|"group history style reapplication failed")?;
         }
@@ -515,22 +530,63 @@ mod tests {
     }
 
     #[test]
-    fn scoped_group_by_controls_grouped_on_notify_binding() {
+    fn on_notify_binding_uses_pre_regroup_style_and_preserves_direct_replace_index() {
         let runtime=SharedRuntime::new(Config::parse(
             "group-by=none\n[category=warning]\ngroup-by=app-name\n[grouped]\non-notify=dismiss\n"
         ).unwrap());
+        let now=Instant::now();
         let earlier=runtime.store.lock().unwrap().push(Request{
             app_name:"sender".into(),category:"success".into(),
             ..Request::default()
         });
-        assert!(matches!(runtime.on_notify_binding(earlier).unwrap(),
-            crate::hooks::NotifyBinding::None));
+        runtime.schedule(earlier,now).unwrap();
+        assert_eq!(runtime.on_notify_binding(earlier).unwrap(),
+            crate::hooks::NotifyBinding::None);
         let warning=runtime.store.lock().unwrap().push(Request{
             app_name:"sender".into(),category:"warning".into(),
             ..Request::default()
         });
-        assert!(matches!(runtime.on_notify_binding(warning).unwrap(),
-            crate::hooks::NotifyBinding::Dismiss{save_history:true}));
+        runtime.schedule(warning,now).unwrap();
+        assert_eq!(runtime.on_notify_binding(warning).unwrap(),
+            crate::hooks::NotifyBinding::None,
+            "new arrival was ungrouped while Mako selected on-notify");
+        assert_eq!(runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==warning).unwrap().group_index,0);
+        assert_eq!(runtime.store.lock().unwrap().push(Request {
+            replaces_id:warning,app_name:"sender".into(),
+            category:"warning".into(),..Request::default()
+        }),warning);
+        runtime.schedule(warning,now).unwrap();
+        assert_eq!(runtime.on_notify_binding(warning).unwrap(),
+            crate::hooks::NotifyBinding::Dismiss{save_history:true},
+            "explicit replacement retains the earlier group-index for binding selection");
+        assert!(runtime.on_notify_binding(warning).is_err(),
+            "an on-notify hook must be consumed only once");
+    }
+
+    #[test]
+    fn stack_tag_hook_selection_uses_new_objects_ungrouped_index() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=app-name\n[grouped]\non-notify=dismiss\n"
+        ).unwrap());
+        let now=Instant::now();
+        let tagged=Request {
+            app_name:"tag-app".into(),tag:"progress".into(),..Request::default()
+        };
+        let id=runtime.store.lock().unwrap().push(tagged.clone());
+        runtime.schedule(id,now).unwrap();
+        assert_eq!(runtime.on_notify_binding(id).unwrap(),NotifyBinding::None);
+        let other=runtime.store.lock().unwrap().push(Request {
+            app_name:"tag-app".into(),..Request::default()
+        });
+        runtime.schedule(other,now).unwrap();
+        assert_eq!(runtime.on_notify_binding(other).unwrap(),NotifyBinding::None);
+        assert_eq!(runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==id).unwrap().group_index,1);
+        assert_eq!(runtime.store.lock().unwrap().push(tagged),id);
+        runtime.schedule(id,now).unwrap();
+        assert_eq!(runtime.on_notify_binding(id).unwrap(),NotifyBinding::None,
+            "stack-tag replacement must select its hook before fresh grouping");
     }
 
     #[test]

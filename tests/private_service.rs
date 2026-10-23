@@ -1112,6 +1112,44 @@ async fn direct_id_replacement_preserves_pre_regroup_group_index_timeout_over_pr
 }
 
 #[tokio::test]
+async fn on_notify_binding_is_selected_before_grouping_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Mako first applies criteria and stores the binding, then groups,
+    // then executes the preselected binding. Grouped styles therefore do
+    // not dismiss a *new* member, but do apply on an explicit replacement
+    // whose pre-existing group index is retained by reset_notification.
+    let (conn,runtime)=open_private_service(Config::parse(
+        "group-by=app-name\n[grouped]\non-notify=dismiss\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let options=HashMap::<String,OwnedValue>::new();
+    let first:u32=desktop.call("Notify",&(
+        "grouped-hook",0u32,"","First","",Vec::<String>::new(),
+        options.clone(),-1i32
+    )).await?;
+    let second:u32=desktop.call("Notify",&(
+        "grouped-hook",0u32,"","Second","",Vec::<String>::new(),
+        options.clone(),-1i32
+    )).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),2,
+        "newly grouped messages cannot retroactively select [grouped] on-notify");
+    assert_eq!(runtime.store.lock().unwrap().active()
+        .iter().find(|n|n.id==first).unwrap().group_index,1);
+    let replaced:u32=desktop.call("Notify",&(
+        "grouped-hook",first,"","Direct replacement","",
+        Vec::<String>::new(),options.clone(),-1i32
+    )).await?;
+    assert_eq!(replaced,first);
+    assert!(runtime.store.lock().unwrap().active().iter()
+        .all(|n|n.id!=first),
+        "existing ID was grouped at style selection and should dismiss");
+    assert_eq!(runtime.store.lock().unwrap().active().len(),1);
+    assert_eq!(runtime.store.lock().unwrap().active().front().unwrap().id,second);
+    Ok(())
+}
+
+#[tokio::test]
 async fn id_and_tag_replacements_have_distinct_group_lifecycle_over_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
