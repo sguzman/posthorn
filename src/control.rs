@@ -10,7 +10,7 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use zbus::{interface, zvariant::{Dict, OwnedValue, SerializeValue, Signature, Value}, Connection};
 
 use crate::dbus::{BUS_NAME, OBJECT_PATH};
-use crate::notification::{CloseReason, Notification, NotificationStore, Urgency};
+use crate::notification::{CloseReason, Notification, NotificationStore};
 use crate::runtime::SharedRuntime;
 
 pub const CONTROL_INTERFACE: &str = "fr.emersion.Mako";
@@ -397,6 +397,17 @@ mod tests {
         assert!(list[0].contains_key("actions"));
     }
 
+
+    #[test]
+    fn out_of_range_mako_urgency_preserves_wire_byte(){
+        let control=fixture();
+        control.store.lock().unwrap().push(Request{
+            urgency:crate::notification::Urgency::Other(-2),
+            ..Request::default()
+        });
+        let record=control.snapshot(false).unwrap();
+        assert_eq!(u8::try_from(record[0].get("urgency").unwrap()).unwrap(),254);
+    }
 
     #[test]
     fn notification_record_fields_follow_mako_fixed_dbus_entry_sequence(){

@@ -4,7 +4,7 @@
 //! Exact cross-output surface association remains a parity task.
 
 use std::collections::{HashMap,HashSet};
-use crate::notification::{Notification, Urgency};
+use crate::notification::Notification;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GroupField {
@@ -252,6 +252,21 @@ mod tests {
 
     fn request(app: &str, category: &str) -> Request {
         Request { app_name: app.into(), category: category.into(), ..Request::default() }
+    }
+
+    #[test]
+    fn urgency_grouping_distinguishes_different_out_of_range_values(){
+        let mut store=NotificationStore::new(5);
+        let a=store.push(Request{urgency:crate::notification::Urgency::Other(3),
+            ..Request::default()});
+        let b=store.push(Request{urgency:crate::notification::Urgency::Other(4),
+            ..Request::default()});
+        let c=store.push(Request{urgency:crate::notification::Urgency::Other(3),
+            ..Request::default()});
+        let groups=group_ordered(store.active(),&GroupSpec::parse("urgency").unwrap());
+        assert_eq!(groups.len(),2);
+        assert_eq!(groups[0].ids,vec![c,a]);
+        assert_eq!(groups[1].ids,vec![b]);
     }
 
     #[test]
