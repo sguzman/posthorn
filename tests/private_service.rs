@@ -92,6 +92,80 @@ async fn empty_image_path_hint_clears_app_icon_through_private_dbus()
     Ok(())
 }
 
+/// A synthetic raw a{sv} sender can preserve duplicate keys and alias
+/// arrival order; HashMap-based test clients cannot exercise that path.
+#[derive(zbus::zvariant::Type)]
+#[zvariant(signature="a{sv}")]
+struct WireOrderedHints(Vec<(String,OwnedValue)>);
+
+impl serde::Serialize for WireOrderedHints {
+    fn serialize<S:serde::Serializer>(&self,serializer:S)
+        ->Result<S::Ok,S::Error>
+    {
+        use serde::ser::SerializeMap;
+        let mut map=serializer.serialize_map(Some(self.0.len()))?;
+        for (key,value) in &self.0{
+            map.serialize_entry(key,value)?;
+        }
+        map.end()
+    }
+}
+
+#[tokio::test]
+async fn ordered_notify_hints_use_last_wire_alias_and_reject_invalid_prior_entry()
+    ->Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let txt=|s:&str|OwnedValue::try_from(zbus::zvariant::Value::from(s)).unwrap();
+    let hints=WireOrderedHints(vec![
+        ("image_path".into(),txt("first-icon")),
+        ("image-path".into(),txt("")),
+        ("x-dunst-stack-tag".into(),txt("first-tag")),
+        ("x-canonical-private-synchronous".into(),txt("last-tag")),
+        ("urgency".into(),OwnedValue::from(0u8)),
+        ("urgency".into(),OwnedValue::from(2u8)),
+    ]);
+    let id:u32=desktop.call("Notify",&(
+        "ordered-hints",0u32,"argument-icon","Title","",
+        Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let note=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).unwrap().clone();
+    assert_eq!(note.app_icon,"");
+    assert_eq!(note.tag,"last-tag");
+    assert_eq!(note.urgency,posthorn::notification::Urgency::Critical);
+
+    let reverse=WireOrderedHints(vec![
+        ("image-path".into(),txt("modern")),
+        ("image_path".into(),txt("legacy-last")),
+        ("x-canonical-private-synchronous".into(),txt("first-tag")),
+        ("x-dunst-stack-tag".into(),txt("newest-tag")),
+    ]);
+    let same:u32=desktop.call("Notify",&(
+        "ordered-hints",id,"argument-icon","Changed","",
+        Vec::<String>::new(),reverse,-1i32
+    )).await?;
+    assert_eq!(same,id);
+    let note=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).unwrap().clone();
+    assert_eq!(note.app_icon,"legacy-last");
+    assert_eq!(note.tag,"newest-tag");
+
+    let invalid=WireOrderedHints(vec![
+        ("image_path".into(),OwnedValue::from(123i32)),
+        ("image-path".into(),txt("safe-later")),
+    ]);
+    let bad:zbus::Result<u32>=desktop.call("Notify",&(
+        "ordered-hints",id,"argument-icon","Do not replace","",
+        Vec::<String>::new(),invalid,-1i32
+    )).await;
+    assert!(bad.is_err(),"Mako rejects a malformed earlier hint");
+    assert_eq!(runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).unwrap().summary,"Changed");
+    Ok(())
+}
+
 #[tokio::test]
 async fn malformed_dismiss_options_are_rejected_over_real_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
