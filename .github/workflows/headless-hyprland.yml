@@ -25,7 +25,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Compile private Posthorn daemon and Rust pixel probe
         run: cargo build --bin posthorn --example qa_png_probe
+      - name: Create unprivileged isolated compositor account
+        run: |
+          useradd --create-home --shell /bin/bash posthornqa
+          chmod a+rx /__w /__w/posthorn /__w/posthorn/posthorn
       - name: Private D-Bus notification lifecycle on actual headless Hyprland
-        run: dbus-run-session -- bash tests/headless_hyprland.sh
-        env:
-          POSTHORN_HEADLESS_HYPRLAND_TEST: '1'
+        run: |
+          runuser -u posthornqa -- env HOME=/home/posthornqa \
+            GITHUB_ACTIONS=true POSTHORN_HEADLESS_HYPRLAND_TEST=1 \
+            dbus-run-session -- bash tests/headless_hyprland.sh
