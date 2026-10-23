@@ -1078,6 +1078,38 @@ async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_d
 }
 
 #[tokio::test]
+async fn compositor_output_changes_reselect_history_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "default-timeout=5000\nhistory=1\n[output=DP-1]\nhistory=0\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let notify=|summary:&str|( "output-history".to_owned(),0u32,"",
+        summary.to_owned(),"",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32);
+    let a:u32=desktop.call("Notify",&notify("Suppress archive")).await?;
+    let original=runtime.next_deadline()?;
+    runtime.set_surface_output(Some("DP-1"))?;
+    assert_eq!(runtime.next_deadline()?,original);
+    let _:()=desktop.call("CloseNotification",&(a,)).await?;
+    let first:Vec<HashMap<String,OwnedValue>>=
+        control.call("ListHistory",&()).await?;
+    assert!(first.is_empty());
+    let b:u32=desktop.call("Notify",&notify("Restore archive")).await?;
+    let before=runtime.next_deadline()?;
+    runtime.set_surface_output(None)?;
+    assert_eq!(runtime.next_deadline()?,before);
+    let _:()=desktop.call("CloseNotification",&(b,)).await?;
+    let history:Vec<HashMap<String,OwnedValue>>=
+        control.call("ListHistory",&()).await?;
+    assert_eq!(history.len(),1);
+    assert_eq!(u32::try_from(history[0].get("id").ok_or("missing id")?)?,b);
+    Ok(())
+}
+
+#[tokio::test]
 async fn separate_notification_output_matches_do_not_bleed_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {

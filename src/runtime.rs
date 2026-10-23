@@ -79,6 +79,11 @@ impl SharedRuntime {
         if current.as_deref()==name{return Ok(false);}
         *current=name.map(str::to_owned);
         drop(current);
+        // Mako render.c rematches criteria when a wl_surface enters/leaves
+        // its compositor output. Refresh the associated history policy too,
+        // or an output-scoped history=0 could archive a dismissed popup.
+        // Do not restart the original notification timeout.
+        self.reapply_active_history_policies()?;
         self.revision.fetch_add(1,Ordering::Release);
         Ok(true)
     }
@@ -1113,6 +1118,32 @@ mod tests {
         assert_eq!(runtime.next_deadline().unwrap(),
             Some(now+std::time::Duration::from_millis(4000)),
             "surface relocation happens after timeout selection, not before");
+    }
+
+    #[test]
+    fn output_enter_and_leave_rematch_history_without_restarting_timeout() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "default-timeout=5000\nhistory=1\n[output=DP-1]\nhistory=0\n"
+        ).unwrap());
+        let now=Instant::now();
+        let first=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(first,now).unwrap();
+        let deadline=runtime.next_deadline().unwrap();
+        assert_eq!(deadline,Some(now+std::time::Duration::from_millis(5000)));
+        runtime.set_surface_output(Some("DP-1")).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),deadline);
+        assert!(runtime.close(first,CloseReason::Dismissed,true).unwrap());
+        assert!(runtime.store.lock().unwrap().history().is_empty(),
+            "output-entered history=0 must suppress archive");
+
+        let second=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(second,now+std::time::Duration::from_millis(20)).unwrap();
+        let second_deadline=runtime.next_deadline().unwrap();
+        runtime.set_surface_output(None).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),second_deadline);
+        assert!(runtime.close(second,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(runtime.store.lock().unwrap().history().len(),1,
+            "an unmapped surface must revert to root history policy");
     }
 
     #[test]
