@@ -650,7 +650,7 @@ if [[ "$test_scale" == 1 ]]; then
   # This rule must not match while the target monitor is absent. After
   # wl_surface.enter on the hotplugged output, the compositor-reported name
   # overrides the ordinary category background on the *same* live popup.
-  printf '\\n[category=success output=HEADLESS-2]\\nbackground-color=#366FBC\\n' >> "$root/mako.conf"
+  printf '\n[category=success output=HEADLESS-2]\nbackground-color=#366FBC\n' >> "$root/mako.conf"
   ./target/debug/posthorn --experimental-private-desktop "$root/mako.conf" \
     >"$root/hotplug-posthorn.log" 2>&1 &
   posthorn_pid=$!
