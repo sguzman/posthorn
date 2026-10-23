@@ -633,7 +633,7 @@ async fn overlapping_different_width_hotspots_dispatch_to_lower_dbus_notificatio
             OwnedValue::try_from(zbus::zvariant::Value::from(category)).unwrap()
         )].into();
         (
-            "overlap-click-fixture",0u32,"",category,"",
+            "overlap-click-fixture",0u32,"",category.to_owned(),"",
             Vec::<String>::new(),hints,-1i32
         )
     };
