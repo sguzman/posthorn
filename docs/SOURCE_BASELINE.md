@@ -142,6 +142,7 @@ passed at [commit 614055e](https://github.com/sguzman/posthorn/actions/runs/3995
 No workstation session bus, Mako service, or user configuration was touched.
 These startup safeguards do **not** authorize production name acquisition;
 that still requires the explicit reversible MVP inauguration gate.
+
 ## Makoctl CLI option and menu parity
 
 Mako v1.11 `makoctl.c` parses notification IDs using C
@@ -186,6 +187,23 @@ PipeWire or live Hyprland audio acceptance. Both Rust/D-Bus and
 headless Wayland CI passed at
 [commit b57ff88](https://github.com/sguzman/posthorn/actions/runs/39960413355).
 Actual sound-player integration and workstation cutover remain open.
+
+## Configured exec-hook standard streams
+
+Mako v1.11 `notification.c:notification_execute_binding` double-forks and
+executes `sh -c` without redirecting its inherited stdin, stdout, or
+stderr. Posthorn previously redirected all three descriptors to
+`/dev/null`, suppressing command output and diagnostics. Configured
+`on-notify=exec` and mouse/touch `exec` bindings now explicitly inherit
+the parent's standard streams. Notification-originated fields are still
+not interpolated into the shell, apart from Mako's decimal `$id`.
+
+Regression tests launch the hook in a separate test-harness process with
+real OS pipes, checking that stdout, stderr and stdin reach the executed
+shell. The tests and existing private D-Bus/headless Wayland suites passed
+[CI at 18cbe4e](https://github.com/sguzman/posthorn/actions/runs/39965029992).
+This is standard-stream fidelity, **not** real audio-player or Hyprland
+speaker acceptance.
 
 ## Explicit nonclaims
 
