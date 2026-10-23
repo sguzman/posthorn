@@ -495,7 +495,7 @@ history=0
 EOF
   busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
     org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
-  result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s -- call \
     org.posthorn.Development /org/freedesktop/Notifications \
     org.freedesktop.Notifications Notify 'susssasa{sv}i' \
     'Posthorn scoped-policy test' 0 '' 'Output-scoped expiry fixture' '' \
