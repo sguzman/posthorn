@@ -652,6 +652,34 @@ mod tests {
     }
 
     #[test]
+    fn source_scoped_radius_padding_resolution_reaches_renderer() {
+        let fields=crate::config::Traits {
+            app_name:"fixture",app_icon:"",category:"success",
+            desktop_entry:"",summary:"Text visible",body:"Line 2",
+            urgency:"normal",anchor:"top-right",output:"",
+            modes:&["default"],requested_timeout_ms:-1,actionable:false,
+            group_index:-1,hidden:false,
+        };
+        let config=crate::config::Config::parse(
+            "border-radius=24\n[category=success]\npadding=3\n"
+        ).unwrap();
+        let styled=config.style_for(&fields);
+        assert_eq!(styled["padding"],"3",
+            "scoped padding does not inherit a new root-style clamp");
+        assert_eq!(Padding::parse(&styled).left,3);
+        let config=crate::config::Config::parse(
+            "[category=success]\npadding=3\nborder-radius=24\n"
+        ).unwrap();
+        let styled=config.style_for(&fields);
+        let pad=Padding::parse(&styled);
+        assert_eq!((pad.top,pad.right,pad.bottom,pad.left),(3,24,3,24));
+        let note=fixture();
+        assert_eq!(render_notification(&note,&styled).unwrap().height,
+            measure_notification_height(&note,&styled).unwrap(),
+            "renderer measurement and paint must share effective padding");
+    }
+
+    #[test]
     fn directional_padding_affects_actual_notification_height() {
         let mut style=Options::new();
         for (key,value) in [("width","240"),("height","180"),
