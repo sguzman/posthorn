@@ -430,6 +430,33 @@ mod tests {
     }
 
     #[test]
+    fn empty_image_path_hint_clears_sender_icon_including_replacements(){
+        let svc=service();
+        let empty=||[(
+            "image-path".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from("")).unwrap(),
+        )].into();
+        let id=svc.apply_notify(
+            "sender",0,"existing-icon","First","",Vec::new(),empty(),-1
+        ).unwrap();
+        assert_eq!(svc.store.lock().unwrap().active()[0].app_icon,"");
+        svc.apply_notify(
+            "sender",id,"replacement-icon","Second","",Vec::new(),empty(),-1
+        ).unwrap();
+        assert_eq!(svc.store.lock().unwrap().active()[0].app_icon,"");
+        svc.apply_notify(
+            "sender",id,"again","Third","",Vec::new(),[
+                ("image_path".into(),
+                 OwnedValue::try_from(zbus::zvariant::Value::from("legacy-icon")).unwrap())
+            ].into(),-1
+        ).unwrap();
+        assert_eq!(svc.store.lock().unwrap().active()[0].app_icon,"legacy-icon");
+        svc.apply_notify("sender",id,"argument-icon","Fourth","",
+            Vec::new(),HashMap::new(),-1).unwrap();
+        assert_eq!(svc.store.lock().unwrap().active()[0].app_icon,"argument-icon");
+    }
+
+    #[test]
     fn image_data_hint_is_stored_with_correct_color_and_replaces_atomically() {
         let service=service();
         let tuple=(1i32,1i32,4i32,true,8i32,4i32,
