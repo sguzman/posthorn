@@ -34,6 +34,19 @@ jobs:
             exit 1
           fi
           grep -q 'real Hyprland Wayland session is required' "$output"
+          if POSTHORN_HYPRLAND_QA=1 bash tests/hyprland_private.sh --inside >"$output" 2>&1; then
+            echo 'Direct nested QA unexpectedly bypassed its parent'
+            exit 1
+          fi
+          grep -q 'nested QA entrypoint requires original-bus verification by parent' "$output"
+          if POSTHORN_HYPRLAND_QA=1 POSTHORN_QA_NESTED=1 \
+              POSTHORN_QA_PARENT_BUS=unix:path=/tmp/test-bus \
+              DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/test-bus \
+              bash tests/hyprland_private.sh --inside >"$output" 2>&1; then
+            echo 'Nested QA unexpectedly accepted the original bus'
+            exit 1
+          fi
+          grep -q 'nested QA must not run on the original session bus' "$output"
       - run: dbus-run-session -- cargo test --tests --features dbus-integration -- --test-threads=1
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
       - run: python3 tools/render_roadmap.py && git diff --exit-code -- docs/ROADMAP.md
