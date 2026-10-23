@@ -508,12 +508,16 @@ fn validate_rule(rule: &Rule) -> Result<(), String> {
         }
     }
 
-    // Mako excludes output, anchor and hidden from its "non-surface"
-    // selector test. Only those selectors may control max-visible.
+    // Mako 1.11's validate_criteria checks style.max_visible itself,
+    // NOT style.spec.max_visible. A zero value is permitted under category,
+    // app-name, etc., even when the option was explicitly assigned. C's
+    // parse_int uses (int)strtol, so signed 32-bit narrowing also matters.
     let non_surface = rule.selectors.iter().any(|selector|
         !matches!(selector.key.as_str(), "output" | "anchor" | "hidden"));
-    if non_surface && rule.options.contains_key("max-visible") {
-        return Err("max-visible is only allowed with output and/or anchor criteria".into());
+    if non_surface && rule.options.get("max-visible")
+        .and_then(|value| parse_signed_mako(value))
+        .is_some_and(|value| value != 0) {
+        return Err("nonzero max-visible is only allowed with output and/or anchor criteria".into());
     }
     if non_surface && rule.selectors.iter().any(|selector|
         selector.key == "hidden" && parse_bool(&selector.value) == Some(true)) {
@@ -670,6 +674,34 @@ mod tests {
         Traits { app_name: "example", app_icon:"", category, desktop_entry:"", summary:"Saved",
             body:"All changes written", urgency:"normal", anchor:"top-right", output:"",
             modes, requested_timeout_ms:-1, actionable:false, group_index:-1, hidden:false }
+    }
+
+    #[test]
+    fn max_visible_criteria_validation_matches_upstream_numeric_value() {
+        // Mako v1.11 criteria.c:validate_criteria tests the numeric
+        // max_visible field, rather than its explicitly-set flag.
+        // Its parse_int narrows 64-bit strtol to C int on Linux.
+        for zero in ["0", "+0", "-0", "", "4294967296", "-4294967296"] {
+            let source=format!("[category=urgent]\nmax-visible={zero}\n");
+            let config=Config::parse(&source).unwrap_or_else(|e|
+                panic!("zero-valued max-visible rejected: {zero:?}: {e}"));
+            let style=config.style_for(&note("urgent",&["default"]));
+            assert_eq!(parse_signed_mako(&style["max-visible"]),Some(0));
+        }
+        for nonzero in ["1", "-1", "4294967297", "-4294967297"] {
+            assert!(Config::parse(&format!(
+                "[category=urgent]\nmax-visible={nonzero}\n"
+            )).is_err(),"nonzero max-visible accepted under category: {nonzero}");
+        }
+        // Mako validates a section at its end using the final value.
+        assert!(Config::parse(
+            "[category=urgent]\nmax-visible=3\nmax-visible=0\n"
+        ).is_ok());
+        assert!(Config::parse(
+            "[category=urgent]\nmax-visible=0\nmax-visible=3\n"
+        ).is_err());
+        // Under a surface selector, any signed value is allowed by Mako.
+        assert!(Config::parse("[output=DP-1]\nmax-visible=-1\n").is_ok());
     }
 
     #[test]
