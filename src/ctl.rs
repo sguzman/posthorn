@@ -885,6 +885,15 @@ mod tests {
             Command::Menu{id:42,program:vec!["cat".into()]});
         assert_eq!(parse_command(&v(&["dismiss","-n","\t-0"])).unwrap(),
             Command::Dismiss{id:0,all:false,group:false,history:true});
+        // All three notification-ID CLI entry points use the same strict
+        // one-sign strtoumax parser. Compact -n arguments must obey it too.
+        for malformed in ["++1","-+18446744073709551615"] {
+            assert!(parse_command(&v(&["dismiss","-n",malformed])).is_err());
+            assert!(parse_command(&v(&["invoke","-n",malformed])).is_err());
+            assert!(parse_command(&v(&["menu","-n",malformed,"cat"])).is_err());
+            assert!(parse_command(&v(&["dismiss",&format!("-n{malformed}")])).is_err());
+            assert!(parse_command(&v(&["invoke",&format!("-n{malformed}")])).is_err());
+        }
     }
 
     #[test]
