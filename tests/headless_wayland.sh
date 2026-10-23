@@ -647,6 +647,10 @@ if [[ "$test_scale" == 1 ]]; then
   wait "$posthorn_pid" 2>/dev/null || true
   posthorn_pid=""
   sed -i '1i output=HEADLESS-2' "$root/mako.conf"
+  # This rule must not match while the target monitor is absent. After
+  # wl_surface.enter on the hotplugged output, the compositor-reported name
+  # overrides the ordinary category background on the *same* live popup.
+  printf '\\n[category=success output=HEADLESS-2]\\nbackground-color=#366FBC\\n' >> "$root/mako.conf"
   ./target/debug/posthorn --experimental-private-desktop "$root/mako.conf" \
     >"$root/hotplug-posthorn.log" 2>&1 &
   posthorn_pid=$!
@@ -678,7 +682,8 @@ from collections import Counter
 from PIL import Image
 import sys
 counts = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
-raise SystemExit(0 if counts[(48, 87, 71)] >= 300 else 1)
+raise SystemExit(0 if counts[(54, 111, 188)] >= 300
+    and counts[(48, 87, 71)] < 100 else 1)
 PY
     then
       hotplug_painted=1
