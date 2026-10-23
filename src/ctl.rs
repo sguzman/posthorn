@@ -668,6 +668,16 @@ mod tests {
     }
 
     #[test]
+    fn menu_helper_can_close_stdin_before_selecting_an_action(){
+        let actions=vec![("selected".into(),"Open".into())];
+        let command=vec![
+            "sh".to_string(),"-c".to_string(),
+            "exec 0<&-; sleep 0.05; printf 'Open\\n'".to_string(),
+        ];
+        assert_eq!(choose_from_menu(&command,&actions).unwrap(),"selected");
+    }
+
+    #[test]
     fn menu_closes_stdout_after_first_line_before_waitpid(){
         let actions=vec![("selected".into(),"Open".into())];
         // The first line is a valid selection. A helper that writes more
