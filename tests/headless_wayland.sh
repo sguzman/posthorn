@@ -29,6 +29,11 @@ case "$test_scale" in
   1.25|2) resolution="1920x1080";;
   *) echo "Unsupported acceptance test scale: $test_scale"; exit 1;;
 esac
+# Compile the Rust virtual pointer QA client before sending any
+# notifications so its build time cannot consume a test notification TTL.
+if [[ "$test_scale" == 1 ]]; then
+  cargo build --quiet --example qa_virtual_pointer
+fi
 printf 'output * resolution %s scale %s\n' "$resolution" "$test_scale" > "$root/sway.conf"
 sway --unsupported-gpu -c "$root/sway.conf" >"$root/sway.log" 2>&1 &
 sway_pid=$!
@@ -173,9 +178,10 @@ PY
 if [[ "$test_scale" == 1 ]]; then
   ipc_socket="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'sway-ipc.*.sock' -print -quit)"
   [[ -S "$ipc_socket" ]] || { echo "Could not find isolated Sway IPC socket"; exit 1; }
-  swaymsg -s "$ipc_socket" 'seat seat0 cursor set 1100 25' >/dev/null
-  swaymsg -s "$ipc_socket" 'seat seat0 cursor press button3' >/dev/null
-  swaymsg -s "$ipc_socket" 'seat seat0 cursor release button3' >/dev/null
+  # A headless Sway seat initially has no pointer capability. Create a
+  # temporary virtual device with the wlroots protocol; it advertises the
+  # capability to Posthorn and then emits actual Wayland pointer events.
+  ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720
 else
   busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
     /org/freedesktop/Notifications org.freedesktop.Notifications CloseNotification \
