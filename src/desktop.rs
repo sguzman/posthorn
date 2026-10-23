@@ -56,13 +56,14 @@ pub fn style_for_note_index(
 )->Options {
     let config=runtime.config();
     let mode_views: Vec<&str>=modes.iter().map(String::as_str).collect();
+    let observed_output=runtime.surface_output();
     let traits=Traits {
         app_name:&n.app_name, app_icon:&n.app_icon, category:&n.category,
         desktop_entry:&n.desktop_entry, summary:&n.summary, body:&n.body,
         urgency:n.urgency.criteria_label(),
         anchor:config.global.get("anchor")
             .map(String::as_str).unwrap_or("top-right"),
-        output:config.global.get("output").map(String::as_str).unwrap_or(""),
+        output:observed_output.as_deref().unwrap_or(""),
         modes:&mode_views,
         requested_timeout_ms:n.requested_timeout_ms,
         actionable:!n.actions.is_empty(),
@@ -269,6 +270,15 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
         // Read Wayland output scale events before deciding whether a fresh
         // logical image must be committed with new physical SHM dimensions.
         viewer.poll_events().map_err(other)?;
+        // Mako matches [output=...] to the compositor-assigned surface,
+        // including when the layer shell was given no explicit output.
+        // A surface recreation temporarily loses its enter event: keep the
+        // previous known monitor until the replacement is mapped.
+        let assigned_output=viewer.current_output_name().map(str::to_owned);
+        if (assigned_output.is_some() || !viewer.has_active_surface()) &&
+           runtime.set_surface_output(assigned_output.as_deref()).map_err(other)? {
+            runtime.reapply_active_grouping().map_err(other)?;
+        }
         let config=runtime.config();
         let selected_output=config.global.get("output")
             .map(String::as_str).unwrap_or("");
@@ -437,9 +447,38 @@ mod tests {
         let note=runtime.store.lock().unwrap().active()
             .iter().find(|n|n.id==id).unwrap().clone();
         let modes=["default".to_string()];
+        let before=style_for_note(&runtime,&note,&modes);
+        assert_ne!(before.get("background-color").map(String::as_str),
+            Some("#305747"),"configured output is not a compositor enter event");
+        runtime.set_surface_output(Some("DP-2")).unwrap();
         let style=style_for_note(&runtime,&note,&modes);
         assert_eq!(style.get("background-color").map(String::as_str),
             Some("#305747"));
+    }
+
+    #[test]
+    fn compositor_assigned_output_overrides_configured_output_and_restyles() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "output=DP-2\n[output=DP-2]\nbackground-color=#305747\n\
+             [output=HEADLESS-1]\nbackground-color=#715536\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        let note=runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==id).unwrap().clone();
+        let modes=["default".to_string()];
+        let before=style_for_note(&runtime,&note,&modes);
+        assert_ne!(before.get("background-color").map(String::as_str),
+            Some("#305747"));
+        let revision=runtime.revision();
+        assert!(runtime.set_surface_output(Some("HEADLESS-1")).unwrap());
+        assert_eq!(runtime.revision(),revision+1);
+        assert_eq!(style_for_note(&runtime,&note,&modes)
+            .get("background-color").map(String::as_str),Some("#715536"));
+        assert!(!runtime.set_surface_output(Some("HEADLESS-1")).unwrap());
+        assert_eq!(runtime.revision(),revision+1);
+        assert!(runtime.set_surface_output(Some("DP-2")).unwrap());
+        assert_eq!(style_for_note(&runtime,&note,&modes)
+            .get("background-color").map(String::as_str),Some("#305747"));
     }
 
     #[test]
@@ -478,6 +517,9 @@ mod tests {
             category:"urgent".into(),..Request::default()
         });
         let newest=runtime.store.lock().unwrap().push(Request::default());
+        assert_eq!(visible_notifications(&runtime).unwrap().len(),1,
+            "configured output is not a compositor assignment");
+        runtime.set_surface_output(Some("DP-1")).unwrap();
         let shown=visible_notifications(&runtime).unwrap();
         assert_eq!(shown.iter().map(|n|n.id).collect::<Vec<_>>(),
             vec![newest,middle,older]);
