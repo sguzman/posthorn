@@ -911,6 +911,79 @@ done
   cat "$root/posthorn.log"
   exit 1
 }
+# Mako includes an external INI fragment at the exact point encountered.
+# Verify a live active popup inherits that file, then repaints after the
+# fragment changes; a malformed included file must reject Reload without
+# erasing the last valid style. Only the disposable private session is used.
+if [[ "$test_scale" == 1 ]]; then
+  printf '[category=qa-include]\nbackground-color=#4A872F\n' > "$root/included-colors.conf"
+  sed -i "1i include=$root/included-colors.conf" "$root/mako.conf"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  included_reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn include QA' 0 '' 'Nested fragment popup' '' \
+    0 1 'category' 's' 'qa-include' 30000)"
+  [[ "$included_reply" == u\ * ]] || { echo 'Unexpected included config Notify reply'; exit 1; }
+  included_id="$(printf '%s\n' "$included_reply" | cut -d ' ' -f 2)"
+  included_painted=0
+  for _ in {1..25}; do
+    sleep 0.12
+    grim "$root/include-before.png"
+    if ./target/debug/examples/qa_png_probe \
+        "$root/include-before.png" '#4A872F' 300 present >/dev/null 2>&1; then
+      included_painted=1
+      break
+    fi
+  done
+  [[ "$included_painted" == 1 ]] || {
+    echo 'Notification did not paint the included theme'
+    cat "$root/posthorn.log"
+    exit 1
+  }
+
+  printf '[category=qa-include]\nbackground-color=#7952A3\n' > "$root/included-colors.conf"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  include_repainted=0
+  for _ in {1..25}; do
+    sleep 0.12
+    grim "$root/include-after.png"
+    if ./target/debug/examples/qa_png_probe \
+        "$root/include-after.png" '#7952A3' 300 present >/dev/null 2>&1 &&
+       ./target/debug/examples/qa_png_probe \
+        "$root/include-after.png" '#4A872F' 80 absent >/dev/null 2>&1; then
+      include_repainted=1
+      break
+    fi
+  done
+  [[ "$include_repainted" == 1 ]] || {
+    echo 'Changing an included configuration fragment did not repaint the active popup'
+    cat "$root/posthorn.log"
+    exit 1
+  }
+
+  printf '[category=qa-include]\nbackground-color=invalid-color\n' > "$root/included-colors.conf"
+  if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+      org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload \
+      >"$root/invalid-include.log" 2>&1; then
+    echo 'Invalid included fragment reload was incorrectly accepted'
+    exit 1
+  fi
+  grim "$root/include-rejected.png"
+  ./target/debug/examples/qa_png_probe \
+    "$root/include-rejected.png" '#7952A3' 300 present >/dev/null || {
+      echo 'Invalid include erased previously committed active popup style'
+      exit 1
+    }
+  printf '[category=qa-include]\nbackground-color=#7952A3\n' > "$root/included-colors.conf"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications CloseNotification 'u' "$included_id" >/dev/null
+  echo 'Private included fragment reload, live repaint and invalid rollback: OK'
+fi
+
 # Mako's configured on-notify exec also launches notification sounds.
 # Verify a trusted shell command receives the D-Bus ID and quiet suppresses
 # that command, with no physical audio, user bus, or output device involved.
