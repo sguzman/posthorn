@@ -1085,8 +1085,8 @@ mod tests {
             .find(|n|n.id==left).unwrap().surface_anchor.as_deref(),
             Some("top-right"),"an existing matching surface wins over old association");
         assert_eq!(runtime.next_deadline().unwrap(),
-            Some(now+std::time::Duration::from_millis(1030)),
-            "newly associated top-right surface influences later criteria, not initial timer");
+            Some(now+std::time::Duration::from_millis(4000)),
+            "surface relocation happens after timeout selection, not before");
     }
 
     #[test]
