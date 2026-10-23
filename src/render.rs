@@ -87,10 +87,10 @@ impl CornerRadii {
     }
 }
 fn rounded(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, radius: CornerRadii) {
-    // Bound individual radii for a valid Cairo path even with large
-    // user-provided values and small notification rectangles.
-    let cap=(w/2.0).min(h/2.0).max(0.0);
-    let [tl,tr,br,bl]=[radius.tl,radius.tr,radius.br,radius.bl].map(|r|r.min(cap));
+    // Mako's set_rounded_rectangle passes the original radii to Cairo.
+    // Clamping to half the rectangle changes large-radius borders/icons.
+    // The style parser already prevents negative radii reaching this path.
+    let [tl,tr,br,bl]=[radius.tl,radius.tr,radius.br,radius.bl];
     cr.new_sub_path();
     cr.arc(x+w-tr,y+tr,tr,-std::f64::consts::FRAC_PI_2,0.0);
     cr.arc(x+w-br,y+h-br,br,0.0,std::f64::consts::FRAC_PI_2);
@@ -1077,6 +1077,35 @@ mod tests {
         assert_eq!(&pixels.pixels[bg..bg+4], &[0x47,0x57,0x30,0xff]);
         assert_eq!(&pixels.pixels[0..4], &[0xff,0xff,0xff,0xff]);
         assert!(pixels.pixels.chunks_exact(4).any(|p| p[3] > 0 && p[0] != 0x47 && p[0] != 0xff));
+    }
+
+    #[test]
+    fn large_radius_path_matches_unclamped_mako_cairo_arcs(){
+        let draw=|ours:bool|{
+            let mut image=cairo::ImageSurface::create(cairo::Format::ARgb32,80,80).unwrap();
+            let cr=cairo::Context::new(&image).unwrap();
+            let radii=CornerRadii{tl:30.0,tr:12.0,br:25.0,bl:10.0};
+            if ours {
+                rounded(&cr,5.0,7.0,40.0,40.0,radii);
+            }else{
+                // Upstream Mako render.c:set_rounded_rectangle(), applied
+                // directly with no half-width/height radius cap.
+                use std::f64::consts::{PI,FRAC_PI_2};
+                cr.new_sub_path();
+                cr.arc(5.0+30.0,7.0+30.0,30.0,PI,3.0*FRAC_PI_2);
+                cr.arc(5.0+40.0-12.0,7.0+12.0,12.0,-FRAC_PI_2,0.0);
+                cr.arc(5.0+40.0-25.0,7.0+40.0-25.0,25.0,0.0,FRAC_PI_2);
+                cr.arc(5.0+10.0,7.0+40.0-10.0,10.0,FRAC_PI_2,PI);
+                cr.close_path();
+            }
+            cr.set_source_rgb(1.0,1.0,1.0);
+            cr.fill().unwrap();
+            drop(cr);
+            image.flush();
+            image.with_data(|pixels|pixels.to_vec()).unwrap()
+        };
+        assert_eq!(draw(true),draw(false),
+            "Mako never caps each corner radius at half the rectangle");
     }
 
     #[test]
