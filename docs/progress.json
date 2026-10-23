@@ -103,7 +103,7 @@
               "id": "T204",
               "emoji": "🔗",
               "name": "Grouping, sorting, hidden placeholder and visibility",
-              "progress": 98
+              "progress": 99
             },
             {
               "id": "T205",
@@ -159,7 +159,7 @@
               "id": "T403",
               "emoji": "🖱️",
               "name": "Pointer, touch, button bindings and XDG activation",
-              "progress": 89
+              "progress": 90
             }
           ]
         },

@@ -458,6 +458,35 @@ history restoration. The full Rust/private D-Bus and isolated Sway suite
 passed at [commit 915a07a](https://github.com/sguzman/posthorn/actions/runs/40011789720).
 No real Hyprland touch or focus handoff is claimed.
 
+## Notification action and group dismissal without D-Bus await races
+
+Pinned Mako v1.11 processes group dismissal and action invocation in one
+synchronous event-loop turn. Posthorn previously awaited
+`NotificationClosed` between each member in `dismiss-group` and
+`dismiss-all`, and awaited `ActivationToken`/`ActionInvoked` *before*
+closing the clicked notification. A sender replacing an ID during those
+awaits could have a newly arriving notification dismissed by the old
+click.
+
+The input adapter now closes all selected group/all members before
+awaiting their respective D-Bus signals. Similarly it resolves a
+sender's default or named action and removes the original notification
+**before** the first asynchronous action signal. On-wire ordering remains
+`ActivationToken` (when applicable), `ActionInvoked` (when applicable),
+`NotificationClosed`, followed by the control property's invalidation.
+`actions=0` and missing default actions still dismiss without action
+signals, and a missing ID emits nothing. The tests check group
+membership/history and reject duplicate closures; the private
+compositor suite checks action signal order and grouped dismissal.
+
+The grouped/all implementation passed both CI jobs at
+[commit 3bec532](https://github.com/sguzman/posthorn/actions/runs/40019970174).
+The action implementation and fixed regression fixture passed both CI
+jobs at [commit 8299ed5](https://github.com/sguzman/posthorn/actions/runs/40020352282).
+This proves private D-Bus/headless Sway compatibility, not actual
+Hyprland focus handoff or multi-process concurrency beyond the current
+single-thread desktop event loop.
+
 ## Compositor-assigned output criteria versus requested placement
 
 Pinned Mako v1.11 `criteria.c:criteria_matches` compares an
