@@ -976,6 +976,37 @@ async fn absent_urgency_is_wire_unknown_and_not_selector_normal()
 }
 
 #[tokio::test]
+async fn priority_sort_matches_mako_bounded_enum_search_over_private_dbus()
+    ->Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "sort=+priority\nsort=+time\ngroup-by=none\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let mut ids=Vec::new();
+    for urgency in [3i32,4i32,-3i32]{
+        let hints:HashMap<String,OwnedValue>=[
+            ("urgency".into(),OwnedValue::from(urgency))
+        ].into();
+        let id:u32=desktop.call("Notify",&(
+            "priority-fixture",0u32,"","Raw urgency","",
+            Vec::<String>::new(),hints,-1i32
+        )).await?;
+        ids.push(id);
+    }
+    let records:Vec<HashMap<String,OwnedValue>>=
+        ctl.call("ListNotifications",&()).await?;
+    let order:Vec<u32>=records.iter()
+        .map(|record|u32::try_from(record.get("id").unwrap()).unwrap())
+        .collect();
+    assert_eq!(order,vec![ids[2],ids[1],ids[0]],
+        "Mako's bounded enum insertion differs from generic signed sorting");
+    assert_eq!(runtime.store.lock().unwrap().active().len(),3);
+    Ok(())
+}
+
+#[tokio::test]
 async fn chromium_urgency_variants_are_preserved_over_real_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
