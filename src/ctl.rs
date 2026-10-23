@@ -1,7 +1,7 @@
 //! Partial Makoctl-compatible CLI, deliberately targeting the private
 //! Posthorn development service while the desktop daemon is unfinished.
-//! Future MVP must add menu, exact text formatting, real daemon selection and
-//! full D-Bus error behavior before treating this as makoctl parity.
+//! Ordered menu action selection, text and JSON output are implemented.
+//! Exact D-Bus error wording and the approved production cutover remain open.
 
 use std::collections::HashMap;
 use std::fmt;

@@ -1,8 +1,8 @@
 //! Mako-compatible app-icon lookup and image decoding.
 //!
-//! The first pass accepts absolute paths, file:// URLs, themed icon names,
-//! and freedesktop pixmaps. Notification image-data hints and SVG theme scaling
-//! are further MVP work. Sender-provided icon names cannot escape search roots.
+//! Accepts absolute paths, file:// URLs, themed names, freedesktop pixmaps,
+//! and decoded image-data hints. Exact SVG theme fidelity remains MVP work;
+//! sender-provided themed names cannot escape search roots.
 
 use std::fs;
 use std::path::{Path,PathBuf};

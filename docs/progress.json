@@ -103,7 +103,7 @@
               "id": "T204",
               "emoji": "🔗",
               "name": "Grouping, sorting, hidden placeholder and visibility",
-              "progress": 96
+              "progress": 97
             },
             {
               "id": "T205",
@@ -122,13 +122,13 @@
               "id": "T301",
               "emoji": "📬",
               "name": "Implement org.freedesktop.Notifications methods and signals",
-              "progress": 96
+              "progress": 97
             },
             {
               "id": "T302",
               "emoji": "🧾",
               "name": "Implement full Mako D-Bus control interface, properties and JSON",
-              "progress": 92
+              "progress": 93
             },
             {
               "id": "T303",

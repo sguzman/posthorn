@@ -1,7 +1,8 @@
 //! Mako control-interface implementation on Posthorn's isolated development
 //! session-bus name. The public Mako method and property signatures are retained.
-//! Group dismissal, modes, and transactional reload are implemented; exact
-//! action dictionary ordering and production cutover remain open MVP gates.
+//! Group dismissal, modes, and transactional reload are implemented. The
+//! Notifications property still loses duplicate action keys during Value
+//! conversion; production cutover remains an explicit MVP acceptance gate.
 
 use std::collections::{HashMap,HashSet};
 use std::sync::{Arc, Mutex};

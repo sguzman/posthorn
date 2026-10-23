@@ -169,7 +169,8 @@ impl NotificationStore {
     pub fn history(&self) -> &VecDeque<Notification> { &self.history }
 
     /// Configure sorting before accepting notifications.
-    /// Re-sorting existing notifications on config reload is pending.
+    /// Mako reload preserves existing list order; new arrivals use the
+    /// updated sort policy, while grouping may still reorder active entries.
     pub fn set_sort_policy(&mut self, policy: SortPolicy) {
         self.sort_policy = policy;
     }

@@ -23,18 +23,18 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 📂 T104 — Include files with Mako-compatible path behavior — `████████░░ 81%`
 - 📐 T105 — Type/layout/style parity for all Mako config settings — `████████░░ 76%`
 
-### 📨 P2 — Notification lifecycle and formatting — `█████████░ 94%`
+### 📨 P2 — Notification lifecycle and formatting — `██████████ 95%`
 
 - 🆔 T201 — Allocate nonzero IDs, replacement by ID and app-scoped tag — `██████████ 100%`
 - 🗃️ T202 — Bounded in-memory history, close and restore — `██████████ 100%`
 - ⏳ T203 — Timeout selection and timer/event scheduling — `██████████ 95%`
-- 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `██████████ 96%`
+- 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `██████████ 97%`
 - 🔤 T205 — Pango markup/escaping, format specifiers and actions — `████████░░ 81%`
 
 ### 🚌 P3 — D-Bus protocol and control surface — `█████████░ 86%`
 
-- 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `██████████ 96%`
-- 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `█████████░ 92%`
+- 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `██████████ 97%`
+- 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `█████████░ 93%`
 - 🔄 T303 — Correct startup, bus ownership and config reload behavior — `███████░░░ 69%`
 
 ### 🪟 P4 — Wayland protocol and rendering — `█████████░ 90%`
