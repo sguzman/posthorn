@@ -6,6 +6,8 @@
 
 use std::fs;
 use std::path::{Path,PathBuf};
+use std::ffi::OsString;
+use std::os::unix::ffi::OsStringExt;
 use gdk_pixbuf::Pixbuf;
 use crate::config::Options;
 use crate::notification::Notification;
@@ -63,7 +65,7 @@ fn hex(b:u8)->Option<u8>{
         b'A'..=b'F'=>Some(b-b'A'+10),_=>None}
 }
 
-fn url_decode(input:&str)->Option<String> {
+fn url_decode(input:&str)->Option<Vec<u8>> {
     let bytes=input.as_bytes();
     let mut decoded=Vec::with_capacity(bytes.len());
     let mut i=0;
@@ -80,7 +82,7 @@ fn url_decode(input:&str)->Option<String> {
         decoded.push(bytes[i]);
         i+=1;
     }
-    String::from_utf8(decoded).ok()
+    Some(decoded)
 }
 
 fn valid_icon_name(name:&str)->bool {
@@ -133,7 +135,9 @@ pub fn resolve_icon_scaled(
         // Mako strips the scheme and URL-decodes the remainder verbatim.
         // It does not require an absolute path: file://relative.png is
         // resolved against the daemon's working directory by GdkPixbuf.
-        return Some(PathBuf::from(url_decode(uri)?));
+        // Mako's URL decoder writes raw Linux filename bytes. Requiring
+        // valid UTF-8 would discard otherwise valid on-disk filenames.
+        return Some(PathBuf::from(OsString::from_vec(url_decode(uri)?)));
     }
     if !valid_icon_name(name){return None;}
     let max_scale=output_scale.max(1);
@@ -310,6 +314,20 @@ mod tests {
         // Relative unprefixed names still go through the confined theme
         // resolver; no general directory-traversal exemption is introduced.
         assert!(resolve_icon("../one/two.png","",64).is_none());
+    }
+
+    #[test]
+    fn file_urls_preserve_non_utf8_linux_filename_bytes() {
+        use std::os::unix::ffi::OsStrExt;
+        let path=resolve_icon("file://images/name%FF.png","",64).unwrap();
+        assert_eq!(path.as_os_str().as_bytes(),b"images/name\xff.png");
+        assert!(path.to_str().is_none());
+        // The upstream decoder also passes through malformed percent
+        // escapes as literal '%' rather than treating them as fatal.
+        let literal=resolve_icon("file://images/100%broken.png","",64).unwrap();
+        assert_eq!(literal.as_os_str().as_bytes(),b"images/100%broken.png");
+        // Do not allow a C-style NUL to truncate the path in Rust.
+        assert!(resolve_icon("file://images/%00hidden.png","",64).is_none());
     }
 
     #[test]
