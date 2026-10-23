@@ -8,7 +8,7 @@
 use std::io;
 use crate::grouping::active_group_ids;
 use crate::hooks::NotifyBinding;
-use crate::notification::{CloseReason,Notification};
+use crate::notification::CloseReason;
 use crate::runtime::SharedRuntime;
 use crate::wayland::PointerClick;
 use crate::desktop::{style_for_note_index,visible_members_indexed,stack_alignment};

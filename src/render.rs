@@ -298,7 +298,7 @@ pub fn render_notification_group_with_icon_scale(
     let foreground = color_option(style, "text-color", "#FFFFFFFF")?;
     let background = color_option(style, "background-color", "#285577FF")?;
     let border_color = color_option(style, "border-color", "#4C7899FF")?;
-    let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, w, h)
+    let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, w, h)
         .map_err(|e| e.to_string())?;
     let context = cairo::Context::new(&surface).map_err(|e| e.to_string())?;
     context.scale(f64::from(pixel_scale),f64::from(pixel_scale));

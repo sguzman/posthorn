@@ -108,7 +108,6 @@ pub fn visible_members_indexed(runtime:&SharedRuntime)
 }
 
 fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
-    let config=runtime.config();
     // Keep lock acquisition order consistent with SharedRuntime::schedule:
     // store first, modes second. The reverse order can deadlock with a
     // concurrent Notify() while the popup thread is reading groups.
@@ -386,7 +385,6 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::notification::{Request,CloseReason};
-    use std::time::Instant;
 
     #[test]
     fn headless_private_desktop_snapshot_shows_two_category_colors() {

@@ -70,7 +70,7 @@ impl ExpirationScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::notification::{Request, Notification};
+    use crate::notification::Request;
 
     #[test]
     fn replacement_reschedules_without_old_timer_firing() {
