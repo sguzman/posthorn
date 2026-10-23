@@ -559,6 +559,24 @@ real `wl_touch` event delivered by Sway or Hyprland: the headless
 wlroots virtual-pointer protocol is pointer-only. Real compositor
 touch delivery and physical Hyprland acceptance remain MVP gates.
 
+## Configured sound-hook execution and quiet-mode suppression
+
+Mako uses `on-notify=exec` for configurable notification sound
+commands. A new isolated Sway 1× test sends a real Freedesktop
+`Notify` into Posthorn's private development session and requires
+the configured shell hook to write the exact notification ID from
+the `$id` shell variable to a disposable fixture. After activating
+quiet mode through the private control D-Bus interface, another
+notification of the same category must **not** re-execute that
+hook because a `[mode=quiet] on-notify=none` rule overrides it.
+
+Both Rust/private D-Bus and headless Sway 1×, 1.25×, 2× CI jobs
+passed at [commit a1565f3](https://github.com/sguzman/posthorn/actions/runs/40024408720).
+This verifies **command dispatch and quiet suppression**, not physical
+audio playback, PipeWire routing, device selection, audible fidelity,
+or the workstation's sound configuration. The test never launches
+`pw-play` or touches physical audio. Acoustic acceptance remains open.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
