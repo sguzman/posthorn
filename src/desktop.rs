@@ -337,20 +337,26 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
             // dropping notification or input events.
         }
         for click in viewer.take_clicks() {
-            // Capture the active notification before resolving its hit-test.
-            // If a concurrent D-Bus Notify replaces it, the later identity
-            // guard drops the event instead of dispatching to a newer popup.
-            let snapshot={
+            // Snapshot only small (ID, instance) pairs before hit-testing.
+            // Notifications may carry multi-megabyte inline icons; cloning
+            // every payload once more per click would waste memory and time.
+            let instances={
                 let store=runtime.store.lock().map_err(|_|poisoned())?;
                 store.active().iter().filter_map(|note|
                     store.active_instance(note.id).map(|instance|
-                        (note.clone(),instance))
+                        (note.id,instance))
                 ).collect::<Vec<_>>()
             };
             let Some((id,binding))=crate::input::hit_test(&runtime,click)
                 .map_err(other)? else{continue};
-            let Some((target,instance))=snapshot.into_iter()
-                .find(|(note,_)|note.id==id) else{continue};
+            let Some((_,instance))=instances.into_iter()
+                .find(|(candidate,_)|*candidate==id) else{continue};
+            let target={
+                let store=runtime.store.lock().map_err(|_|poisoned())?;
+                if store.active_instance(id)!=Some(instance){continue;}
+                store.active().iter().find(|note|note.id==id).cloned()
+            };
+            let Some(target)=target else{continue};
             if !click_target_is_current(&runtime,&target,instance)? {continue;}
             // Request activation only for an actually matching sender action.
             // Dismissals and missing default keys must not incur a token wait.
