@@ -347,7 +347,7 @@ impl Config {
 
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
         let mut conf = Self::default();
-        conf.append(text, "<input>", None, 0, &mut HashSet::new())?;
+        conf.append(text, "<input>", None, &mut HashSet::new())?;
         Ok(conf)
     }
 
@@ -385,12 +385,11 @@ impl Config {
     pub fn from_path(path: &Path) -> Result<Self, ConfigError> {
         let mut conf = Self::default();
         let mut seen = HashSet::new();
-        conf.load(path, 0, &mut seen)?;
+        conf.load(path, &mut seen)?;
         Ok(conf)
     }
 
-    fn load(&mut self, path: &Path, depth: usize, seen: &mut HashSet<PathBuf>) -> Result<(), ConfigError> {
-        if depth >= 16 { return Err(err(path.display().to_string(), "include nesting exceeded 16")); }
+    fn load(&mut self, path: &Path, seen: &mut HashSet<PathBuf>) -> Result<(), ConfigError> {
         let canonical = path.canonicalize().map_err(|e| err(path.display().to_string(), e.to_string()))?;
         if !seen.insert(canonical.clone()) {
             return Err(err(path.display().to_string(), "recursive include"));
@@ -398,13 +397,13 @@ impl Config {
         let result = (|| {
             let text = fs::read_to_string(&canonical)
                 .map_err(|e| err(path.display().to_string(), e.to_string()))?;
-            self.append(&text, &canonical.display().to_string(), Some(&canonical), depth, seen)
+            self.append(&text, &canonical.display().to_string(), Some(&canonical), seen)
         })();
         seen.remove(&canonical);
         result
     }
 
-    fn append(&mut self, text: &str, source: &str, path: Option<&Path>, depth: usize,
+    fn append(&mut self, text: &str, source: &str, path: Option<&Path>,
               seen: &mut HashSet<PathBuf>) -> Result<(), ConfigError> {
         let mut current: Option<usize> = None;
         // getline() in pinned Mako strips leading/trailing ASCII spaces
@@ -435,7 +434,7 @@ impl Config {
             let value = val;
             if key == "include" && current.is_none() {
                 let path = resolve_include(value).map_err(|e|err(&location,e))?;
-                self.load(&path, depth+1, seen)?;
+                self.load(&path, seen)?;
             } else if current.is_none() && key == "max-history" {
                 // Mako parses max-history as a signed int and treats
                 // zero or negative values as history disabled.
@@ -853,6 +852,29 @@ mod tests {
         assert!(Config::parse("width =320\n").is_err());
         assert!(Config::parse("width=320 garbage\n").is_err());
         assert!(Config::parse("max-history=4 garbage\n").is_err());
+    }
+
+    #[test]
+    fn mako_nested_includes_do_not_hit_an_artificial_depth_limit() {
+        let temporary=tempfile::tempdir().unwrap();
+        let file=|i:usize|temporary.path().join(format!("part-{i:02}.conf"));
+        // Upstream Mako recursively calls load_config_file without a
+        // fixed depth cap; a valid modular config can exceed 16 includes.
+        for i in 0..22 {
+            let content=if i==21 {
+                "width=440\nmax-history=3\n".to_string()
+            } else {
+                format!("include={}\n",file(i+1).display())
+            };
+            std::fs::write(file(i),content).unwrap();
+        }
+        let config=Config::from_path(&file(0)).unwrap();
+        assert_eq!(config.global["width"],"440");
+        assert_eq!(config.max_history,3);
+        // Keep the existing safety guard on actually recursive includes.
+        std::fs::write(file(21),format!("include={}\n",file(0).display())).unwrap();
+        let result=Config::from_path(&file(0)).unwrap_err();
+        assert!(result.message.contains("recursive include"));
     }
 
     #[test]
