@@ -42,8 +42,12 @@ fn main()->Result<(),Box<dyn Error>> {
     let y:u32=args.next().ok_or("missing Y")?.parse()?;
     let width:u32=args.next().ok_or("missing output width")?.parse()?;
     let height:u32=args.next().ok_or("missing output height")?.parse()?;
-    if args.next().is_some() || width==0 || height==0 || x>=width || y>=height {
-        return Err("expected: X Y OUTPUT_WIDTH OUTPUT_HEIGHT, coordinates within output".into());
+    // The default button is BTN_RIGHT. Accept only the three normal mouse
+    // buttons so the private QA fixture can exercise default actions, too.
+    let button:u32=args.next().map(|arg|arg.parse()).transpose()?.unwrap_or(273);
+    if args.next().is_some() || width==0 || height==0 || x>=width || y>=height
+        || ![272,273,274].contains(&button) {
+        return Err("expected: X Y OUTPUT_WIDTH OUTPUT_HEIGHT [272|273|274]".into());
     }
 
     let connection=Connection::connect_to_env()?;
@@ -62,11 +66,11 @@ fn main()->Result<(),Box<dyn Error>> {
     pointer.frame();
     connection.flush()?;
     std::thread::sleep(Duration::from_millis(200));
-    pointer.button(2,273,wl_pointer::ButtonState::Pressed);
+    pointer.button(2,button,wl_pointer::ButtonState::Pressed);
     pointer.frame();
     connection.flush()?;
     std::thread::sleep(Duration::from_millis(100));
-    pointer.button(3,273,wl_pointer::ButtonState::Released);
+    pointer.button(3,button,wl_pointer::ButtonState::Released);
     pointer.frame();
     connection.flush()?;
     std::thread::sleep(Duration::from_millis(100));
