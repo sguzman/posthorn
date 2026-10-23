@@ -6,8 +6,39 @@ use std::time::Duration;
 use posthorn::config::Config;
 use posthorn::control::{CONTROL_INTERFACE, CONTROL_PATH};
 use posthorn::dbus::{BUS_NAME, OBJECT_PATH};
-use posthorn::service::{open_private_service, tick_expirations, PRIVATE_BUS_NAME};
+use posthorn::service::{open_private_service, open_standard_service, tick_expirations, PRIVATE_BUS_NAME};
 use zbus::{Proxy, zvariant::OwnedValue};
+
+#[tokio::test]
+async fn notification_bus_name_collision_never_queues_or_displaces_owner()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // This test is launched only inside the workflow's dbus-run-session.
+    // No user-session org.freedesktop.Notifications ownership is touched.
+    let (first,_) = open_standard_service(Config::default()).await?;
+    let dbus = Proxy::new(&first,"org.freedesktop.DBus",
+        "/org/freedesktop/DBus","org.freedesktop.DBus").await?;
+    let owner_before:String=dbus.call("GetNameOwner",&(BUS_NAME,)).await?;
+    assert_eq!(owner_before,first.unique_name().ok_or("missing owner name")?.as_str());
+    let collision=open_standard_service(Config::default()).await;
+    assert!(collision.is_err(),
+        "second server must not replace or queue behind the existing owner");
+    let owner_after:String=dbus.call("GetNameOwner",&(BUS_NAME,)).await?;
+    assert_eq!(owner_after,owner_before,
+        "collision must not displace the existing notification daemon");
+
+    let (private,_) = open_private_service(Config::default()).await?;
+    let private_dbus = Proxy::new(&private,"org.freedesktop.DBus",
+        "/org/freedesktop/DBus","org.freedesktop.DBus").await?;
+    let private_before:String=private_dbus.call(
+        "GetNameOwner",&(PRIVATE_BUS_NAME,)).await?;
+    assert!(open_private_service(Config::default()).await.is_err(),
+        "private development name must have the same no-queue guarantee");
+    let private_after:String=private_dbus.call(
+        "GetNameOwner",&(PRIVATE_BUS_NAME,)).await?;
+    assert_eq!(private_before,private_after);
+    Ok(())
+}
 
 #[tokio::test]
 async fn private_service_expires_and_archives_a_notification() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
