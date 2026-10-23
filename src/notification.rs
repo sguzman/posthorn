@@ -4,7 +4,9 @@
 
 use std::collections::{HashSet,VecDeque};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+// Do not derive Ord: variant order would incorrectly place Other(-3) above
+// Critical. Sorting must compare mako_value(), the original signed C enum.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Urgency { Unknown, Low, Normal, Critical, Other(i32) }
 
 impl Urgency {
