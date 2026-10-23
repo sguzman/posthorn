@@ -229,6 +229,46 @@ if [[ "$dismiss_repainted" != 1 ]]; then
   cat "$root/posthorn.log"
   exit 1
 fi
+# Retain the existing 2× Freedesktop close/repaint acceptance above,
+# then separately exercise an actual 2× compositor-originated right-click.
+# The 1920×1080 physical headless output has 960×540 logical seat geometry.
+if [[ "$test_scale" == 2 ]]; then
+  result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn HiDPI pointer fixture' 0 '' 'Right click at 2x' '' \
+    0 1 'category' 's' 'warning' 30000)"
+  [[ "$result" == u\\ * ]] || { echo 'Invalid 2x action fixture ID'; exit 1; }
+  hidpi_appeared=0
+  for _ in {1..20}; do
+    sleep 0.1
+    grim "$root/before-hidpi-pointer.png"
+    if /usr/bin/python3 - "$root/before-hidpi-pointer.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+pixels = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if pixels[(113,85,54)] >= 300 else 1)
+PY
+    then hidpi_appeared=1; break; fi
+  done
+  [[ "$hidpi_appeared" == 1 ]] || { echo '2x pointer target never painted'; exit 1; }
+  POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer 800 25 960 540
+  hidpi_dismissed=0
+  for _ in {1..20}; do
+    sleep 0.15
+    grim "$root/after-hidpi-pointer.png"
+    if /usr/bin/python3 "$root/check-dismissed.py" "$root/after-hidpi-pointer.png" >/dev/null 2>&1; then
+      hidpi_dismissed=1
+      break
+    fi
+  done
+  [[ "$hidpi_dismissed" == 1 ]] || {
+    echo '2x compositor pointer did not dismiss only the warning popup'
+    /usr/bin/python3 "$root/check-dismissed.py" "$root/after-hidpi-pointer.png" || true
+    exit 1
+  }
+fi
 # The compositor-originated left click must invoke the sender's default
 # action and dismiss only that notification. Observe the D-Bus signal.
 if [[ "$test_scale" == 1 ]]; then
