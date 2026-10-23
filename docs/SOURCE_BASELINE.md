@@ -140,6 +140,18 @@ The regression suite passed both CI jobs at
 These findings do not close remaining POSIX grammar, properties, or
 real Hyprland parity gates.
 
+The nested-include precedence regression also verifies that recursively
+included criteria retain source order, that the parent file can
+override included root options after the `include=` directive,
+and that later matching criteria in the parent override their
+earlier included counterparts. The test uses three independently
+stored synthetic files and checks both effective style and source
+locations. All Rust/private D-Bus and isolated Sway 1×, 1.25× and
+2× jobs passed at
+[commit e3c2f00](https://github.com/sguzman/posthorn/actions/runs/40027375107).
+This strengthens configuration-source parity but does not claim
+complete glibc regex or user-workstation config acceptance.
+
 ## Fail-fast D-Bus name acquisition
 
 Upstream Mako v1.11 registers its interfaces in `dbus/dbus.c` before
