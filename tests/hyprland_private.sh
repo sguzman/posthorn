@@ -125,6 +125,12 @@ result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   'Posthorn private Hyprland QA' 0 '' 'Temporary QA popup' '' 0 0 30000)"
 [[ "$result" == u\ * ]] || die "unexpected Notify reply: $result"
 notification_id="$(printf '%s\n' "$result" | awk '{print $2}')"
+[[ "$notification_id" =~ ^[1-9][0-9]*$ ]] ||
+  die 'private Notify returned an invalid notification ID'
+listed="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListNotifications)"
+[[ "$listed" == *'Temporary QA popup'* ]] ||
+  die 'private notification was not active in the control API'
 
 painted=0
 for _ in {1..25}; do
@@ -157,4 +163,8 @@ for _ in {1..25}; do
   sleep 0.15
 done
 [[ "$removed" == 1 ]] || die 'closed private popup remained on real Hyprland'
-printf 'PASS: private Hyprland popup appeared and disappeared on screenshots\n'
+listed_after="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListNotifications)"
+[[ "$listed_after" != *'Temporary QA popup'* ]] ||
+  die 'closed notification remains active on the private control API'
+printf 'PASS: private Hyprland popup appeared and disappeared on screenshots and control bus\n'
