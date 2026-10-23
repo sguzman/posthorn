@@ -685,16 +685,25 @@ mod tests {
         let runtime=SharedRuntime::new(Config::parse(
             "output=DP-2\ndefault-timeout=900\n             [output=DP-2]\ndefault-timeout=210\nhistory=0\n"
         ).unwrap());
-        let id=runtime.store.lock().unwrap().push(Request::default());
         let now=Instant::now();
-        // Output rules apply when the actual surface enters the monitor,
-        // not merely because the target output name was configured.
+        let before_enter=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(before_enter,now).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+std::time::Duration::from_millis(900)),
+            "a configured target alone must not trigger output-scoped timeout");
+        assert!(runtime.close(before_enter,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(runtime.store.lock().unwrap().history().len(),1,
+            "the unmatched output-scoped history=0 must not suppress history");
+        // The same config must apply its monitor rule only after the
+        // compositor reports that the surface actually entered DP-2.
         runtime.set_surface_output(Some("DP-2")).unwrap();
-        runtime.schedule_without_hook(id,now).unwrap();
+        let after_enter=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(after_enter,now).unwrap();
         assert_eq!(runtime.next_deadline().unwrap(),
             Some(now+std::time::Duration::from_millis(210)));
-        assert!(runtime.close(id,CloseReason::Dismissed,true).unwrap());
-        assert!(runtime.store.lock().unwrap().history().is_empty());
+        assert!(runtime.close(after_enter,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(runtime.store.lock().unwrap().history().len(),1,
+            "matching output-scoped history=0 must not add a history entry");
     }
 
     #[test]
