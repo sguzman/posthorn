@@ -135,6 +135,26 @@ impl SharedRuntime {
     /// Recalculate active notification history eligibility after Mako-style
     /// mode/config reapplication. This does not reschedule timers or trigger
     /// on-notify bindings, which upstream also leaves alone.
+    /// Mako RestoreNotification reinitializes a historical note's style,
+    /// applies criteria with a NULL surface, then associates a surface.
+    /// Do not treat this as a new Notify: no timer or on-notify hook is armed.
+    pub fn associate_restored_surface(&self,id:u32)->Result<(),String>{
+        let mut store=self.store.lock()
+            .map_err(|_|"notification store lock poisoned")?;
+        let note=store.active().iter().find(|n|n.id==id)
+            .ok_or("restored notification is not active")?.clone();
+        let modes=self.modes.lock()
+            .map_err(|_|"mode state lock poisoned")?.clone();
+        let mut unassociated=note.clone();
+        unassociated.surface_associated=false;
+        unassociated.surface_anchor=None;
+        let style=crate::desktop::style_for_note_index(
+            self,&unassociated,&modes,note.group_index);
+        store.associate_surface(id,
+            style.get("anchor").map(String::as_str).unwrap_or("top-right"));
+        Ok(())
+    }
+
     pub fn reapply_active_history_policies(&self)->Result<(),String>{
         // Keep the store gate until the policy map has been replaced.
         // Otherwise a concurrent Notify could insert its policy between our
@@ -628,6 +648,34 @@ mod tests {
         let id = runtime.store.lock().unwrap().push(Request::default());
         runtime.schedule(id, Instant::now()).unwrap();
         assert!(runtime.next_deadline().unwrap().is_none());
+    }
+
+    #[test]
+    fn history_restore_reselects_category_surface_without_new_timeout() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "default-timeout=4000\n[category=warning]\nanchor=bottom-left\n\
+             [anchor=bottom-left]\nbackground-color=#416276\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request{
+            category:"warning".into(),..Request::default()
+        });
+        let now=Instant::now();
+        runtime.schedule(id,now).unwrap();
+        assert_eq!(runtime.store.lock().unwrap().active().front().unwrap()
+            .surface_anchor.as_deref(),Some("bottom-left"));
+        assert!(runtime.close(id,CloseReason::Dismissed,true).unwrap());
+        assert_eq!(runtime.store.lock().unwrap().history().front().unwrap()
+            .surface_anchor,None);
+        assert_eq!(runtime.store.lock().unwrap().restore(),Some(id));
+        runtime.associate_restored_surface(id).unwrap();
+        runtime.reapply_active_history_policies().unwrap();
+        let note=runtime.store.lock().unwrap().active().front().unwrap().clone();
+        assert_eq!(note.surface_anchor.as_deref(),Some("bottom-left"));
+        let modes=vec!["default".into()];
+        assert_eq!(crate::desktop::style_for_note_index(&runtime,&note,&modes,-1)
+            .get("background-color").map(String::as_str),Some("#416276"));
+        assert!(runtime.next_deadline().unwrap().is_none(),
+            "Mako history restore must not schedule a new expiration");
     }
 
     #[test]

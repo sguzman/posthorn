@@ -349,11 +349,12 @@ impl MakoControl {
         &self, #[zbus(connection)] conn: &Connection,
     ) -> zbus::fdo::Result<()> {
         let restored = self.store.lock().map_err(|_| internal_error())?.restore();
-        if let (Some(runtime), Some(_id)) = (&self.runtime, restored) {
-            // Upstream Mako inserts a restored notification directly into
-            // the active list: it never creates another expiration timer.
-            // Reapply current history style without replaying notification
-            // hooks or scheduling a replacement timeout.
+        if let (Some(runtime), Some(id)) = (&self.runtime, restored) {
+            // Mako clears the restored style and reapplies criteria before
+            // associating the new surface. Do not replay its Notify hooks or
+            // start another expiration timer.
+            runtime.associate_restored_surface(id)
+                .map_err(zbus::fdo::Error::Failed)?;
             runtime.reapply_active_history_policies()
                 .map_err(zbus::fdo::Error::Failed)?;
         }

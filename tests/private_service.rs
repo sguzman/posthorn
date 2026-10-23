@@ -1078,6 +1078,44 @@ async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_d
 }
 
 #[tokio::test]
+async fn history_restore_reapplies_category_anchor_without_timer_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "default-timeout=4000\n[category=warning]\nanchor=bottom-left\n\
+         [anchor=bottom-left]\nbackground-color=#416276\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let hints:HashMap<String,OwnedValue>=[(
+        "category".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("warning"))?
+    )].into();
+    let id:u32=desktop.call("Notify",&(
+        "restore-anchor",0u32,"","Archive","",Vec::<String>::new(),
+        hints,-1i32
+    )).await?;
+    let options:HashMap<String,OwnedValue>=[(
+        "id".into(),OwnedValue::from(id)
+    )].into();
+    let _:()=control.call("DismissNotifications",&(options,)).await?;
+    let historical=runtime.store.lock().unwrap().history().front()
+        .ok_or("notification not archived")?.clone();
+    assert!(!historical.surface_associated);
+    assert!(historical.surface_anchor.is_none());
+    let _:()=control.call("RestoreNotification",&()).await?;
+    let restored=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).ok_or("notification not restored")?.clone();
+    assert_eq!(restored.surface_anchor.as_deref(),Some("bottom-left"));
+    let style=posthorn::desktop::style_for_note_index(
+        &runtime,&restored,&["default".into()],restored.group_index);
+    assert_eq!(style.get("background-color").map(String::as_str),
+        Some("#416276"));
+    assert!(runtime.next_deadline()?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
 async fn direct_replacement_uses_prior_category_surface_anchor_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
