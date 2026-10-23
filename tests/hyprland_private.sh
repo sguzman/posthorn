@@ -28,13 +28,17 @@ if [[ "$#" != 1 || "$1" != '--inside' ]]; then
   [[ "$owner_before" == s\ * ]] || die 'unexpected original bus owner'
   cargo build --quiet --bin posthorn --example qa_png_probe
   # The child gets a new DBUS_SESSION_BUS_ADDRESS but retains WAYLAND_DISPLAY.
-  dbus-run-session -- bash "$script_path" --inside
+  child_status=0
+  dbus-run-session -- bash "$script_path" --inside || child_status=$?
+  # Always re-check the original owner, including when child acceptance fails.
   owner_after="$(busctl --user --timeout=3s call org.freedesktop.DBus \
     /org/freedesktop/DBus org.freedesktop.DBus GetNameOwner \
     s org.freedesktop.Notifications 2>/dev/null)" ||
     die 'real notification owner vanished during QA'
   [[ "$owner_before" == "$owner_after" ]] ||
     die 'original notification daemon owner changed during QA'
+  [[ "$child_status" == 0 ]] ||
+    die "nested private Hyprland acceptance failed (exit $child_status); original owner unchanged"
   printf 'PASS: private Hyprland rendering; original notification owner unchanged\n'
   exit 0
 fi
