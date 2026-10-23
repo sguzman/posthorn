@@ -1202,6 +1202,39 @@ async fn click_activation_signal_precedes_action_and_close()
 }
 
 #[tokio::test]
+async fn out_of_range_urgency_does_not_match_normal_style_over_dbus()
+    ->Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "[urgency=normal]\non-notify=dismiss\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let ordinary:HashMap<String,OwnedValue>=[(
+        "urgency".into(),OwnedValue::from(1u8)
+    )].into();
+    let _:u32=desktop.call("Notify",&(
+        "urgency-parity",0u32,"","Normal closes","",
+        Vec::<String>::new(),ordinary,-1i32
+    )).await?;
+    assert!(runtime.store.lock().unwrap().active().is_empty());
+    let unusual:HashMap<String,OwnedValue>=[(
+        "urgency".into(),OwnedValue::from(3u32)
+    )].into();
+    let id:u32=desktop.call("Notify",&(
+        "urgency-parity",0u32,"","Unknown value stays","",
+        Vec::<String>::new(),unusual,-1i32
+    )).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),1);
+    let records:Vec<HashMap<String,OwnedValue>>=
+        ctl.call("ListNotifications",&()).await?;
+    assert_eq!(records.len(),1);
+    assert_eq!(u32::try_from(records[0].get("id").unwrap())?,id);
+    assert_eq!(u8::try_from(records[0].get("urgency").unwrap())?,3u8);
+    Ok(())
+}
+
+#[tokio::test]
 async fn posix_dotall_summary_criteria_drive_private_dbus_on_notify()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
