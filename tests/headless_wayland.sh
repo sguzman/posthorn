@@ -442,6 +442,47 @@ PY
     exit 1
   }
 fi
+# Mako's [output=] criteria use the compositor-assigned wl_surface output,
+# not the requested output= placement field. This fixture deliberately has
+# no global output= setting; Sway must report HEADLESS-1 via wl_surface.enter.
+cat >> "$root/mako.conf" <<'EOF'
+[category=output-probe output=HEADLESS-1]
+background-color=#256F9C
+[category=output-probe output=NONEXISTENT]
+background-color=#C51F76
+EOF
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+output_probe="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /org/freedesktop/Notifications \
+  org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+  'Posthorn output-criteria QA' 0 '' 'Compositor output match' '' \
+  0 1 'category' 's' 'output-probe' 30000)"
+[[ "$output_probe" == u\ * ]] || { echo 'Invalid output-criteria notification'; exit 1; }
+output_probe_id="${output_probe#u }"
+output_painted=0
+for _ in {1..20}; do
+  sleep 0.15
+  grim "$root/output-criteria.png"
+  if /usr/bin/python3 - "$root/output-criteria.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+pixels=Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if pixels[(37,111,156)] >= 300
+    and pixels[(197,31,118)] < 100 else 1)
+PY
+  then output_painted=1; break; fi
+done
+[[ "$output_painted" == 1 ]] || {
+  echo 'Compositor-selected HEADLESS-1 did not match its output-scoped style'
+  cat "$root/posthorn.log"
+  exit 1
+}
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /org/freedesktop/Notifications \
+  org.freedesktop.Notifications CloseNotification 'u' "$output_probe_id" >/dev/null
+
 # Exercise timer-driven expiry through the full private D-Bus / Wayland path.
 # Use a distinct warning color so visual removal can be distinguished from
 # ordinary notification closure in the compositor capture.
