@@ -164,11 +164,23 @@ assert top_rows["warning"] < top_rows["failure"] < top_rows["success"], (
     f"Mako newest-first stack order changed: {top_rows}"
 )
 PY
-# Close one popup through the actual Freedesktop method. The compositor must
-# repaint the stack, removing that color without erasing the remaining popups.
-busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
-  /org/freedesktop/Notifications org.freedesktop.Notifications CloseNotification \
-  'u' "$warning_id" >/dev/null
+# At 1x, use a compositor-originated pointer button event rather than a
+# synthetic Rust hit-test or D-Bus CloseNotification. The nested Sway seat
+# moves to the newest right-aligned warning popup (width=300, margin=8) and
+# sends BTN_RIGHT through wl_pointer. This NEVER touches the user's seat.
+# Other scales retain the existing D-Bus repaint check; at fractional scale
+# screenshot pixels do not correspond directly to seat logical coordinates.
+if [[ "$test_scale" == 1 ]]; then
+  ipc_socket="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'sway-ipc.*.sock' -print -quit)"
+  [[ -S "$ipc_socket" ]] || { echo "Could not find isolated Sway IPC socket"; exit 1; }
+  swaymsg -s "$ipc_socket" 'seat seat0 cursor set 1100 25' >/dev/null
+  swaymsg -s "$ipc_socket" 'seat seat0 cursor press button3' >/dev/null
+  swaymsg -s "$ipc_socket" 'seat seat0 cursor release button3' >/dev/null
+else
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
+    /org/freedesktop/Notifications org.freedesktop.Notifications CloseNotification \
+    'u' "$warning_id" >/dev/null
+fi
 cat > "$root/check-dismissed.py" <<'PY'
 from collections import Counter
 from PIL import Image
@@ -351,7 +363,7 @@ done
   cat "$root/posthorn.log"
   exit 1
 }
-echo "Headless Sway ${test_scale}x + D-Bus popups, timer, reload and live modes: OK"
+echo "Headless Sway ${test_scale}x + D-Bus popups, compositor pointer at 1x, timer, reload and live modes: OK"
 
 if [[ "$test_scale" == 1 ]]; then
   # Live registry hotplug: the target named output does not exist at daemon
