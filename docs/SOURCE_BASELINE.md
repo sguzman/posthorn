@@ -384,6 +384,31 @@ tokens. They still do **not** prove production Hyprland action focus,
 compositor touch behavior, exact fractional-buffer negotiation, physical
 audio, or the reversible Mako replacement gate.
 
+## Real compositor action and custom button edge cases
+
+Two additional isolated Sway 1× input regressions use the guarded
+wlroots virtual pointer instead of synthetic hit tests. When a sender
+supplies an `open` action but **no `default` key**, Mako's default
+left-button binding still dismisses its popup without an
+`xdg_activation_v1.get_activation_token` request or
+`ActivationToken`/`ActionInvoked` signals. This passed the full
+Rust/private D-Bus and 1×/1.25×/2× compositor CI at
+[commit c109ae8](https://github.com/sguzman/posthorn/actions/runs/40009309154).
+
+A notification scoped by `[category=middle-dismiss]` overrides the
+previously unbound middle mouse button with
+`on-button-middle=dismiss --no-history`. Actual
+`wl_pointer.button` delivery must remove the target popup while
+leaving older unrelated popups intact, emit
+`NotificationClosed` without invoking an action or requesting XDG
+activation, and omit the dismissed notification from the control
+`ListHistory` result. Both CI jobs passed at
+[commit 05a1353](https://github.com/sguzman/posthorn/actions/runs/40009694365).
+
+These prove additional *headless Sway* input and D-Bus behavior only;
+no physical Hyprland pointer/touch or production session ownership is
+implied.
+
 ## Compositor-assigned output criteria versus requested placement
 
 Pinned Mako v1.11 `criteria.c:criteria_matches` compares an
