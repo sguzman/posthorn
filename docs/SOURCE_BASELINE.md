@@ -501,7 +501,7 @@ single-thread desktop event loop.
 
 ## Compositor-assigned output criteria versus requested placement
 
-Pinned Mako v1.11 `criteria.c:criteria_matches` compares an
+Pinned Mako v1.11 `criteria.c:match_criteria` compares an
 `[output=...]` selector with
 `notif->surface->surface_output->name`; its `render.c` rematches
 criteria immediately before painting, after the compositor can
@@ -533,21 +533,44 @@ same popup to repaint in a color supplied by a rule scoped to its
 private Rust/D-Bus and 1×/1.25×/2× compositor CI passed at
 [commit 467e6c1](https://github.com/sguzman/posthorn/actions/runs/40006415764).
 
-The notification scheduler independently used to construct selector traits
-from the configured placement string. It now uses the observed output as
-well. A lifecycle regression verifies that output-scoped
-`default-timeout=210` and `history=0` **do not** match before
-compositor assignment, then do match once the surface is observed on
-`DP-2`. Both CI jobs passed at
-[commit dc26d78](https://github.com/sguzman/posthorn/actions/runs/40006884032).
-A stronger 1× compositor acceptance sends a notification with a
-sender timeout of -1 and checks that `[output=HEADLESS-1]` selects
-the scoped short default timeout, paints its distinctive color, removes
-the popup on expiry, and excludes it from `ListHistory` when
-`history=0`. The signed D-Bus fixture uses an explicit option terminator
-so `busctl` passes -1 as the actual method argument. Rust/private D-Bus
-and all headless Sway output scales passed at
-[commit a483bbd](https://github.com/sguzman/posthorn/actions/runs/40008223463).
+Earlier Posthorn revisions used the configured placement to select initial
+timeout criteria; a subsequent change correctly used the compositor-entered
+output. The regression at
+[commit dc26d78](https://github.com/sguzman/posthorn/actions/runs/40006884032)
+established the importance of the **observed output**, but its initial
+timeout expectation was incomplete. A historical headless regression at
+[commit a483bbd](https://github.com/sguzman/posthorn/actions/runs/40008223463)
+also passed with that now-superseded assumption. These prior successful
+runs are retained as implementation history, **not** as proof of strict
+Mako v1.11.0 arrival-time semantics.
+
+Pinned Mako `criteria.c:match_criteria` also requires
+`notif->surface != NULL` before either `[anchor]` or `[output]`
+can match. On the first Freedesktop `Notify`, the notification's
+surface is still NULL when `apply_each_criteria` chooses its timeout
+and `on-notify` binding; only **afterwards** does it create or reuse
+a surface. Later render passes may apply an output-specific background,
+format or visibility rule once the compositor has reported
+`wl_surface.enter`, but this must **not retroactively change** the
+initial expiration timer. An explicit-ID replacement retains the old
+surface pointer through `reset_notification` and may therefore select
+surface-specific criteria on arrival. A new stack-tag replacement does
+not inherit that surface and starts with NULL.
+
+Posthorn now records per-notification surface-association lifecycle
+state, preserving it on direct-ID replacement, clearing it for new/tag
+objects and history, and restoring association when history is
+reinserted. Rust and private D-Bus regressions cover fresh/direct/tag
+`[anchor]` timeout behavior, first versus direct replacement
+`[output]` timeouts, and rendering after association. The earlier
+headless timeout fixture was revised to require a fresh notification
+to remain visible past an output-only 1800ms timeout, followed by
+an explicit-ID replacement that must expire under that output rule
+and honor `history=0`. Rust unit and private D-Bus validation
+passed at [ddd2112](https://github.com/sguzman/posthorn/actions/runs/40038629306);
+the corrected final headless compositor acceptance is tracked in
+[8e7400a](https://github.com/sguzman/posthorn/actions/runs/40038808422)
+and is **not asserted green until both CI jobs finish**.
 
 Real Hyprland monitor reassignment, multiple independent notification
 surfaces, and complete output-sensitive grouping behavior remain open.
