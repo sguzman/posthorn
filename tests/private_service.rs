@@ -889,15 +889,21 @@ async fn category_sound_command_routing_and_quiet_mode_preserve_notifications()
     assert_eq!(observed,expected,
         "each category must select its own sound hook once");
     let _:()=control.call("SetMode",&("quiet",)).await?;
-    for (category,_) in category_color {
+    for (category,color) in category_color {
         let hints:HashMap<String,OwnedValue>=[(
             "category".to_owned(),
             OwnedValue::try_from(zbus::zvariant::Value::from(category))?,
         )].into();
-        let _:u32=desktop.call("Notify",&(
+        let id:u32=desktop.call("Notify",&(
             "sound-router",0u32,"","Quiet category","",
             Vec::<String>::new(),hints,-1i32,
         )).await?;
+        let note=runtime.store.lock().unwrap().active().iter()
+            .find(|note|note.id==id).cloned().ok_or("missing quiet note")?;
+        let style=posthorn::desktop::style_for_note(
+            &runtime,&note,&["quiet".to_owned()]);
+        assert_eq!(style["background-color"],color,
+            "quiet mode must preserve category presentation while muting hooks");
     }
     tokio::time::sleep(std::time::Duration::from_millis(160)).await;
     assert_eq!(std::fs::read_to_string(&marker)?,text,
