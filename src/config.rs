@@ -8,6 +8,53 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use crate::wayland::PopupMargins;
+
+/// Mako adjusts a style's left/right padding only when the same style
+/// explicitly contains both padding and border-radius. The root style has
+/// both from built-in defaults; a criteria section begins with neither.
+/// Recording each assignment is essential: later lowering border-radius
+/// does not undo an earlier padding clamp.
+#[derive(Clone, Debug, Default)]
+struct MakoPaddingState {
+    input_padding: Option<PopupMargins>,
+    effective_padding: Option<PopupMargins>,
+    border_radius: Option<PopupMargins>,
+}
+
+impl MakoPaddingState {
+    fn root() -> Self {
+        let padding=PopupMargins::uniform(5);
+        Self {
+            input_padding:Some(padding),
+            effective_padding:Some(padding),
+            border_radius:Some(PopupMargins::uniform(0)),
+        }
+    }
+
+    fn assign(&mut self, key:&str, value:&str) {
+        let Some(value)=PopupMargins::parse_mako(value) else{return};
+        match key {
+            "padding" => {
+                self.input_padding=Some(value);
+                self.effective_padding=Some(value);
+            }
+            "border-radius" => self.border_radius=Some(value),
+            _ => return,
+        }
+        if let (Some(padding),Some(radius))=(&mut self.effective_padding,self.border_radius) {
+            padding.left=padding.left.max(radius.left);
+            padding.right=padding.right.max(radius.right);
+        }
+    }
+
+    fn override_padding(&self) -> Option<String> {
+        let (Some(original),Some(actual))=(self.input_padding,self.effective_padding)
+            else{return None};
+        if actual==original {return None}
+        Some(format!("{},{},{},{}",actual.top,actual.right,actual.bottom,actual.left))
+    }
+}
 
 /// Exactly what appeared in the Mako config, with no conversion to CSS or TOML.
 pub type Options = BTreeMap<String, String>;
@@ -203,6 +250,7 @@ pub struct Rule {
     pub raw_selector: String,
     pub selectors: Vec<Selector>,
     pub options: Options,
+    padding_state: MakoPaddingState,
 }
 
 impl Rule {
@@ -241,6 +289,7 @@ pub struct Config {
     pub rules: Vec<Rule>,
     pub max_history: usize,
     pub sort: Vec<String>,
+    root_padding_state: MakoPaddingState,
 }
 
 impl Default for Config {
@@ -261,6 +310,7 @@ impl Default for Config {
         Self {
             global: default.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
             rules: Vec::new(), max_history: 5, sort: vec!["-time".into()],
+            root_padding_state:MakoPaddingState::root(),
         }
     }
 }
@@ -270,6 +320,9 @@ impl Config {
     /// selectors and cross-output layout are deliberately not claimed as ported.
     pub fn style_for(&self, n: &Traits<'_>) -> Options {
         let mut style = self.global.clone();
+        if let Some(padding)=self.root_padding_state.override_padding(){
+            style.insert("padding".into(),padding);
+        }
         // Mako installs a hidden-notification formatting rule before user
         // criteria. Later [hidden] rules may override this built-in format.
         if n.hidden {
@@ -284,6 +337,9 @@ impl Config {
         for rule in &self.rules {
             if rule.matches(n) {
                 style.extend(rule.options.clone());
+                if let Some(padding)=rule.padding_state.override_padding(){
+                    style.insert("padding".into(),padding);
+                }
             }
         }
         style
@@ -364,6 +420,7 @@ impl Config {
                 self.rules.push(Rule {
                     source: location, raw_selector: selector.into(), selectors,
                     options: Options::new(),
+                    padding_state:MakoPaddingState::default(),
                 });
                 current = Some(self.rules.len() - 1);
                 continue;
@@ -400,14 +457,24 @@ impl Config {
                 if ["margin","outer-margin","padding","border-radius"].contains(&key)
                     && value.split(',').all(str::is_empty) {
                     if let Some(index)=current {
-                        self.rules[index].options.entry(key.into())
-                            .or_insert_with(||"0".into());
+                        let rule=&mut self.rules[index];
+                        if !rule.options.contains_key(key){
+                            rule.options.insert(key.into(),"0".into());
+                            rule.padding_state.assign(key,"0");
+                        }
                     }
                     continue;
                 }
                 match current {
-                    Some(index) => { self.rules[index].options.insert(key.into(),value.into()); },
-                    None => { self.global.insert(key.into(),value.into()); },
+                    Some(index) => {
+                        let rule=&mut self.rules[index];
+                        rule.options.insert(key.into(),value.into());
+                        rule.padding_state.assign(key,value);
+                    },
+                    None => {
+                        self.global.insert(key.into(),value.into());
+                        self.root_padding_state.assign(key,value);
+                    },
                 }
             }
         }
@@ -605,6 +672,43 @@ mod tests {
         Traits { app_name: "example", app_icon:"", category, desktop_entry:"", summary:"Saved",
             body:"All changes written", urgency:"normal", anchor:"top-right", output:"",
             modes, requested_timeout_ms:-1, actionable:false, group_index:-1, hidden:false }
+    }
+
+    #[test]
+    fn border_radius_padding_clamp_follows_mako_style_scope_and_assignment_order(){
+        let fields=note("success",&["default"]);
+        let root=Config::parse("border-radius=20\n").unwrap();
+        assert_eq!(root.global["padding"],"5",
+            "the parsed user input remains available unchanged");
+        assert_eq!(root.style_for(&fields)["padding"],"5,20,5,20",
+            "root style includes default padding and explicit radius");
+        let lowered=Config::parse("border-radius=20\nborder-radius=0\n").unwrap();
+        assert_eq!(lowered.style_for(&fields)["padding"],"5,20,5,20",
+            "Mako does not reverse a previous config-time clamp");
+        let reset=Config::parse("border-radius=20\npadding=8\nborder-radius=0\n").unwrap();
+        assert_eq!(reset.style_for(&fields)["padding"],"8,20,8,20",
+            "a padding reassignment reclamps against the then-current radius");
+
+        let radius_only=Config::parse(
+            "[category=success]\nborder-radius=30\n"
+        ).unwrap();
+        assert_eq!(radius_only.style_for(&fields)["padding"],"5",
+            "a scoped radius-only rule does not reclamp inherited root padding");
+        let scoped=Config::parse(
+            "[category=success]\npadding=2\nborder-radius=30\n"
+        ).unwrap();
+        assert_eq!(scoped.style_for(&fields)["padding"],"2,30,2,30");
+        let different=note("failure",&["default"]);
+        assert_eq!(scoped.style_for(&different)["padding"],"5");
+        let order=Config::parse(
+            "[category=success]\nborder-radius=30\npadding=2\nborder-radius=4\n"
+        ).unwrap();
+        assert_eq!(order.style_for(&fields)["padding"],"2,30,2,30");
+        let later=Config::parse(
+            "[category=success]\npadding=2\nborder-radius=30\n            [category=success]\npadding=7\n"
+        ).unwrap();
+        assert_eq!(later.style_for(&fields)["padding"],"7",
+            "a later independent scoped padding override is not re-clamped");
     }
 
     #[test]
