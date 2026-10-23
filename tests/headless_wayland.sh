@@ -57,7 +57,7 @@ cat > "$root/mako.conf" <<'EOF'
 width=300
 height=120
 margin=8
-default-timeout=7000
+default-timeout=30000
 [category=success]
 background-color=#305747
 [category=failure]
@@ -90,7 +90,7 @@ fi
 
 result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
   /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
-  'susssasa{sv}i' 'Posthorn Wayland smoke' 0 '' 'Hello' 'A real Wayland popup' 0 0 7000)"
+  'susssasa{sv}i' 'Posthorn Wayland smoke' 0 '' 'Hello' 'A real Wayland popup' 0 0 30000)"
 [[ "$result" == u\ * ]] || { echo "Invalid Notify result: $result"; exit 1; }
 # Observe real Wayland protocol traffic, not merely D-Bus success
 # or an alive process. The compositor must configure the layer surface
@@ -122,12 +122,12 @@ busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s introspect org.posthor
 # 1 is the a{sv} length; the variant is (key='category', type=s, value=success).
 busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
   /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
-  'susssasa{sv}i' 'Posthorn screenshot' 0 '' 'Success' '' 0 1 'category' 's' 'success' 7000 >/dev/null
+  'susssasa{sv}i' 'Posthorn screenshot' 0 '' 'Success' '' 0 1 'category' 's' 'success' 30000 >/dev/null
 warning_id=""
 for category in failure warning; do
   result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
     /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
-    'susssasa{sv}i' 'Posthorn screenshot' 0 '' "$category" '' 0 1 'category' 's' "$category" 7000)"
+    'susssasa{sv}i' 'Posthorn screenshot' 0 '' "$category" '' 0 1 'category' 's' "$category" 30000)"
   if [[ "$category" == warning ]]; then warning_id="${result#u }"; fi
 done
 [[ "$warning_id" =~ ^[0-9]+$ ]] || { echo "Invalid warning notification ID: $warning_id"; exit 1; }
@@ -208,6 +208,13 @@ done
 if [[ "$dismiss_repainted" != 1 ]]; then
   /usr/bin/python3 "$root/check-dismissed.py" "$root/after-close.png"
   echo 'Notification close did not repaint the live Wayland stack'
+  if [[ "$test_scale" == 1 ]]; then
+    echo 'Nested compositor seat state:'
+    swaymsg -s "$ipc_socket" -t get_seats || true
+    echo 'Relevant compositor-delivered pointer events:'
+    grep -E 'wl_pointer@.*(enter|motion|button)|wl_seat@.*capabilities' \
+      "$root/posthorn.log" | tail -45 || true
+  fi
   cat "$root/posthorn.log"
   exit 1
 fi
@@ -392,7 +399,7 @@ if [[ "$test_scale" == 1 ]]; then
   busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
     /org/freedesktop/Notifications org.freedesktop.Notifications Notify \
     'susssasa{sv}i' 'Posthorn hotplug' 0 '' 'Hotplug success' '' 0 1 \
-    'category' 's' 'success' 7000 >/dev/null
+    'category' 's' 'success' 30000 >/dev/null
   sleep 0.25
   kill -0 "$posthorn_pid" || { echo "Posthorn crashed while output missing"; exit 1; }
 
