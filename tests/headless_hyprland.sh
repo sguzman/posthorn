@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Experimental Arch/Hyprland compositor CI. No workstation or Mako cutover.
 set -euo pipefail
-[[ "\${POSTHORN_HEADLESS_HYPRLAND_TEST:-}" == "1" ]] || { echo 'Headless QA guard missing'; exit 1; }
-[[ "\${GITHUB_ACTIONS:-}" == "true" ]] || { echo 'CI-only experimental harness'; exit 1; }
+[[ "${POSTHORN_HEADLESS_HYPRLAND_TEST:-}" == "1" ]] || { echo 'Headless QA guard missing'; exit 1; }
+[[ "${GITHUB_ACTIONS:-}" == "true" ]] || { echo 'CI-only experimental harness'; exit 1; }
 root="$(mktemp -d)"
 hypr_pid=""
 posthorn_pid=""
@@ -39,7 +39,7 @@ for _ in {1..80}; do
   sleep 0.25
 done
 [[ -n "$socket" ]] || { echo 'Missing headless Hyprland Wayland socket'; cat "$root/hyprland.log"; exit 1; }
-export WAYLAND_DISPLAY="\${socket##*/}"
+export WAYLAND_DISPLAY="${socket##*/}"
 ready=0
 for _ in {1..35}; do
   if timeout 5s grim "$root/before.png" >/dev/null 2>&1; then ready=1; break; fi
