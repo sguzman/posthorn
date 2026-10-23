@@ -217,11 +217,13 @@ contain an `@`.
 Posthorn now follows this ordering, including C `strtol`-style
 positive decimal prefixes for icon size and scale. Unit tests cover
 both directory layouts and confirm that `64x64/apps@2` does not
-incorrectly outrank `64x64@2/apps` on a 2× display. Rust and headless
-Wayland CI passed at
-[commit 543f7c7](https://github.com/sguzman/posthorn/actions/runs/39966123186).
-The new acceptance case does not prove complete monitor-hotplug,
-Hyprland, or pixel-equivalent icon placement behavior.
+incorrectly outrank `64x64@2/apps` on a 2× display. An additional
+Cairo-renderer test constructs different-colored PNG assets in conflicting
+directory layouts and verifies the selected pixels at both 1× and 2×,
+without changing popup geometry. Rust and headless Wayland CI passed at
+[commit 6d2c308](https://github.com/sguzman/posthorn/actions/runs/39966794165).
+These acceptance cases do not prove complete monitor-hotplug or live
+Hyprland parity.
 
 ## Explicit nonclaims
 
