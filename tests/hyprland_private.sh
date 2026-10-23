@@ -9,6 +9,13 @@ cd "$(dirname "$script_path")/.."
 [[ -v POSTHORN_HYPRLAND_QA ]] ||
   die 'explicit POSTHORN_HYPRLAND_QA=1 guard required'
 [[ "$POSTHORN_HYPRLAND_QA" == "1" ]] || die 'Hyprland QA not authorized'
+if [[ "${1:-}" == '--inside' ]]; then
+  [[ "${POSTHORN_QA_NESTED:-}" == "1" && -n "${POSTHORN_QA_PARENT_BUS:-}" ]] ||
+    die 'nested QA entrypoint requires original-bus verification by parent'
+  [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" &&
+     "$DBUS_SESSION_BUS_ADDRESS" != "$POSTHORN_QA_PARENT_BUS" ]] ||
+    die 'nested QA must not run on the original session bus'
+fi
 [[ -v HYPRLAND_INSTANCE_SIGNATURE && -v WAYLAND_DISPLAY && -v XDG_RUNTIME_DIR ]] ||
   die 'a real Hyprland Wayland session is required'
 [[ -n "$HYPRLAND_INSTANCE_SIGNATURE" && -n "$WAYLAND_DISPLAY" ]] ||
@@ -26,10 +33,14 @@ if [[ "$#" != 1 || "$1" != '--inside' ]]; then
     s org.freedesktop.Notifications 2>/dev/null)" ||
     die 'real notification service has no owner; refusing to test'
   [[ "$owner_before" == s\ * ]] || die 'unexpected original bus owner'
+  [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] ||
+    die 'original D-Bus address unavailable; refusing nested test'
   cargo build --quiet --bin posthorn --example qa_png_probe
   # The child gets a new DBUS_SESSION_BUS_ADDRESS but retains WAYLAND_DISPLAY.
   child_status=0
-  dbus-run-session -- bash "$script_path" --inside || child_status=$?
+  POSTHORN_QA_NESTED=1 POSTHORN_QA_PARENT_BUS="$DBUS_SESSION_BUS_ADDRESS" \
+    POSTHORN_QA_EXPECTED_OWNER="$owner_before" \
+    dbus-run-session -- bash "$script_path" --inside || child_status=$?
   # Always re-check the original owner, including when child acceptance fails.
   owner_after="$(busctl --user --timeout=3s call org.freedesktop.DBus \
     /org/freedesktop/DBus org.freedesktop.DBus GetNameOwner \
@@ -44,6 +55,14 @@ if [[ "$#" != 1 || "$1" != '--inside' ]]; then
 fi
 
 [[ -v DBUS_SESSION_BUS_ADDRESS ]] || die 'nested session bus missing'
+# Validate the original bus still has the owner checked by the parent.
+# This also catches a mistaken nested invocation on an untrusted bus.
+owner_in_child="$(busctl --address="$POSTHORN_QA_PARENT_BUS" --timeout=3s call \
+  org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+  GetNameOwner s org.freedesktop.Notifications 2>/dev/null)" ||
+  die 'original notification service disappeared before private QA'
+[[ "$owner_in_child" == "${POSTHORN_QA_EXPECTED_OWNER:-}" ]] ||
+  die 'original notification service owner changed before private QA'
 root="$(mktemp -d)"
 daemon_pid=""
 cleanup(){
