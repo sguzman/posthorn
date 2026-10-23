@@ -617,6 +617,16 @@ impl LivePresenter {
             .any(|(_,name)|name==output_name)
     }
 
+    /// The compositor-assigned monitor of the mapped layer surface.
+    /// A configured output is only a placement request and must not be
+    /// substituted into output criteria before wl_surface.enter.
+    pub fn current_output_name(&self)->Option<&str>{
+        let active=self.state.entered_output.as_ref()?;
+        self.state.output_names.iter()
+            .find(|(proxy,_)|proxy==active)
+            .map(|(_,name)|name.as_str())
+    }
+
     /// Mako icon.c uses the maximum integer scale of every attached output
     /// when selecting a theme asset, independently of popup placement.
     pub fn maximum_output_scale(&self)->u32{
