@@ -28,15 +28,15 @@ async fn open_named_service(config: Config, name: &str)
 async fn open_named_runtime(runtime:SharedRuntime,name:&str)
     -> zbus::Result<(Connection,SharedRuntime)>
 {
+    // Set up the *whole* object before owning any well-known name. zbus
+    // Builder::name requests ownership before this post-build property
+    // override is installed; callers can observe a lossy Notifications
+    // property in that interval. Default name requests may also queue.
     let conn = connection::Builder::session()?
-        .name(name)?
         .serve_at(OBJECT_PATH, FreedesktopNotifications::with_runtime(runtime.clone()))?
         .serve_at(CONTROL_PATH, MakoControl::with_runtime(runtime.clone()))?
         .build()
         .await?;
-    // Override only the standard Properties interface at the Mako control
-    // object path. The Freedesktop object keeps zbus' default implementation.
-    // This is isolated on org.posthorn.Development in regular execution.
     let server=conn.object_server();
     server.remove::<zbus::fdo::Properties,_>(CONTROL_PATH).await?;
     let registered=server.at(CONTROL_PATH,
@@ -45,6 +45,12 @@ async fn open_named_runtime(runtime:SharedRuntime,name:&str)
         return Err(zbus::Error::Failure(
             "unable to register ordered Mako control properties".into()));
     }
+    // Never replace or queue behind an existing notification daemon. If
+    // another service owns the name, return NameTaken immediately. This
+    // is especially important for eventual opt-in reversible cutover.
+    conn.request_name_with_flags(
+        name,zbus::fdo::RequestNameFlags::DoNotQueue.into()
+    ).await?;
     Ok((conn, runtime))
 }
 

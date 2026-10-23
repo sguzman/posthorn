@@ -59,6 +59,27 @@ async fn accepts_notify_then_exposes_control_list_and_history() -> Result<(), Bo
 }
 
 #[tokio::test]
+async fn standard_name_collision_fails_without_queueing_or_replacing_owner()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Only under CI's dbus-run-session; never claim the user's real bus name.
+    let (first,_runtime)=posthorn::service::open_standard_service(Config::default()).await?;
+    let first_owner=first.unique_name().ok_or("missing first unique bus name")?.to_string();
+    let dbus=zbus::fdo::DBusProxy::new(&first).await?;
+    assert_eq!(dbus.get_name_owner(BUS_NAME.try_into()?).await?.as_str(),first_owner);
+
+    let second=tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        posthorn::service::open_standard_service(Config::default())
+    ).await.expect("second service queued instead of immediately rejecting the name");
+    assert!(matches!(second,Err(zbus::Error::NameTaken)),
+        "a second Posthorn instance must fail without replacing Mako");
+    assert_eq!(dbus.get_name_owner(BUS_NAME.try_into()?).await?.as_str(),first_owner,
+        "an unsuccessful startup must not transfer ownership");
+    Ok(())
+}
+
+#[tokio::test]
 async fn standard_notification_name_is_claimed_only_inside_test_session()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
