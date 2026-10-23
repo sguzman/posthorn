@@ -68,9 +68,35 @@ async fn standard_notification_name_is_claimed_only_inside_test_session()
     let desktop=Proxy::new(&conn,BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
     let id:u32=desktop.call("Notify",&(
         "standard-bus-test",0u32,"","Title","Body",
-        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        vec![
+            "same".to_string(),"Older-label-1".to_string(),
+            "same".to_string(),"Newer-label-2".to_string(),
+        ],
+        HashMap::<String,OwnedValue>::new(),-1i32
     )).await?;
     assert_eq!(runtime.store.lock().unwrap().active().len(),1);
     assert_eq!(runtime.store.lock().unwrap().active()[0].id,id);
+    // The real public name is only claimed under dbus-run-session. Verify
+    // that the ordered Properties adapter is installed for this eventual
+    // production-facing name as well, never on the user's session bus.
+    let props=Proxy::new(&conn,BUS_NAME,CONTROL_PATH,
+        "org.freedesktop.DBus.Properties").await?;
+    for (method,args) in [
+        ("Get",vec![CONTROL_INTERFACE,"Notifications"]),
+        ("GetAll",vec![CONTROL_INTERFACE]),
+    ] {
+        let reply=if method=="Get" {
+            props.call_method(method,&(args[0],args[1])).await?
+        } else {
+            props.call_method(method,&(args[0],)).await?
+        };
+        let bytes=reply.body().data().bytes().to_vec();
+        let older=bytes.windows(b"Older-label-1\0".len())
+            .position(|w|w==b"Older-label-1\0").unwrap();
+        let newer=bytes.windows(b"Newer-label-2\0".len())
+            .position(|w|w==b"Newer-label-2\0").unwrap();
+        assert!(newer<older,
+            "{method} on the standard test bus must retain duplicate actions");
+    }
     Ok(())
 }
