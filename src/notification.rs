@@ -571,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn priority_sort_keeps_distinct_out_of_range_urgency_bands(){
+    fn priority_sort_replays_mako_sentinel_for_unsupported_urgencies(){
         let mut store=NotificationStore::new(5);
         store.set_sort_policy(SortPolicy{
             by_priority:true,priority_ascending:false,time_ascending:false
@@ -582,7 +582,8 @@ mod tests {
         let high=store.push(make(Urgency::Other(7)));
         let critical=store.push(make(Urgency::Critical));
         assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
-            vec![high,critical,normal,very_low]);
+            vec![critical,high,very_low,normal],
+            "Mako inserts at the head whenever its bounded search finds no recognized urgency");
         assert_eq!(Urgency::from_mako_wire(Some(u32::MAX as i64)),
             Urgency::Unknown);
         assert_eq!(Urgency::Other(-3).mako_value() as u8,253u8);
