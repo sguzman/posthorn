@@ -1404,6 +1404,40 @@ async fn raw_signed_progress_hint_preserved_across_replacements_over_dbus()
 }
 
 #[tokio::test]
+async fn private_dbus_progress_value_has_exact_mako_integer_pixel_boundary()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::render::render_notification_group_scaled;
+    let config=Config::parse(
+        "width=101\nheight=70\nborder-size=0\npadding=0\n         progress-color=source #FF0000FF\nbackground-color=#0000FFFF\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let dest=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let hints:HashMap<String,OwnedValue>=[("value".into(),OwnedValue::from(33i32))].into();
+    let id:u32=dest.call("Notify",&(
+        "progress-boundary",0u32,"","Status","",Vec::<String>::new(),
+        hints,-1i32
+    )).await?;
+    let note=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).cloned().ok_or("missing notification")?;
+    assert_eq!(note.progress,33);
+    let style=runtime.config().global.clone();
+    for scale in [1u32,2] {
+        let frame=render_notification_group_scaled(&note,&style,0,scale)?;
+        let y=(frame.height as usize)-2*scale as usize;
+        let color=|x:usize| {
+            let at=y*frame.stride as usize+x*4;
+            frame.pixels[at..at+4].to_vec()
+        };
+        assert_eq!(color(33*scale as usize-1),[0,0,255,255],
+            "last Mako integer-width progress pixel at {scale}x is solid red");
+        assert_eq!(color(33*scale as usize),[255,0,0,255],
+            "first unfilled pixel at {scale}x must stay solid blue");
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn dbus_inline_image_and_progress_reach_rendered_pixels()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
