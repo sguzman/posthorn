@@ -71,6 +71,12 @@ fn parse_mako_id(raw:&str)->Result<u32,&'static str>{
     let (negative,numeric)=if let Some(rest)=digits.strip_prefix('-'){
         (true,rest)
     }else{(false,digits.strip_prefix('+').unwrap_or(digits))};
+    // Rust's FromStr for unsigned integers accepts a second leading '+',
+    // unlike C strtoumax after its one optional sign has been consumed.
+    // Ensure the remainder consists of decimal digits only.
+    if numeric.is_empty() || !numeric.bytes().all(|byte|byte.is_ascii_digit()) {
+        return Err("invalid notification ID");
+    }
     let magnitude=numeric.parse::<u64>()
         .map_err(|_|"invalid notification ID")?;
     let parsed=if negative{0u64.wrapping_sub(magnitude)}else{magnitude};
@@ -848,6 +854,13 @@ mod tests {
     #[test]
     fn notification_ids_match_mako_strtoumax_cli_semantics(){
         assert_eq!(parse_mako_id("  +0042"),Ok(42));
+        for malformed in [
+            "++1", "++0000", "-+0", "+-0", " -+18446744073709551615",
+            "+ +4", "--0", "- 0",
+        ] {
+            assert!(parse_mako_id(malformed).is_err(),
+                "strtoumax should reject repeated or separated signs: {malformed:?}");
+        }
         assert_eq!(parse_mako_id("\x0b+0042"),Ok(42));
         assert_eq!(parse_mako_id("\x0c0"),Ok(0));
         assert_eq!(parse_mako_id("\t-0"),Ok(0));
