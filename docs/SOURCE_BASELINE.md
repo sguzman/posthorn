@@ -294,6 +294,26 @@ and headless Wayland CI passed at
 These tests do **not** replace compositor-originated Hyprland
 pointer, touch, or XDG activation acceptance; those remain open.
 
+## XDG activation replies can outlive a Wayland sync roundtrip
+
+Pinned Mako v1.11 `wayland.c:create_xdg_activation_token` calls
+`xdg_activation_token_v1.commit`, then dispatches Wayland events
+until the compositor returns `xdg_activation_token_v1.done`.
+Posthorn formerly performed only one `wl_display.sync` roundtrip,
+which does not guarantee that the asynchronously generated
+activation token has arrived.
+
+Posthorn now polls and dispatches events for the **matching**
+token object until its Done event or a 500 ms deadline. A late reply
+to an earlier request cannot be reused for another click.
+The timeout is a deliberate safety limit, unlike Mako's unbounded
+waiting loop. The code compiles and the existing Rust/private
+D-Bus plus headless Wayland regression suites pass at
+[commit 1c91a75](https://github.com/sguzman/posthorn/actions/runs/39992161443).
+Those suites do not emulate a compositor that deliberately delays
+activation Done, and they do not prove real Hyprland activation.
+Live XDG activation acceptance remains open.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
