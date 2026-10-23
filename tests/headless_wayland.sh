@@ -206,7 +206,7 @@ for _ in {1..30}; do
   fi
 done
 if [[ "$dismiss_repainted" != 1 ]]; then
-  /usr/bin/python3 "$root/check-dismissed.py" "$root/after-close.png"
+  /usr/bin/python3 "$root/check-dismissed.py" "$root/after-close.png" || true
   echo 'Notification close did not repaint the live Wayland stack'
   if [[ "$test_scale" == 1 ]]; then
     echo 'Nested compositor seat state:'
