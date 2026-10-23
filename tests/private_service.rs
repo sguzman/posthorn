@@ -167,6 +167,39 @@ async fn ordered_notify_hints_use_last_wire_alias_and_reject_invalid_prior_entry
 }
 
 #[tokio::test]
+async fn empty_timeout_and_lp64_history_narrowing_reach_private_dbus()
+    ->Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let config=Config::parse(
+        "default-timeout=\nignore-timeout=1\nmax-history=4294967297\n"
+    )?;
+    assert_eq!(config.max_history,1);
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let mut ids=Vec::new();
+    for num in 0..2 {
+        let id:u32=desktop.call("Notify",&(
+            "strtol-parity",0u32,"",format!("Notice {num}"),"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),10i32
+        )).await?;
+        assert!(runtime.next_deadline()?.is_none(),
+            "empty default-timeout is zero, so ignore-timeout makes it persistent");
+        ids.push(id);
+        let options:HashMap<String,OwnedValue>=[(
+            "id".into(),OwnedValue::from(id)
+        )].into();
+        let _:()=ctl.call("DismissNotifications",&(options,)).await?;
+    }
+    let history:Vec<HashMap<String,OwnedValue>>=
+        ctl.call("ListHistory",&()).await?;
+    assert_eq!(history.len(),1,
+        "LP64 max-history wraps 4294967297 to signed 1");
+    assert_eq!(u32::try_from(history[0].get("id").unwrap())?,ids[1]);
+    Ok(())
+}
+
+#[tokio::test]
 async fn malformed_dismiss_options_are_rejected_over_real_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
