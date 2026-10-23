@@ -907,7 +907,7 @@ mod tests {
         let hidpi=render_notification_group_with_icon_scale(&note,&style,0,1,2).unwrap();
         assert_eq!((native.width,native.height),(hidpi.width,hidpi.height),
             "the selected scale must not enlarge the popup");
-        let index=|frame:&RenderedNotification|{
+        let index=|frame:&PixelFrame|{
             (frame.height as usize/2)*frame.stride as usize+6*4
         };
         assert_eq!(&native.pixels[index(&native)..index(&native)+4],
