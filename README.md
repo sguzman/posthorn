@@ -130,6 +130,13 @@ popup appearance/removal using a disposable nested D-Bus session, without
 changing Mako's bus ownership. **This runner has not yet been executed
 on Hyprland**, so no real-session acceptance is claimed.
 
+The latest [fully passing isolated Sway acceptance run](https://github.com/sguzman/posthorn/actions/runs/40028600770)
+also verifies live include-file reload/rollback and compositor-issued
+XDG activation tokens on real 1.25× and 2× pointer clicks. It does not
+replace real workstation testing. The separate
+[consent-gated reversible Mako cutover plan](docs/SAFE_CUTOVER.md)
+defines the final MVP inauguration gate; no production switch is authorized.
+
 ## License
 
 MIT. Mako's original authors are credited in [the source baseline](docs/SOURCE_BASELINE.md).
