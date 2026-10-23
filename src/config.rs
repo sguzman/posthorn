@@ -33,7 +33,7 @@ fn err(location: impl Into<String>, message: impl Into<String>) -> ConfigError {
 /// glibc's POSIX REG_EXTENDED treats many escaped ASCII letters as
 /// literals. Rust regex instead gives them meanings (digit classes, hex/Unicode
 /// escapes and end-of-input anchors), or rejects them. Preserve the tested
-/// glibc spellings while retaining GNU POSIX extensions \\w, \\s, \\b and \\A.
+/// glibc spellings while retaining GNU POSIX extensions \\w, \\s, \\b.
 /// This is not a complete POSIX regex implementation.
 fn mako_posix_ere_escapes(pattern: &str) -> String {
     let mut normalized = String::with_capacity(pattern.len());
@@ -44,7 +44,7 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
             continue;
         }
         match chars.next() {
-            Some(letter @ ('d' | 'D' | 'x' | 'u' | 'z' | 'Q' | 'E' |
+            Some(letter @ ('A' | 'd' | 'D' | 'x' | 'u' | 'z' | 'Q' | 'E' |
                 'p' | 'P' | 'v' | 'h' | 'H' | 'R' | 'C')) => normalized.push(letter),
             Some(other) => {
                 normalized.push('\\');
@@ -792,6 +792,7 @@ mod tests {
     fn glibc_posix_literal_escape_letters_do_not_become_rust_regex_operators() {
         let mut fields = note("normal", &["default"]);
         for (pattern, matching, not_matching) in [
+            (r"\Afoo", "Afoo", "foo"),
             (r"\x41", "x41", "A"),
             (r"\u0041", "u0041", "A"),
             (r"foo\z", "fooz", "foo"),
