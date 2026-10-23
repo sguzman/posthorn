@@ -384,12 +384,12 @@ fn selected_action_key(
         .map(|(key,_)|key.clone())
 }
 
-/// makoctl getline() discards only a terminal LF from the first line.
-/// Rust str::lines() also removes a preceding CR, which can spuriously
-/// select an action that upstream Mako would reject.
-fn mako_menu_selected_line(output:&str)->Option<&str>{
+/// Mako's getline() reads the first line as bytes and discards only a
+/// terminal LF. It ignores later stdout, even if that data is not UTF-8.
+/// std::str::lines() would incorrectly remove CR before LF.
+fn mako_menu_selected_line(output:&[u8])->Option<&[u8]>{
     if output.is_empty(){return None;}
-    Some(output.split_once('\n').map_or(output,|(first,_)|first))
+    Some(output.split(|byte|*byte==b'\n').next().unwrap_or(output))
 }
 
 /// Pass labels via stdin and read a selection from a user-configured menu
@@ -411,8 +411,10 @@ fn choose_from_menu(
     if !output.status.success(){return Err(format!(
         "menu command exited with {}",output.status
     ).into());}
-    let result=String::from_utf8(output.stdout)?;
-    let selected=mako_menu_selected_line(&result).ok_or("no action selected")?;
+    let selected=mako_menu_selected_line(&output.stdout).ok_or("no action selected")?;
+    // D-Bus labels are UTF-8; only the selected line needs to decode. Bytes
+    // after its newline are irrelevant to makoctl's getline() semantics.
+    let selected=std::str::from_utf8(selected)?;
     selected_action_key(actions,selected)
         .ok_or_else(||"menu returned a title not present in notification actions".into())
 }
@@ -617,15 +619,35 @@ mod tests {
 
     #[test]
     fn menu_getline_preserves_cr_and_reads_only_first_line(){
-        assert_eq!(mako_menu_selected_line("Open\nIgnore\n"),Some("Open"));
-        assert_eq!(mako_menu_selected_line("Open\r\nIgnore"),Some("Open\r"));
-        assert_eq!(mako_menu_selected_line("Open"),Some("Open"));
-        assert_eq!(mako_menu_selected_line(""),None);
+        assert_eq!(mako_menu_selected_line(b"Open\nIgnore\n"),Some(&b"Open"[..]));
+        assert_eq!(mako_menu_selected_line(b"Open\r\nIgnore"),Some(&b"Open\r"[..]));
+        assert_eq!(mako_menu_selected_line(b"Open"),Some(&b"Open"[..]));
+        assert_eq!(mako_menu_selected_line(b""),None);
+        assert_eq!(mako_menu_selected_line(b"\n"),Some(&b""[..]));
+        assert_eq!(mako_menu_selected_line(b"Open\n\xff\xfe"),Some(&b"Open"[..]));
         let actions=vec![("chosen".into(),"Open".into())];
         assert!(selected_action_key(&actions,
-            mako_menu_selected_line("Open\r\n").unwrap()).is_none());
+            std::str::from_utf8(mako_menu_selected_line(b"Open\r\n").unwrap()).unwrap()
+        ).is_none());
         assert_eq!(selected_action_key(&actions,
-            mako_menu_selected_line("Open\n").unwrap()),Some("chosen".into()));
+            std::str::from_utf8(mako_menu_selected_line(b"Open\n").unwrap()).unwrap()
+        ),Some("chosen".into()));
+    }
+
+    #[test]
+    fn menu_ignores_invalid_utf8_after_valid_first_line() {
+        let actions=vec![("selected".into(),"Open".into())];
+        let cmd=vec![
+            "sh".to_string(),"-c".to_string(),
+            "printf 'Open\\n\\377\\n'".to_string(),
+        ];
+        assert_eq!(choose_from_menu(&cmd,&actions).unwrap(),"selected");
+        // An invalid selected line itself cannot match a UTF-8 action label.
+        let invalid=vec![
+            "sh".to_string(),"-c".to_string(),
+            "printf '\\377\\nOpen\\n'".to_string(),
+        ];
+        assert!(choose_from_menu(&invalid,&actions).is_err());
     }
 
     #[test]
