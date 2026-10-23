@@ -314,6 +314,33 @@ Those suites do not emulate a compositor that deliberately delays
 activation Done, and they do not prove real Hyprland activation.
 Live XDG activation acceptance remains open.
 
+## Real Wayland pointer delivery in isolated headless Sway
+
+The headless compositor initially advertises `wl_seat.capabilities=0`:
+a `swaymsg seat cursor press` command cannot reach Posthorn because no
+pointer device exists. Posthorn's development-only test harness now
+uses a **Rust wlroots virtual-pointer client** to register a temporary
+pointer on the isolated Sway seat, wait for `wl_seat.pointer`
+capability, send a real right-click and release, then destroy the
+device. This exercises Mako-style hotspot processing through actual
+Wayland protocol events, not just the in-memory hit-test.
+
+The 1× acceptance test shows three different category colors,
+sends the input event to the newest warning popup, and verifies
+through a fresh compositor screenshot that only that popup disappears
+while the older two remain. The existing 1.25×/2× repaint, timer,
+reload, mode and named-output hotplug tests still pass.
+`examples/qa_virtual_pointer.rs` explicitly refuses to run without
+`POSTHORN_HEADLESS_POINTER_TEST=1` and
+`WLR_BACKENDS=headless`; the test launcher sets them only in its
+private runtime directory. These tests passed
+[CI at commit 4003cf2](https://github.com/sguzman/posthorn/actions/runs/39994717557).
+
+This is **headless Sway** mouse acceptance, not real Hyprland
+pointer/touch or compositor-issued XDG activation acceptance.
+No production D-Bus name was taken and no installed Mako configuration
+was changed.
+
 ## Explicit nonclaims
 
 Normal development commands register only the **private development D-Bus name**; standard Freedesktop registration is exercised solely in an isolated CI session.
