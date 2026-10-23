@@ -15,10 +15,10 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🔐 T003 — Keep live Mako untouched, isolate public test fixtures — `██████████ 100%`
 - 🧪 T004 — Validate Rust scaffold with CI and formatting — `██████████ 97%`
 
-### 🧩 P1 — Config, criteria and types port — `█████████░ 85%`
+### 🧩 P1 — Config, criteria and types port — `█████████░ 86%`
 
 - 📄 T101 — Parse Mako configuration sections and ordered overrides — `██████████ 100%`
-- 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `█████████░ 92%`
+- 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `█████████░ 93%`
 - 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `████████░░ 77%`
 - 📂 T104 — Include files with Mako-compatible path behavior — `████████░░ 81%`
 - 📐 T105 — Type/layout/style parity for all Mako config settings — `████████░░ 77%`
