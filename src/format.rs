@@ -80,7 +80,9 @@ pub fn render_notification_format(template: &str, n: &FormatNotification<'_>,
             'a' => (n.app_name.to_string(),false),
             's' => (n.summary.to_string(),false),
             'b' => (n.body.to_string(),allow_valid_body_markup),
-            'i' => (n.id.to_string(),false),
+            // Upstream Mako v1.11 uses mako_asprintf("%d", notif->id).
+            // %d interprets the uint32 ID bits as a signed 32-bit integer.
+            'i' => ((n.id as i32).to_string(),false),
             'g' => (n.group_count.to_string(),false),
             _ => (String::new(),false),
         };
@@ -157,6 +159,20 @@ mod tests {
         assert_eq!(render_hidden_format("\x0b(%h of %t)\x0c",2,3),"(2 of 3)");
         assert_eq!(render_notification_format("\u{a0}%s\u{a0}",&n,false),
             "\u{a0}Visible\u{a0}");
+    }
+
+    #[test]
+    fn id_placeholder_matches_mako_signed_decimal_at_u32_boundary() {
+        for (id,expected) in [
+            (0u32,"0"),
+            (i32::MAX as u32,"2147483647"),
+            ((i32::MAX as u32)+1,"-2147483648"),
+            (u32::MAX,"-1"),
+        ] {
+            let note=FormatNotification{id,..FormatNotification::default()};
+            assert_eq!(render_notification_format("id=%i",&note,false),
+                format!("id={expected}"));
+        }
     }
 
     #[test]
