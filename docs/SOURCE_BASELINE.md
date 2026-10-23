@@ -641,3 +641,16 @@ still need parity tests. The
 presence of a config key in a map does not mean the visual behavior is ported.
 No MVP/release or workstation cutover until the end-to-end acceptance suite
 passes. The README and progress report must not call this a working Mako port.
+
+## Group count format placeholder signedness
+
+Pinned Mako v1.11.0 declares `mako_notification.group_count` as C `int`
+(`include/notification.h`) and formats `%g` using `mako_asprintf("%d",
+notif->group_count)` (`notification.c`). Posthorn now narrows its internal
+`usize` count to signed 32-bit before formatting, as it already does for
+Mako's signed `%i` notification ID. Synthetic Rust regressions exercise
+zero, `INT_MAX`, `INT_MAX + 1` and `UINT32_MAX` values; the complete
+private D-Bus and 1×/1.25×/2× isolated Sway suite passed in
+[run 40030597962](https://github.com/sguzman/posthorn/actions/runs/40030597962)
+at commit `7bd46a5`. This is source-level placeholder compatibility,
+not evidence of real desktop grouping under billions of notifications.
