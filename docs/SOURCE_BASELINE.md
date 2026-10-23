@@ -809,3 +809,26 @@ This is bounded Mako parity for **retaining the existing surface
 anchor**. Reassignment between multiple currently live surfaces,
 per-notification real-output identities, and physical Hyprland
 acceptance are still outstanding; no production Mako cutover occurred.
+
+## Reapplying category surface anchor on history restoration
+
+Pinned Mako v1.11.0 `dbus/mako.c:handle_restore_action` removes
+the historical notification from history, calls `finish_style` and
+`init_empty_style`, applies current criteria while the notification's
+surface is still NULL, inserts the notification in active sort order,
+and marks its selected surface dirty. It neither runs `on-notify`
+nor creates a new expiration timer.
+
+Posthorn now repeats the criteria-based anchor association on the
+restored active notification before reapplying history policy. In
+particular, `[category=warning] anchor=bottom-left` can choose the
+restored surface even when the root anchor is top-right and the
+historical object's surface pointer was cleared on close.
+The existing non-rearmed timeout and no-hook behavior remain intact.
+
+CI [40040434719](https://github.com/sguzman/posthorn/actions/runs/40040434719)
+passed 263 Rust unit tests, 57 private D-Bus tests and all isolated
+1×, 1.25×, 2× Sway compositor acceptance. This is bounded restored
+anchor parity; real multi-surface output reassignment and physical
+Hyprland acceptance remain unverified. The user's installed Mako,
+autostart, and production D-Bus ownership are untouched.
