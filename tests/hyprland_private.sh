@@ -36,11 +36,15 @@ if [[ "$#" != 1 || "$1" != '--inside' ]]; then
   [[ "$owner_before" == s\ * ]] || die 'unexpected original bus owner'
   [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] ||
     die 'original D-Bus address unavailable; refusing nested test'
+  parent_bus_id="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
+    org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetId)" ||
+    die 'could not inspect original D-Bus GUID'
+  [[ "$parent_bus_id" == s\ * ]] || die 'unexpected original D-Bus GUID'
   cargo build --quiet --bin posthorn --example qa_png_probe
   # The child gets a new DBUS_SESSION_BUS_ADDRESS but retains WAYLAND_DISPLAY.
   child_status=0
   POSTHORN_QA_NESTED=1 POSTHORN_QA_PARENT_BUS="$DBUS_SESSION_BUS_ADDRESS" \
-    POSTHORN_QA_EXPECTED_OWNER="$owner_before" \
+    POSTHORN_QA_EXPECTED_OWNER="$owner_before" POSTHORN_QA_PARENT_ID="$parent_bus_id" \
     dbus-run-session -- bash "$script_path" --inside || child_status=$?
   # Always re-check the original owner, including when child acceptance fails.
   owner_after="$(busctl --user --timeout=3s call org.freedesktop.DBus \
@@ -64,6 +68,14 @@ owner_in_child="$(busctl --address="$POSTHORN_QA_PARENT_BUS" --timeout=3s call \
   die 'original notification service disappeared before private QA'
 [[ "$owner_in_child" == "${POSTHORN_QA_EXPECTED_OWNER:-}" ]] ||
   die 'original notification service owner changed before private QA'
+# D-Bus addresses can alias the same bus using different URI spellings.
+# Compare the actual bus GUIDs too, not only their address strings.
+nested_bus_id="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
+  org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetId)" ||
+  die 'private D-Bus GUID unavailable'
+[[ -n "${POSTHORN_QA_PARENT_ID:-}" &&
+   "$nested_bus_id" != "$POSTHORN_QA_PARENT_ID" ]] ||
+  die 'private QA is still connected to the original D-Bus daemon'
 root="$(mktemp -d)"
 daemon_pid=""
 cleanup(){
