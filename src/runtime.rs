@@ -21,6 +21,9 @@ pub struct SharedRuntime {
     /// Category/mode-specific history setting captured when a message arrives.
     history_policies: Arc<Mutex<HashMap<u32,bool>>>,
     config: Arc<RwLock<Arc<Config>>>,
+    // The compositor's wl_surface.enter output name, not config.output.
+    // Unknown until the layer surface is mapped and the compositor replies.
+    surface_output: Arc<RwLock<Option<String>>>,
     source_path: Option<Arc<PathBuf>>,
     revision: Arc<AtomicU64>,
     modes: Arc<Mutex<Vec<String>>>,
@@ -35,6 +38,7 @@ impl SharedRuntime {
             timers: Arc::new(Mutex::new(ExpirationScheduler::default())),
             history_policies: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(RwLock::new(Arc::new(config))),
+            surface_output: Arc::new(RwLock::new(None)),
             source_path: None,
             revision: Arc::new(AtomicU64::new(0)),
             modes: Arc::new(Mutex::new(vec!["default".into()])),
@@ -49,6 +53,25 @@ impl SharedRuntime {
 
     pub fn revision(&self)->u64{
         self.revision.load(Ordering::Acquire)
+    }
+
+    /// Output selectors in Mako match wl_surface.enter's actual monitor.
+    /// Configured target names are only layer-shell placement requests.
+    pub fn surface_output(&self)->Option<String>{
+        self.surface_output.read()
+            .expect("surface output lock poisoned").clone()
+    }
+
+    /// Called by the private Wayland presenter after compositor output events.
+    /// A changed output invalidates styled frames and group visibility.
+    pub fn set_surface_output(&self,name:Option<&str>)->Result<bool,String>{
+        let mut current=self.surface_output.write()
+            .map_err(|_|"surface output lock poisoned")?;
+        if current.as_deref()==name{return Ok(false);}
+        *current=name.map(str::to_owned);
+        drop(current);
+        self.revision.fetch_add(1,Ordering::Release);
+        Ok(true)
     }
 
     pub fn from_path(path:&Path)->Result<Self,crate::config::ConfigError>{
