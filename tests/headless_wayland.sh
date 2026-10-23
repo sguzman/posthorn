@@ -6,7 +6,9 @@ set -euo pipefail
 root="$(mktemp -d)"
 sway_pid=""
 posthorn_pid=""
+monitor_pid=""
 cleanup() {
+  if [[ -n "$monitor_pid" ]]; then kill "$monitor_pid" 2>/dev/null || true; wait "$monitor_pid" 2>/dev/null || true; fi
   if [[ -n "$posthorn_pid" ]]; then kill "$posthorn_pid" 2>/dev/null || true; wait "$posthorn_pid" 2>/dev/null || true; fi
   if [[ -n "$sway_pid" ]]; then kill "$sway_pid" 2>/dev/null || true; wait "$sway_pid" 2>/dev/null || true; fi
   rm -rf "$root"
@@ -223,6 +225,56 @@ if [[ "$dismiss_repainted" != 1 ]]; then
   fi
   cat "$root/posthorn.log"
   exit 1
+fi
+# The compositor-originated left click must invoke the sender's default
+# action and dismiss only that notification. Observe the D-Bus signal.
+if [[ "$test_scale" == 1 ]]; then
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" monitor org.posthorn.Development \
+    >"$root/action-signal.log" 2>&1 &
+  monitor_pid=$!
+  sleep 0.2
+  action_result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn action fixture' 0 '' 'Click default action' '' \
+    2 'default' 'Open' 1 'category' 's' 'warning' 30000)"
+  [[ "$action_result" == u\ * ]] || { echo "Invalid action notification result: $action_result"; exit 1; }
+  action_ready=0
+  for _ in {1..15}; do
+    sleep 0.1
+    grim "$root/before-action-click.png"
+    if /usr/bin/python3 - "$root/before-action-click.png" <<'PY'
+from collections import Counter
+from PIL import Image
+import sys
+pixels = Counter(Image.open(sys.argv[1]).convert("RGB").getdata())
+raise SystemExit(0 if pixels[(113,85,54)] >= 300 else 1)
+PY
+    then action_ready=1; break; fi
+  done
+  [[ "$action_ready" == 1 ]] || { echo 'Action popup never reached compositor'; exit 1; }
+  ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720 272
+  action_signal=0
+  for _ in {1..30}; do
+    if grep -q 'ActionInvoked' "$root/action-signal.log"; then
+      action_signal=1
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ "$action_signal" != 1 ]]; then
+    echo 'Compositor left click did not emit Freedesktop ActionInvoked'
+    cat "$root/action-signal.log"
+    exit 1
+  fi
+  kill "$monitor_pid" 2>/dev/null || true
+  wait "$monitor_pid" 2>/dev/null || true
+  monitor_pid=""
+  grim "$root/after-action-click.png"
+  /usr/bin/python3 "$root/check-dismissed.py" "$root/after-action-click.png" || {
+    echo 'Compositor default action did not dismiss just the action popup'
+    exit 1
+  }
 fi
 # Exercise timer-driven expiry through the full private D-Bus / Wayland path.
 # Use a distinct warning color so visual removal can be distinguished from
