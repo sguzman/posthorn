@@ -271,9 +271,15 @@ mod tests {
         // while the lower (160px) begins at x=0 and overlaps vertically.
         assert_eq!(hit_test(&runtime,click(20.0,y,273)).unwrap(),
             Some((lower,NotifyBinding::Dismiss{save_history:true})));
+        assert_eq!(hit_test(&runtime,click(20.0,y,0)).unwrap(),
+            Some((lower,NotifyBinding::Dismiss{save_history:true})),
+            "touch-up uses the same Mako first full-hotspot match traversal");
         assert_eq!(hit_test(&runtime,click(100.0,y,273)).unwrap(),
             Some((upper,NotifyBinding::Dismiss{save_history:true})),
             "first matching Mako hotspot keeps precedence");
+        assert_eq!(hit_test(&runtime,click(100.0,y,0)).unwrap(),
+            Some((upper,NotifyBinding::Dismiss{save_history:true})),
+            "touch-up keeps topmost full-hotspot precedence");
     }
 
     #[test]
