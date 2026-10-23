@@ -275,6 +275,16 @@ PY
     echo 'Compositor default action did not dismiss just the action popup'
     exit 1
   }
+  # A click outside the input region and the default unbound middle button
+  # must leave both existing popups untouched, over real compositor input.
+  POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer 100 25 1280 720 273
+  POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720 274
+  sleep 0.2
+  grim "$root/after-noop-clicks.png"
+  /usr/bin/python3 "$root/check-dismissed.py" "$root/after-noop-clicks.png" || {
+    echo 'Click outside the popup or unbound middle button unexpectedly dismissed a notification'
+    exit 1
+  }
 fi
 # Exercise timer-driven expiry through the full private D-Bus / Wayland path.
 # Use a distinct warning color so visual removal can be distinguished from
