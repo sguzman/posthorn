@@ -488,6 +488,16 @@ mod tests {
         assert_eq!(store.restore(),Some(id));
         assert_ne!(store.active_instance(id),Some(replaced),
             "restored history is a new active lifetime with the same ID");
+        let tagged=Request{
+            app_name:"sender".into(),tag:"stack-key".into(),
+            summary:"same tagged body".into(),..Request::default()
+        };
+        let tag_id=store.push(tagged.clone());
+        let tag_instance=store.active_instance(tag_id).unwrap();
+        assert_eq!(store.push(tagged),tag_id,
+            "same-sender stack-tag should keep the public notification ID");
+        assert_ne!(store.active_instance(tag_id),Some(tag_instance),
+            "tag replacement must invalidate a pending compositor click");
     }
 
     #[test]
