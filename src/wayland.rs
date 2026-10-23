@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use nix::poll::{poll, PollFd, PollFlags};
 use std::os::fd::AsFd;
-use std::time::Duration;
+use std::time::{Duration,Instant};
 use crate::render::PixelFrame;
 use wayland_protocols::xdg::activation::v1::client::{
     xdg_activation_v1,
@@ -174,6 +174,7 @@ struct ConfigureState {
     entered_output: Option<wl_output::WlOutput>,
     released_buffers: Vec<wl_buffer::WlBuffer>,
     activation_token: Option<String>,
+    pending_activation_token: Option<xdg_activation_token_v1::XdgActivationTokenV1>,
 }
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for ConfigureState {
@@ -212,12 +213,16 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for ConfigureState {
 delegate_noop!(ConfigureState: ignore xdg_activation_v1::XdgActivationV1);
 impl Dispatch<xdg_activation_token_v1::XdgActivationTokenV1, ()> for ConfigureState {
     fn event(
-        state:&mut Self, _: &xdg_activation_token_v1::XdgActivationTokenV1,
+        state:&mut Self, request:&xdg_activation_token_v1::XdgActivationTokenV1,
         event:xdg_activation_token_v1::Event,
         _: &(), _: &Connection, _: &QueueHandle<Self>,
     ) {
         if let xdg_activation_token_v1::Event::Done {token} = event {
-            state.activation_token = Some(token);
+            // Timed-out requests must not supply activation tokens to
+            // subsequent clicks.
+            if state.pending_activation_token.as_ref()==Some(request) {
+                state.activation_token=Some(token);
+            }
         }
     }
 }
@@ -844,15 +849,37 @@ impl LivePresenter {
         else {return Ok(None)};
         self.state.activation_token=None;
         let token=activation.get_activation_token(&self.qh,());
+        self.state.pending_activation_token=Some(token.clone());
         token.set_serial(serial,seat);
         token.set_surface(&active.surface);
         token.commit();
         self.conn.flush()?;
-        // Mako likewise waits for the compositor's token response. Dispatch
-        // one roundtrip instead of spinning forever if no token is delivered.
-        self.queue.roundtrip(&mut self.state)?;
+        // Mako dispatches until xdg_activation_token_v1.done. A single
+        // wl_display.sync is not guaranteed to include an asynchronous Done.
+        // Bound compositor silence to avoid blocking click handling forever.
+        let deadline=Instant::now()+Duration::from_millis(500);
+        let result=(|| -> Result<(),Box<dyn std::error::Error>> {
+            loop {
+                self.queue.dispatch_pending(&mut self.state)?;
+                if self.state.activation_token.is_some() || Instant::now()>=deadline {
+                    break;
+                }
+                if let Some(read)=self.conn.prepare_read(){
+                    let remaining=deadline.saturating_duration_since(Instant::now());
+                    let timeout=remaining.as_millis().clamp(1,100) as u16;
+                    let mut fd=[PollFd::new(self.conn.as_fd(),PollFlags::POLLIN)];
+                    let ready=poll(&mut fd,timeout)?>0
+                        && fd[0].revents().is_some_and(|events|
+                            events.contains(PollFlags::POLLIN));
+                    if ready {read.read()?;}
+                }
+            }
+            Ok(())
+        })();
+        self.state.pending_activation_token=None;
         let issued=self.state.activation_token.take().filter(|s|!s.is_empty());
         token.destroy();
+        result?;
         Ok(issued)
     }
 
