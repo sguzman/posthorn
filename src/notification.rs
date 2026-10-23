@@ -2,7 +2,7 @@
 //!
 //! No SQLite, channels, or other post-MVP behavior belongs in this module.
 
-use std::collections::{HashSet,VecDeque};
+use std::collections::{HashMap,HashSet,VecDeque};
 
 // Do not derive Ord: variant order would incorrectly place Other(-3) above
 // Critical. Sorting must compare mako_value(), the original signed C enum.
@@ -157,6 +157,11 @@ pub struct NotificationStore {
     active: VecDeque<Notification>,
     history: VecDeque<Notification>,
     next_id: u32,
+    // A Freedesktop ID survives Notify replacement and history restoration.
+    // Track each active incarnation independently so asynchronous compositor
+    // events cannot execute against a newer payload with the same ID.
+    next_instance: u64,
+    active_instances: HashMap<u32,u64>,
     max_history: usize,
     sort_policy: SortPolicy,
 }
@@ -164,11 +169,24 @@ pub struct NotificationStore {
 impl NotificationStore {
     pub fn new(max_history: usize) -> Self {
         Self { active: VecDeque::new(), history: VecDeque::new(),
-            next_id: 1, max_history, sort_policy: SortPolicy::default() }
+            next_id: 1, next_instance: 0, active_instances: HashMap::new(),
+            max_history, sort_policy: SortPolicy::default() }
     }
 
     pub fn active(&self) -> &VecDeque<Notification> { &self.active }
     pub fn history(&self) -> &VecDeque<Notification> { &self.history }
+
+    /// Instance numbers are internal only: notification identity on D-Bus
+    /// remains the original u32 ID, including explicit/tag replacements.
+    pub fn active_instance(&self,id:u32)->Option<u64>{
+        self.active_instances.get(&id).copied()
+    }
+
+    fn record_new_instance(&mut self,id:u32){
+        self.next_instance=self.next_instance.wrapping_add(1);
+        if self.next_instance==0{self.next_instance=1;}
+        self.active_instances.insert(id,self.next_instance);
+    }
 
     /// Configure sorting before accepting notifications.
     /// Mako reload preserves existing list order; new arrivals use the
@@ -228,6 +246,7 @@ impl NotificationStore {
             self.active[index].group_index=group_index;
             self.active[index].group_count=group_count;
             self.active[index].grouping_applied=grouping_applied;
+            self.record_new_instance(id);
             return id;
         }
         let tag_replace=if request.tag.is_empty(){None}else{
@@ -237,10 +256,12 @@ impl NotificationStore {
         if let Some(index)=tag_replace {
             let id=self.active[index].id;
             self.active[index]=Notification::from_request(id,request);
+            self.record_new_instance(id);
             return id;
         }
         let id = self.allocate_id();
         self.insert_sorted(Notification::from_request(id, request));
+        self.record_new_instance(id);
         id
     }
 
@@ -327,6 +348,7 @@ impl NotificationStore {
                  history_enabled: bool) -> Option<Notification> {
         let idx = self.active.iter().position(|n| n.id == id)?;
         let notification = self.active.remove(idx)?;
+        self.active_instances.remove(&id);
         if save_history && history_enabled && self.max_history != 0 {
             self.history.push_front(notification.clone());
             self.history.truncate(self.max_history);
@@ -341,6 +363,7 @@ impl NotificationStore {
         // Mako reinserts restored notifications using the active sort policy;
         // pushing to the front would break urgency and ascending-time ordering.
         self.insert_sorted(notification);
+        self.record_new_instance(id);
         Some(id)
     }
 
@@ -451,6 +474,22 @@ mod tests {
         assert_eq!(first,store.push(c));
         assert_eq!(store.active().len(),2);
     }
+    #[test]
+    fn instance_identity_changes_on_same_payload_replacement_and_restore(){
+        let mut store=NotificationStore::new(5);
+        let request=Request{summary:"identical".into(),..Request::default()};
+        let id=store.push(request.clone());
+        let original=store.active_instance(id).unwrap();
+        assert_eq!(store.push(Request{replaces_id:id,..request.clone()}),id);
+        let replaced=store.active_instance(id).unwrap();
+        assert_ne!(original,replaced,"identical payload is still a new Notify");
+        store.close(id,CloseReason::Dismissed,true,true).unwrap();
+        assert!(store.active_instance(id).is_none());
+        assert_eq!(store.restore(),Some(id));
+        assert_ne!(store.active_instance(id),Some(replaced),
+            "restored history is a new active lifetime with the same ID");
+    }
+
     #[test]
     fn explicit_id_replacement_retains_group_metadata_and_list_position() {
         let mut store=NotificationStore::new(8);
