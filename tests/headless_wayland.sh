@@ -253,7 +253,7 @@ PY
     then action_ready=1; break; fi
   done
   [[ "$action_ready" == 1 ]] || { echo 'Action popup never reached compositor'; exit 1; }
-  ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720 272
+  POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer 1100 25 1280 720 272
   action_signal=0
   for _ in {1..30}; do
     if grep -q 'ActionInvoked' "$root/action-signal.log"; then
