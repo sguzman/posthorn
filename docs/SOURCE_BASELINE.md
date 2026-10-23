@@ -782,3 +782,30 @@ including this regression and isolated compositor checks.
 
 These checks do not authorize production D-Bus ownership or establish
 real Hyprland pointer, touch, compositor or cutover acceptance.
+
+## Category-selected surface anchor preserved on explicit ID replacement
+
+Pinned Mako v1.11.0 `criteria.c:match_criteria` evaluates
+`[anchor=...]` against `notif->surface->anchor`, not the root
+`anchor=` configuration. A first notification can select a non-root
+anchor through a category rule. On direct `replaces_id`, Mako
+`notification.c:reset_notification` retains that surface association;
+its next pre-regroup criteria pass can therefore match the **old
+surface anchor** even when the new notification no longer belongs to
+the old category. New notifications and app-scoped stack-tag
+replacements start without an associated surface.
+
+Posthorn now retains the chosen anchor alongside surface-association
+state, preserves it for direct replacements, and avoids borrowing it
+for new/tagged objects or persisted history. Isolated unit and
+Freedesktop Notify/private D-Bus regressions cover a category-specific
+bottom-left surface followed by a direct replacement with a different
+category; the replacement chooses the old anchor's timeout instead
+of the root timeout. Both jobs, including 1×, 1.25×, and 2× isolated
+Sway compositor acceptance, passed at
+[commit 0b5bb43](https://github.com/sguzman/posthorn/actions/runs/40040039068).
+
+This is bounded Mako parity for **retaining the existing surface
+anchor**. Reassignment between multiple currently live surfaces,
+per-notification real-output identities, and physical Hyprland
+acceptance are still outstanding; no production Mako cutover occurred.

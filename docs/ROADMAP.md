@@ -39,7 +39,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 ### 🪟 P4 — Wayland protocol and rendering — `██████████ 96%`
 
-- 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `██████████ 97%`
+- 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `██████████ 98%`
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `██████████ 99%`
 - 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `█████████░ 92%`
 
