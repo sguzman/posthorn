@@ -106,6 +106,35 @@ async fn closed(conn:&Connection,runtime:&SharedRuntime,id:u32,history:bool)
     Ok(())
 }
 
+/// Mako closes all selected group members in one synchronous event-loop
+/// turn. Apply state transitions before any .await so a sender cannot replace
+/// a still-unclosed ID while the prior NotificationClosed signal is in flight.
+/// Keep the established per-ID signal/invalidation sequence afterward.
+fn close_selected(
+    runtime:&SharedRuntime,ids:impl IntoIterator<Item=u32>,history:bool
+)->Result<Vec<u32>,String>{
+    let mut removed=Vec::new();
+    for id in ids {
+        if runtime.close(id,CloseReason::Dismissed,history)? {
+            removed.push(id);
+        }
+    }
+    Ok(removed)
+}
+
+async fn closed_many(
+    conn:&Connection,runtime:&SharedRuntime,ids:impl IntoIterator<Item=u32>,
+    history:bool,
+)->Result<(),Box<dyn std::error::Error+Send+Sync>>{
+    let removed=close_selected(runtime,ids,history).map_err(error)?;
+    for id in removed {
+        conn.emit_signal(None::<&str>,OBJECT_PATH,BUS_NAME,
+            "NotificationClosed",&(id,CloseReason::Dismissed as u32)).await?;
+        crate::signals::invalidate(conn,"Notifications").await?;
+    }
+    Ok(())
+}
+
 /// D-Bus signals are emitted from the async task, not the Wayland thread.
 pub async fn dispatch_click(
     conn:&Connection,runtime:&SharedRuntime,click:PointerClick,
@@ -139,11 +168,11 @@ pub async fn dispatch_binding(
         NotifyBinding::DismissAll=>{
             let ids:Vec<_>=runtime.store.lock().map_err(|_|error("notification lock poisoned"))?
                 .active().iter().map(|n|n.id).collect();
-            for id in ids {closed(conn,runtime,id,true).await?;}
+            closed_many(conn,runtime,ids,true).await?;
         }
         NotifyBinding::DismissGroup=>{
             let ids=active_group_ids(runtime,id).map_err(error)?;
-            for id in ids {closed(conn,runtime,id,true).await?;}
+            closed_many(conn,runtime,ids,true).await?;
         }
         NotifyBinding::InvokeDefaultAction=>
             invoke(conn,runtime,id,"default",activation_token).await?,
@@ -215,6 +244,35 @@ mod tests {
     fn click(x:f64,y:f64,button:u32)->PointerClick{
         PointerClick{x,y,button,serial:3}
     }
+    #[test]
+    fn batched_group_dismiss_transitions_all_members_before_signalling() {
+        let runtime=SharedRuntime::new(Config::parse("group-by=app-name\n").unwrap());
+        let first=runtime.store.lock().unwrap().push(Request{
+            app_name:"group".into(),summary:"first".into(),
+            ..Request::default()
+        });
+        let outsider=runtime.store.lock().unwrap().push(Request{
+            app_name:"other".into(),summary:"independent".into(),
+            ..Request::default()
+        });
+        let second=runtime.store.lock().unwrap().push(Request{
+            app_name:"group".into(),summary:"second".into(),
+            ..Request::default()
+        });
+        let members=active_group_ids(&runtime,first).unwrap();
+        assert_eq!(members.len(),2);
+        assert!(members.contains(&first)&&members.contains(&second));
+        let dismissed=close_selected(&runtime,members,true).unwrap();
+        assert_eq!(dismissed.len(),2);
+        assert!(runtime.store.lock().unwrap().active().iter()
+            .all(|n|n.id==outsider),"unrelated notification must survive");
+        assert_eq!(runtime.store.lock().unwrap().history().len(),2);
+        assert!(runtime.store.lock().unwrap().active_instance(first).is_none());
+        assert!(runtime.store.lock().unwrap().active_instance(second).is_none());
+        assert!(close_selected(&runtime,[first,second],true).unwrap().is_empty(),
+            "repeated close must never emit duplicate NotificationClosed");
+    }
+
     #[test]
     fn overlapping_negative_margins_follow_mako_first_hotspot_rule() {
         let runtime=SharedRuntime::new(Config::parse(
