@@ -428,6 +428,102 @@ impl MakoControl {
     }
 }
 
+/// zbus' default Properties helper and #[interface(property)] getter
+/// convert the nested a{sv} value into OwnedValue. That materializes each
+/// a{ss} as a BTreeMap, losing duplicate action keys that Mako 1.11 emits.
+/// The control object therefore uses a path-local Properties implementation
+/// that writes the known property values as typed variants without a Dict.
+#[derive(Clone)]
+pub struct OrderedControlProperties {
+    control: MakoControl,
+}
+
+impl OrderedControlProperties {
+    pub fn with_runtime(runtime: SharedRuntime) -> Self {
+        Self { control: MakoControl::with_runtime(runtime) }
+    }
+
+    fn validate_interface(name: &str) -> zbus::fdo::Result<()> {
+        if name == CONTROL_INTERFACE { Ok(()) } else {
+            Err(zbus::fdo::Error::UnknownInterface(name.into()))
+        }
+    }
+}
+
+/// Each Get reply is a D-Bus variant whose contained type depends on the
+/// requested property. SerializeValue knows the inner signature and writes
+/// the original ordered notification maps without any OwnedValue conversion.
+#[derive(zbus::zvariant::Type)]
+#[zvariant(signature = "v")]
+enum OrderedPropertyValue {
+    Modes(Vec<String>),
+    Notifications(Vec<OrderedNotificationWire>),
+}
+
+impl Serialize for OrderedPropertyValue {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Modes(modes) => SerializeValue(modes).serialize(serializer),
+            Self::Notifications(records) => SerializeValue(records).serialize(serializer),
+        }
+    }
+}
+
+#[derive(zbus::zvariant::Type)]
+#[zvariant(signature = "a{sv}")]
+struct OrderedControlPropertiesMap {
+    modes: Vec<String>,
+    notifications: Vec<OrderedNotificationWire>,
+}
+
+impl Serialize for OrderedControlPropertiesMap {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map=serializer.serialize_map(Some(2))?;
+        map.serialize_entry("Modes",&SerializeValue(&self.modes))?;
+        map.serialize_entry("Notifications",&SerializeValue(&self.notifications))?;
+        map.end()
+    }
+}
+
+#[interface(name = "org.freedesktop.DBus.Properties")]
+impl OrderedControlProperties {
+    #[zbus(name = "Get")]
+    fn get(&self, interface: &str, property: &str)
+        -> zbus::fdo::Result<OrderedPropertyValue>
+    {
+        Self::validate_interface(interface)?;
+        match property {
+            "Modes" => Ok(OrderedPropertyValue::Modes(self.control.list_modes()?)),
+            "Notifications" => Ok(OrderedPropertyValue::Notifications(
+                self.control.ordered_snapshot(false)?)),
+            _ => Err(zbus::fdo::Error::UnknownProperty(property.into())),
+        }
+    }
+
+    #[zbus(name = "GetAll")]
+    fn get_all(&self, interface: &str)
+        -> zbus::fdo::Result<OrderedControlPropertiesMap>
+    {
+        Self::validate_interface(interface)?;
+        Ok(OrderedControlPropertiesMap {
+            modes:self.control.list_modes()?,
+            notifications:self.control.ordered_snapshot(false)?,
+        })
+    }
+
+    #[zbus(name = "Set")]
+    fn set(&self, interface: &str, property: &str, _value: OwnedValue)
+        -> zbus::fdo::Result<()>
+    {
+        Self::validate_interface(interface)?;
+        match property {
+            "Modes" | "Notifications" =>
+                Err(zbus::fdo::Error::PropertyReadOnly(property.into())),
+            _ => Err(zbus::fdo::Error::UnknownProperty(property.into())),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

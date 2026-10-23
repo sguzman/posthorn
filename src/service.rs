@@ -34,6 +34,17 @@ async fn open_named_runtime(runtime:SharedRuntime,name:&str)
         .serve_at(CONTROL_PATH, MakoControl::with_runtime(runtime.clone()))?
         .build()
         .await?;
+    // Override only the standard Properties interface at the Mako control
+    // object path. The Freedesktop object keeps zbus' default implementation.
+    // This is isolated on org.posthorn.Development in regular execution.
+    let server=conn.object_server();
+    server.remove::<zbus::fdo::Properties,_>(CONTROL_PATH).await?;
+    let registered=server.at(CONTROL_PATH,
+        crate::control::OrderedControlProperties::with_runtime(runtime.clone())).await?;
+    if !registered {
+        return Err(zbus::Error::Failure(
+            "unable to register ordered Mako control properties".into()));
+    }
     Ok((conn, runtime))
 }
 
