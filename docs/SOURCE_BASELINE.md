@@ -24,6 +24,24 @@ change how they call the Freedesktop Notification protocol. Until parity:
 - Keep Mako active in `config-store` until side-by-side tests prove parity.
 - Never try to run both notification servers on the same session bus name.
 
+## Signed padding in pinned Mako v1.11.0
+
+Mako `types.c:parse_directional` accepts signed integers for padding.
+The pinned `render.c:render_notification` retains these signed top,
+bottom, left, and right padding values directly in Pango text bounds,
+text offsets, icon positioning, and computed notification height.
+Posthorn previously clamped negative directional padding to zero when
+measuring and painting, changing geometry for a supported config.
+
+The renderer now preserves signed insets while bounding physical SHM
+allocations and Pango layout dimensions. A source-matched regression
+demonstrates that a -3px top and -2px bottom inset reduce notification
+height by 5px and that Cairo uses that same measured height. Full Rust,
+private D-Bus, and isolated 1×/1.25×/2×/mixed-DPI Sway CI passed for
+[9196333](https://github.com/sguzman/posthorn/actions/runs/40055215486).
+This validates one signed-padding path, not exact complete Pango pixel
+parity on real Hyprland.
+
 ## Scale-aware notification hitboxes and themed icons
 
 Pinned Mako v1.11.0 `icon.c` selects themed assets using the **maximum
