@@ -1901,6 +1901,52 @@ async fn control_reload_swaps_styles_and_preserves_last_good_file()
 }
 
 #[tokio::test]
+async fn private_reload_rejects_glibc_unsupported_posix_classes_without_style_loss()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::open_private_service_from_path;
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("mako.conf");
+    std::fs::write(&path,"background-color=#305747\n")?;
+    let (conn,runtime)=open_private_service_from_path(&path).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    for invalid in ["[[:ascii:]]", "[[:word:]]"] {
+        // Rust regex accepts these names; pinned Mako glibc does not.
+        std::fs::write(&path,format!(
+            "background-color=#684148\n[summary~={invalid}]\nwidth=250\n"
+        ))?;
+        let rejected:zbus::Result<()>=control.call("Reload",&()).await;
+        assert!(rejected.is_err(),
+            "private D-Bus Reload accepted invalid glibc POSIX class {invalid}");
+        assert_eq!(runtime.config().global["background-color"],"#305747",
+            "rejected config must not displace the last accepted style");
+        assert_eq!(runtime.revision(),0);
+    }
+    // The same path must still accept standard POSIX classes and
+    // apply a new style without restarting the isolated service.
+    std::fs::write(&path,
+        "background-color=#684148\n[summary~=^[[:alpha:]]+$]\non-notify=dismiss\n"
+    )?;
+    let _:()=control.call("Reload",&()).await?;
+    assert_eq!(runtime.config().global["background-color"],"#684148");
+    assert_eq!(runtime.revision(),1);
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let closed:u32=desktop.call("Notify",&(
+        "posix-class-reload",0u32,"","PlainASCII","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert!(runtime.store.lock().unwrap().active().iter().all(|n|n.id!=closed),
+        "reloaded valid POSIX class did not execute its Notify binding");
+    let kept:u32=desktop.call("Notify",&(
+        "posix-class-reload",0u32,"","café","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert!(runtime.store.lock().unwrap().active().iter().any(|n|n.id==kept),
+        "C locale POSIX [:alpha:] incorrectly matched non-ASCII text");
+    Ok(())
+}
+
+#[tokio::test]
 async fn deeply_included_config_reload_preserves_last_good_state_on_errors()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
