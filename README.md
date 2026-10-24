@@ -12,7 +12,7 @@ D-Bus APIs, Wayland rendering, actions, history, and controls. Only **after**
 that milestone will we add TOML, a graphical notification center with history
 and Clear All, channels, SQLite persistence, and a general local message broker.
 
-> **Not yet a working daemon.** Rust now includes configuration/criteria,
+> **Not yet a production-ready Mako replacement.** Rust now includes configuration/criteria,
 > notification lifecycle, timers, insertion-time grouping with persistent indices and active-list reordering, D-Bus
 > adapters on an isolated development bus, a continuously refreshed
 > Wayland layer-shell stack with release-aware SHM buffers and surface reuse,
@@ -95,6 +95,14 @@ handlers are implemented but compositor interaction, output routing,
 activation and scaling now have headless protocol tests but are not yet
 verified on a real Hyprland session. Do not autostart it.
 
+The separate `posthorn --experimental-private-multi-desktop PATH` mode
+also uses **only `org.posthorn.Development`**, but maps independent
+Wayland layer-shell surfaces for distinct configured-output/layer/anchor
+identities. It maintains separate compositor output observations and input
+coordinates per surface, with independent notification stacks and
+overflow placeholders. This remains opt-in developer QA, not an autostart
+or production notification service. Keep installed Mako active.
+
 ## Automated compositor acceptance (development only)
 
 CI runs `tests/headless_wayland.sh` inside a new `dbus-run-session`
@@ -130,10 +138,13 @@ popup appearance/removal using a disposable nested D-Bus session, without
 changing Mako's bus ownership. **This runner has not yet been executed
 on Hyprland**, so no real-session acceptance is claimed.
 
-The latest [fully passing isolated Sway acceptance run](https://github.com/sguzman/posthorn/actions/runs/40028600770)
-also verifies live include-file reload/rollback and compositor-issued
-XDG activation tokens on real 1.25× and 2× pointer clicks. It does not
-replace real workstation testing. The separate
+The [CI-backed multi-output acceptance run](https://github.com/sguzman/posthorn/actions/runs/40045890584)
+also verifies simultaneous notification surfaces at 1×, 1.25× and 2×,
+independent screenshots on two virtual monitors, and a compositor
+right click that dismisses the second output's notification without
+removing the first. The survivor remains visible after unplugging the
+other monitor. These are automated isolated Sway results, not physical
+Hyprland acceptance. The separate
 [consent-gated reversible Mako cutover plan](docs/SAFE_CUTOVER.md)
 defines the final MVP inauguration gate; no production switch is authorized.
 
