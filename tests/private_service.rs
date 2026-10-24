@@ -2065,6 +2065,35 @@ async fn private_reload_accepts_gnu_word_start_and_end_criteria()
         assert_eq!(runtime.store.lock().unwrap().active().iter()
             .any(|note|note.id==id),!closed);
     }
+    // Mako's escaped backtick/apostrophe GNU buffer assertions also
+    // survive file reload, independent of ordinary word assertions.
+    std::fs::write(&path,
+        "[summary~=\\`cat\\']\non-notify=dismiss\n"
+    )?;
+    let _:()=control.call("Reload",&()).await?;
+    assert_eq!(runtime.revision(),3);
+    for (title,closed) in [("cat",true),("cat!",false),("bobcat",false)]{
+        let id:u32=desktop.call("Notify",&(
+            "gnu-buffer-reload",0u32,"",title,"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .any(|note|note.id==id),!closed);
+    }
+    // Bracket expression escaped punctuation stays literal in glibc.
+    std::fs::write(&path,
+        "[summary~=^[\\`\\']$]\non-notify=dismiss\n"
+    )?;
+    let _:()=control.call("Reload",&()).await?;
+    assert_eq!(runtime.revision(),4);
+    for (title,closed) in [("`",true),("'",true),("cat",false)]{
+        let id:u32=desktop.call("Notify",&(
+            "gnu-buffer-punctuation",0u32,"",title,"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .any(|note|note.id==id),!closed);
+    }
     Ok(())
 }
 
