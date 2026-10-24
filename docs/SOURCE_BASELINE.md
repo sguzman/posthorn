@@ -1224,3 +1224,36 @@ dismissal, remapping and unplug acceptance. All runs use the
 private test D-Bus name, never the user's desktop notification owner.
 This does not prove real Hyprland focus/activation parity or
 authorize production Mako replacement.
+
+## Exact icon-to-text offsets and orthogonal text centering
+
+Pinned Mako **v1.11.0** `render.c:render_notification` places text
+alongside a left icon at `icon.width + 2*padding.left` (relative to
+the border) and below a top icon at `icon.height + 2*padding.top`.
+It then vertically centers Pango text for horizontal icon locations,
+including a notification without an icon, or horizontally centers it
+for vertical icon locations. Posthorn previously added **one extra
+padding unit** to the left/top text origin and left short text aligned
+to the top of tall left/right icons, or at the left edge below top
+icons.
+
+[Commit 9598a9a](https://github.com/sguzman/posthorn/commit/9598a9a92452a2e98f96c77e1e0531cd89a3dc00)
+corrects those origin calculations and measures the Pango layout
+before deciding the final orthogonal text offset. A dedicated
+`pinned_mako_icon_text_offsets_and_axis_centering` regression
+renders actual icon pixels and white Pango glyphs. It checks that
+12-pixel left/top icons with four-pixel padding displace the glyph
+by **exactly 16 pixels** along the icon's axis; it also checks
+vertical centering alongside a 28-pixel-tall icon and horizontal
+centering below a top icon.
+
+[CI run 40056468251](https://github.com/sguzman/posthorn/actions/runs/40056468251)
+passed both the Rust/private-D-Bus job and the isolated headless
+Wayland job, including the existing 1×, 1.25×, 2×, dual-output,
+input-region, mixed-scale, and signed-padding gates. The new glyph
+offset assertions are **unit-level rendered-pixel checks**, not a
+new screenshot comparison against upstream Mako or a physical
+Hyprland test. Accordingly T105 advances from 81% to **82%**,
+while the M0 milestone remains **88%**, T503 remains 51% and
+the unauthorized production cutover T504 remains 0%.
+The real notification session and installed Mako were not touched.
