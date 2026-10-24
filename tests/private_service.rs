@@ -2217,17 +2217,28 @@ async fn deeply_included_config_reload_preserves_last_good_state_on_errors()
     assert_eq!(runtime.config().global["background-color"],"#684148");
     assert_eq!(runtime.revision(),1);
 
+    // Mako's getline-based parser ignores bytes on comment lines before
+    // interpreting option values. A nested config must reload through
+    // the private D-Bus control surface even with legacy non-UTF-8 comments.
+    let mut commented=b"  # legacy comment ".to_vec();
+    commented.push(0xFF);
+    commented.extend_from_slice(b"\nbackground-color=#694149\n");
+    std::fs::write(file(20),commented)?;
+    let _:()=ctl.call("Reload",&()).await?;
+    assert_eq!(runtime.config().global["background-color"],"#694149");
+    assert_eq!(runtime.revision(),2);
+
     std::fs::write(file(20),"background-color=#invalid\n")?;
     let rejected:zbus::Result<()>=ctl.call("Reload",&()).await;
     assert!(rejected.is_err(),"invalid deep include was accepted");
-    assert_eq!(runtime.config().global["background-color"],"#684148");
-    assert_eq!(runtime.revision(),1);
+    assert_eq!(runtime.config().global["background-color"],"#694149");
+    assert_eq!(runtime.revision(),2);
 
     std::fs::write(file(20),format!("include={}\n",file(0).display()))?;
     let cyclic:zbus::Result<()>=ctl.call("Reload",&()).await;
     assert!(cyclic.is_err(),"cyclic deep include was accepted");
-    assert_eq!(runtime.config().global["background-color"],"#684148");
-    assert_eq!(runtime.revision(),1);
+    assert_eq!(runtime.config().global["background-color"],"#694149");
+    assert_eq!(runtime.revision(),2);
     Ok(())
 }
 
