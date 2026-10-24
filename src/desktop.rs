@@ -420,6 +420,10 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
             if frame.is_none()||!viewer.buffer_backpressure(){
                 viewer.update_native_frame_on_output(frame.as_ref(),corner,margins,layer,output)
                     .map_err(other)?;
+                if frame.is_some(){
+                    let regions=crate::input::input_rectangles(&runtime,None)?;
+                    viewer.set_notification_input_rectangles(&regions).map_err(other)?;
+                }
                 previous=notes;
                 previous_modes=modes;
                 previous_revision=revision;
@@ -540,6 +544,10 @@ fn render_loop_multi(
                     viewer.update_native_frame_on_output(
                         frame.as_ref(),corner,outer_margins(&config),layer,&key.0,
                     ).map_err(other)?;
+                    if frame.is_some(){
+                        let regions=crate::input::input_rectangles(&runtime,Some(&key))?;
+                        viewer.set_notification_input_rectangles(&regions).map_err(other)?;
+                    }
                     rendered.insert(key.clone(),(
                         current_notes,modes.clone(),revision,scale,icon_scale,
                         frame.is_some(),
