@@ -1401,14 +1401,14 @@ mod tests {
         // Checked against glibc REG_EXTENDED|REG_NOSUB in the C locale.
         // A backslash-backtick anchors input start; backslash-apostrophe
         // anchors input end. Both are literals inside character classes.
-        assert_eq!(mako_posix_ere_escapes(r"\${tick}cat\'"),r"\Acat\z");
-        assert_eq!(mako_posix_ere_escapes(r"[\${tick}][\']"),"[`][']");
+        assert_eq!(mako_posix_ere_escapes(r"\`cat\'"),r"\Acat\z");
+        assert_eq!(mako_posix_ere_escapes(r"[\`][\']"),"[`][']");
         let mut fields=note("normal",&["default"]);
         for (pattern,yes,no) in [
-            (r"\${tick}cat\'","cat","cat!"),
-            (r"\${tick}cat","cat!","bobcat"),
+            (r"\`cat\'","cat","cat!"),
+            (r"\`cat","cat!","bobcat"),
             (r"cat\'","bobcat","catnip"),
-            (r"^[\${tick}]$","`","cat"),
+            (r"^[\`]$","`","cat"),
             (r"^[\']$","'","cat"),
         ]{
             let selector=Selector::new("summary~",pattern).unwrap();
