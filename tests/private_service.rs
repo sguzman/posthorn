@@ -2020,7 +2020,7 @@ async fn private_reload_accepts_gnu_word_start_and_end_criteria()
     let dir=tempfile::tempdir()?;
     let path=dir.path().join("mako.conf");
     std::fs::write(&path,
-        "[summary~=\\<cat\\>]\non-notify=dismiss\n"
+        "[summary~=\\\\<cat\\\\>]\non-notify=dismiss\n"
     )?;
     let (conn,runtime)=open_private_service_from_path(&path).await?;
     let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
@@ -2038,7 +2038,7 @@ async fn private_reload_accepts_gnu_word_start_and_end_criteria()
             "GNU word-boundary rule selected wrong title {title:?}");
     }
     std::fs::write(&path,
-        "[summary~=^\\<cat\\>]\non-notify=dismiss\n"
+        "[summary~=^\\\\<cat\\\\>]\non-notify=dismiss\n"
     )?;
     let _:()=control.call("Reload",&()).await?;
     assert_eq!(runtime.revision(),1);
@@ -2053,7 +2053,7 @@ async fn private_reload_accepts_gnu_word_start_and_end_criteria()
     // In glibc a backslash-angle inside [] is a literal punctuation
     // member, not a zero-width assertion; check both spellings live.
     std::fs::write(&path,
-        "[summary~=^[\\<\\>]$]\non-notify=dismiss\n"
+        "[summary~=^[\\\\<\\\\>]$]\non-notify=dismiss\n"
     )?;
     let _:()=control.call("Reload",&()).await?;
     assert_eq!(runtime.revision(),2);
@@ -2068,7 +2068,7 @@ async fn private_reload_accepts_gnu_word_start_and_end_criteria()
     // Mako's escaped backtick/apostrophe GNU buffer assertions also
     // survive file reload, independent of ordinary word assertions.
     std::fs::write(&path,
-        "[summary~=\\`cat\\']\non-notify=dismiss\n"
+        "[summary~=\\\\`cat\\\\']\non-notify=dismiss\n"
     )?;
     let _:()=control.call("Reload",&()).await?;
     assert_eq!(runtime.revision(),3);
@@ -2082,7 +2082,7 @@ async fn private_reload_accepts_gnu_word_start_and_end_criteria()
     }
     // Bracket expression escaped punctuation stays literal in glibc.
     std::fs::write(&path,
-        "[summary~=^[\\`\\']$]\non-notify=dismiss\n"
+        "[summary~=^[\\\\`\\\\']$]\non-notify=dismiss\n"
     )?;
     let _:()=control.call("Reload",&()).await?;
     assert_eq!(runtime.revision(),4);
