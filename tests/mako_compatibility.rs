@@ -108,4 +108,23 @@ fn check_config_accepts_mako_cli_overrides_without_starting_a_daemon(){
     let no_daemon=Command::new(binary).args(["--width","450"]).output().unwrap();
     assert!(!no_daemon.status.success(),
         "bare Mako options must not start a notification daemon");
+    for options in [
+        vec!["--width","0"],
+        vec!["--on-notify","dismiss"],
+        vec!["--default-timeout","-1"],
+    ] {
+        let output=Command::new(binary)
+            .args(["--experimental-private-service",file.to_str().unwrap()])
+            .args(&options)
+            .env("DBUS_SESSION_BUS_ADDRESS","unix:path=/no/such/bus")
+            .output().unwrap();
+        assert!(!output.status.success(),
+            "invalid private-service override must fail before claiming bus: {options:?}");
+    }
+    let extra=Command::new(binary).args([
+        "--experimental-popup-preview",file.to_str().unwrap(),"--width","440",
+    ]).output().unwrap();
+    assert!(!extra.status.success(),
+        "unrelated experimental command must not swallow extra options");
+
 }
