@@ -1948,3 +1948,45 @@ actual user monitors, and XDG activation remain separate unclosed
 acceptance; T503 is still 51% and T504 is still 0%. The original
 workstation daemon, notification bus, desktop config, and input
 session were never accessed.
+
+## Non-UTF-8 comment bytes in Mako configuration includes
+
+Pinned Mako v1.11.0 `config.c:load_config_file` uses `getline` and
+skips lines whose first non-space/tab byte is `#` before parsing
+options or selectors. It never requires a whole config file to decode
+as UTF-8. Posthorn's previous `std::fs::read_to_string` failed the
+entire config when a harmless comment contained a byte from a legacy
+encoding such as 0xFF. This also blocked otherwise-valid nested
+includes and private D-Bus Reload.
+
+[Implementation 1601d12](https://github.com/sguzman/posthorn/commit/1601d12644fc9fc7f1bffc46a411f01d471cb4f2)
+now reads file bytes and discards comment payloads before decoding
+active content. Each discarded comment retains its newline, preserving
+the original line locations of criteria sections and parse errors.
+Active options remain strict UTF-8; Posthorn does **not** claim exact
+C-byte handling for non-UTF-8 option values, because its Rust style
+and D-Bus text types require valid UTF-8. Such active lines fail with
+a precise file:line diagnostic, never silent lossy replacement.
+
+Unit regressions validate an invalid-byte root comment, an invalid-byte
+nested-include comment, source line numbering, resulting style, and
+failure on invalid-byte active options. A separate full private service
+regression in [commit f4fe843](https://github.com/sguzman/posthorn/commit/f4fe843815680c9ad2ea57ff7935f41cfd713398)
+exercises D-Bus Reload through 20 nested include levels with a
+non-UTF-8 comment. The live configuration updates, revision increases,
+and subsequent invalid values/cyclic includes still preserve the last
+known-good revision.
+
+[GitHub Actions run 40144009482](https://github.com/sguzman/posthorn/actions/runs/40144009482)
+passed **both** mandatory test and headless-wayland jobs on
+`f4fe843`, including Rust unit tests, private service D-Bus
+integration and isolated 1x/1.25x/2x/9x compositor acceptance.
+No private workstation service, physical Hyprland environment, bus
+name, config or input device was accessed.
+
+**T104 87% -> 88% (delta +1 percentage point).**
+P1 remains 90% (delta 0pp), strict M0 remains 89%
+(delta 0pp). T303 reload work is better regression-covered but
+remains 84% (delta 0pp); T503 physical Hyprland remains 51%
+and T504 production cutover remains 0%. This does not
+establish full byte-oriented Mako config parity.
