@@ -2822,7 +2822,10 @@ async fn default_root_style_survives_private_notify_and_pango_rendering()
             "missing pinned Mako default after private Notify: {key}");
     }
     let frame=posthorn::render::render_notification(&note,&style)?;
-    assert_eq!((frame.width,frame.height),(300,100));
+    assert_eq!(style["height"],"100");
+    assert_eq!(frame.width,300);
+    assert!((1..=100).contains(&frame.height),
+        "Mako height=100 is a maximum; shorter text shrinks the popup");
     Ok(())
 }
 
