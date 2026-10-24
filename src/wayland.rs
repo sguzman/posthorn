@@ -17,6 +17,9 @@ use nix::poll::{poll, PollFd, PollFlags};
 use std::os::fd::AsFd;
 use std::time::{Duration,Instant};
 use crate::render::PixelFrame;
+use wayland_protocols::wp::cursor_shape::v1::client::{
+    wp_cursor_shape_manager_v1, wp_cursor_shape_device_v1,
+};
 use wayland_protocols::xdg::activation::v1::client::{
     xdg_activation_v1,
     xdg_activation_token_v1,
@@ -161,6 +164,11 @@ struct ConfigureState {
     size: Option<(u32, u32)>,
     closed: bool,
     pointer: Option<wl_pointer::WlPointer>,
+    // Mako sets the default cursor on pointer enter. Prefer the compositor's
+    // cursor-shape protocol where advertised; older compositor theme fallback
+    // is a separate parity item.
+    cursor_shape_manager: Option<wp_cursor_shape_manager_v1::WpCursorShapeManagerV1>,
+    cursor_shape_device: Option<wp_cursor_shape_device_v1::WpCursorShapeDeviceV1>,
     touch: Option<wl_touch::WlTouch>,
     touch_contacts: HashMap<i32,(f64,f64)>,
     active_surface: Option<wl_surface::WlSurface>,
@@ -241,6 +249,8 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for ConfigureState {
     }
 }
 
+delegate_noop!(ConfigureState: ignore wp_cursor_shape_manager_v1::WpCursorShapeManagerV1);
+delegate_noop!(ConfigureState: ignore wp_cursor_shape_device_v1::WpCursorShapeDeviceV1);
 delegate_noop!(ConfigureState: ignore xdg_activation_v1::XdgActivationV1);
 impl Dispatch<xdg_activation_token_v1::XdgActivationTokenV1, ()> for ConfigureState {
     fn event(
@@ -326,9 +336,14 @@ impl Dispatch<wl_seat::WlSeat, ()> for ConfigureState {
             if let WEnum::Value(flags) = capabilities {
                 if flags.contains(wl_seat::Capability::Pointer) {
                     if state.pointer.is_none() {
-                        state.pointer = Some(seat.get_pointer(qh, ()));
+                        let pointer=seat.get_pointer(qh, ());
+                        if let Some(manager)=state.cursor_shape_manager.as_ref() {
+                            state.cursor_shape_device=Some(manager.get_pointer(&pointer,qh,()));
+                        }
+                        state.pointer=Some(pointer);
                     }
                 } else {
+                    if let Some(device)=state.cursor_shape_device.take(){device.destroy();}
                     if let Some(pointer) = state.pointer.take() { pointer.release(); }
                     state.pointer_inside = false;
                 }
@@ -351,10 +366,17 @@ impl Dispatch<wl_pointer::WlPointer, ()> for ConfigureState {
         _: &(), _: &Connection, _: &QueueHandle<Self>,
     ) {
         match event {
-            wl_pointer::Event::Enter { surface, surface_x, surface_y, .. } => {
+            wl_pointer::Event::Enter { serial, surface, surface_x, surface_y } => {
                 state.pointer_inside = state.active_surface.as_ref()==Some(&surface);
                 state.pointer_x = mako_fixed_coordinate(surface_x);
                 state.pointer_y = mako_fixed_coordinate(surface_y);
+                if state.pointer_inside {
+                    if let Some(device)=state.cursor_shape_device.as_ref() {
+                        // The serial must be the compositor's wl_pointer.enter serial.
+                        // A button serial is not valid for this request.
+                        device.set_shape(serial,wp_cursor_shape_device_v1::Shape::Default);
+                    }
+                }
             }
             wl_pointer::Event::Leave { .. } => state.pointer_inside = false,
             wl_pointer::Event::Motion { surface_x, surface_y, .. } => {
@@ -580,6 +602,8 @@ impl LivePresenter {
         // Headless preview still works without a pointer-capable seat.
         let seat = globals.bind(&qh, 1..=9, ()).ok();
         let xdg_activation = globals.bind(&qh, 1..=1, ()).ok();
+        let cursor_shape_manager:Option<wp_cursor_shape_manager_v1::WpCursorShapeManagerV1>=
+            globals.bind(&qh,1..=2,()).ok();
         // wl_output.name is available from version 4. Bind every named
         // output instead of incorrectly selecting the first global.
         let named_outputs:Vec<_>=globals.contents().clone_list().into_iter()
@@ -589,6 +613,7 @@ impl LivePresenter {
             )))
             .collect();
         let mut state=ConfigureState::default();
+        state.cursor_shape_manager=cursor_shape_manager;
         state.output_globals=named_outputs;
         if !state.output_globals.is_empty() {
             queue.roundtrip(&mut state)?;
