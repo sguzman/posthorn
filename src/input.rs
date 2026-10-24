@@ -311,6 +311,33 @@ mod tests {
         PointerClick{x,y,button,serial:3}
     }
     #[test]
+    fn compositor_input_hotspots_match_click_geometry_not_stack_canvas(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=110\nheight=40\nmargin=12\nborder-size=0\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request{
+            summary:"Hitbox vs transparent layer margins".into(),
+            ..Request::default()
+        });
+        runtime.schedule_without_hook(id,std::time::Instant::now()).unwrap();
+        let rects=input_rectangles(&runtime,None).unwrap();
+        assert_eq!(rects.len(),1);
+        let rect=rects[0];
+        assert_eq!(rect.width,110);
+        assert_eq!(rect.x,12);
+        assert_eq!(rect.y,12);
+        assert!(rect.height>0);
+        let inside=click((rect.x+1) as f64,(rect.y+1) as f64,273);
+        assert_eq!(hit_test(&runtime,inside).unwrap().unwrap().0,id);
+        // The layer surface includes these transparent pixels, but neither
+        // the Mako input region nor Posthorn hit-testing may capture them.
+        assert!(hit_test(&runtime,click((rect.x-1) as f64,
+            (rect.y+1) as f64,273)).unwrap().is_none());
+        assert!(hit_test(&runtime,click((rect.x+1) as f64,
+            (rect.y-1) as f64,273)).unwrap().is_none());
+    }
+
+    #[test]
     fn surface_scoped_hit_testing_cannot_retarget_other_surface(){
         let runtime=SharedRuntime::new(Config::parse(
             "width=110\nheight=32\nborder-size=0\nmargin=0\nmax-visible=1\n\
