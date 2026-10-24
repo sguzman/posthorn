@@ -98,8 +98,14 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
                 // literal '<' and '>', not assertions.
                 Some('<') if !in_class => normalized.push_str(r"\b{start}"),
                 Some('>') if !in_class => normalized.push_str(r"\b{end}"),
+                // GNU glibc escaped backtick and apostrophe delimit
+                // the entire input, like Rust \A and \z.
+                Some('`') if !in_class => normalized.push_str(r"\A"),
+                Some('\'') if !in_class => normalized.push_str(r"\z"),
                 Some('<') => normalized.push('<'),
                 Some('>') => normalized.push('>'),
+                Some('`') => normalized.push('`'),
+                Some('\'') => normalized.push('\''),
                 Some(other) => {
                     normalized.push('\\');
                     normalized.push(other);
@@ -1388,6 +1394,33 @@ mod tests {
             "two POSIX dots consume two UTF-8 bytes in the C locale");
         traits.summary="A";
         assert!(Selector::new("summary~",r"^.$").unwrap().matches(&traits));
+    }
+
+    #[test]
+    fn glibc_gnu_buffer_begin_end_anchors_are_not_literal_punctuation(){
+        // Checked against glibc REG_EXTENDED|REG_NOSUB in the C locale.
+        // A backslash-backtick anchors input start; backslash-apostrophe
+        // anchors input end. Both are literals inside character classes.
+        assert_eq!(mako_posix_ere_escapes(r"\${tick}cat\'"),r"\Acat\z");
+        assert_eq!(mako_posix_ere_escapes(r"[\${tick}][\']"),"[`][']");
+        let mut fields=note("normal",&["default"]);
+        for (pattern,yes,no) in [
+            (r"\${tick}cat\'","cat","cat!"),
+            (r"\${tick}cat","cat!","bobcat"),
+            (r"cat\'","bobcat","catnip"),
+            (r"^[\${tick}]$","`","cat"),
+            (r"^[\']$","'","cat"),
+        ]{
+            let selector=Selector::new("summary~",pattern).unwrap();
+            fields.summary=yes;
+            assert!(selector.matches(&fields),
+                "glibc GNU buffer anchor {pattern:?} failed {yes:?}");
+            fields.summary=no;
+            assert!(!selector.matches(&fields),
+                "glibc GNU buffer anchor {pattern:?} matched {no:?}");
+        }
+        assert_eq!(mako_posix_ere_escapes(r"\\`"),r"\\`",
+            "doubled backslash is a literal backslash");
     }
 
     #[test]
