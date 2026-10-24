@@ -111,7 +111,16 @@ pub async fn run_private_service(config: Config)
 pub async fn run_private_service_from_path(path:&Path)
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
-    let (conn,runtime)=open_private_service_from_path(path).await?;
+    run_private_service_from_path_with_cli_overrides(path,&[]).await
+}
+
+/// Only the opt-in private development name is available to the CLI-aware
+/// runtime. Invalid flags/config reject before requesting any D-Bus name.
+pub async fn run_private_service_from_path_with_cli_overrides(
+    path:&Path,overrides:&[(String,String)]
+)->Result<(),Box<dyn std::error::Error+Send+Sync>>{
+    let (conn,runtime)=open_private_service_from_path_with_cli_overrides(
+        path,overrides).await?;
     run_private_service_instance(conn,runtime).await
 }
 
