@@ -1693,3 +1693,35 @@ this evidence does not constitute full physical Hyprland acceptance
 (T503: 51%) or an authorized live daemon cutover (T504: 0%).
 No installed Mako process, user's home configuration or
 production notification bus was touched.
+
+## GNU getopt_long attached -c path parity for private Mako configuration
+
+Pinned Mako v1.11.0 config.c:parse_config_arguments invokes
+getopt_long with the h and c: short-option grammar. GNU getopt
+therefore accepts an attached required argument as -cPATH in
+addition to -c PATH, --config PATH and --config=PATH. Posthorn's
+private-service and safe config-check option parser previously
+rejected that short-attached spelling.
+
+[Implementation commit 85080b5](https://github.com/sguzman/posthorn/commit/85080b544a6dd9823698f1f2ac1282f02e1c5f2f)
+adds the attached form without changing root style precedence or
+permitting ordinary production startup. A child-process
+check-config test verifies that later -cPATH overrides an earlier
+selected file while retaining original option order. A separate
+private dbus-run-session fixture uses -cPATH to launch the ACTUAL
+Posthorn binary; it verifies timeout=75, max-history=0 and
+post-Reload persistence on the disposable development bus. Neither
+test uses or replaces org.freedesktop.Notifications.
+
+[CI run 40133198948](https://github.com/sguzman/posthorn/actions/runs/40133198948)
+passed test and headless-wayland on
+[commit 8f94517](https://github.com/sguzman/posthorn/commit/8f94517741b8e7e144e099a02ae5a76b0033f56b).
+The all-targets Rust suite (290 tests), private D-Bus integration
+(71 tests), safe CLI integration tests and compositor 1x, 1.25x,
+2x, output and pointer suites all remained green.
+
+**T303: 82% → 83%.** P3 remains **93%**, and the strict M0
+aggregate remains **89%**. Full Mako startup parity and physical
+Hyprland acceptance are still incomplete. T503 remains 51%;
+T504 remains 0%. No live daemon, notification bus or personal
+configuration was modified.
