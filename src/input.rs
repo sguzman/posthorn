@@ -35,7 +35,15 @@ fn ordered_visible(runtime:&SharedRuntime)
 pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
     -> io::Result<Option<(u32,NotifyBinding)>>
 {
-    hit_test_impl(runtime,click,None)
+    hit_test_impl(runtime,click,None,1)
+}
+
+/// The desktop renderer chooses themed icon assets at the maximum output
+/// scale. Re-use that scale for the popup height and click hotspots.
+pub fn hit_test_with_icon_scale(
+    runtime:&SharedRuntime,click:PointerClick,icon_scale:u32,
+)->io::Result<Option<(u32,NotifyBinding)>>{
+    hit_test_impl(runtime,click,None,icon_scale)
 }
 
 /// Hit-test in the coordinate system of one independently rendered Mako
@@ -45,7 +53,14 @@ pub fn hit_test_on_surface(
     runtime:&SharedRuntime,click:PointerClick,
     surface_key:&(String,String,String),
 )->io::Result<Option<(u32,NotifyBinding)>>{
-    hit_test_impl(runtime,click,Some(surface_key))
+    hit_test_impl(runtime,click,Some(surface_key),1)
+}
+
+pub fn hit_test_on_surface_with_icon_scale(
+    runtime:&SharedRuntime,click:PointerClick,
+    surface_key:&(String,String,String),icon_scale:u32,
+)->io::Result<Option<(u32,NotifyBinding)>>{
+    hit_test_impl(runtime,click,Some(surface_key),icon_scale)
 }
 
 /// Surface-local rectangles in unscaled Wayland logical coordinates. The
@@ -58,7 +73,7 @@ pub struct InputRect {
 
 fn positioned_targets(
     runtime:&SharedRuntime,
-    surface_key:Option<&(String,String,String)>,
+    surface_key:Option<&(String,String,String)>,icon_scale:u32,
 )->io::Result<Vec<(u32,crate::config::Options,InputRect)>>{
     let config=runtime.config();
     let (all_notes,modes)=ordered_visible(runtime)?;
@@ -77,9 +92,10 @@ fn positioned_targets(
         let width=style.get("width")
             .and_then(|v|crate::config::parse_nonnegative_mako(v))
             .unwrap_or(300) as u32;
-        let height=crate::render::measure_notification_height_group(
-            n,&style,if entry.group_count>=2{entry.group_count}else{0}
-        ).map_err(error)? as u32;
+        let height=crate::render::measure_notification_height_group_with_icon_scale(
+            n,&style,if entry.group_count>=2{entry.group_count}else{0},
+            icon_scale,
+        ).map_err(error)?;
         dimensions.push((width,height));
         styles.push(style);
     }
@@ -102,13 +118,20 @@ pub fn input_rectangles(
     runtime:&SharedRuntime,
     surface_key:Option<&(String,String,String)>,
 )->io::Result<Vec<InputRect>>{
-    Ok(positioned_targets(runtime,surface_key)?.into_iter()
+    input_rectangles_with_icon_scale(runtime,surface_key,1)
+}
+
+pub fn input_rectangles_with_icon_scale(
+    runtime:&SharedRuntime,
+    surface_key:Option<&(String,String,String)>,icon_scale:u32,
+)->io::Result<Vec<InputRect>>{
+    Ok(positioned_targets(runtime,surface_key,icon_scale)?.into_iter()
         .map(|(_,_,rect)|rect).collect())
 }
 
 fn hit_test_impl(
     runtime:&SharedRuntime,click:PointerClick,
-    surface_key:Option<&(String,String,String)>,
+    surface_key:Option<&(String,String,String)>,icon_scale:u32,
 )->io::Result<Option<(u32,NotifyBinding)>>{
     if !click.x.is_finite()||!click.y.is_finite()||click.x<0.0||click.y<0.0 {
         return Ok(None);
@@ -120,7 +143,7 @@ fn hit_test_impl(
         274=>"on-button-middle",
         _=>return Ok(None),
     };
-    for (id,style,rect) in positioned_targets(runtime,surface_key)? {
+    for (id,style,rect) in positioned_targets(runtime,surface_key,icon_scale)? {
         if click.y<f64::from(rect.y) ||
            click.y>=f64::from(rect.y)+f64::from(rect.height) ||
            click.x<f64::from(rect.x) ||
