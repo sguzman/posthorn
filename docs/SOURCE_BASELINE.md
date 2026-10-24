@@ -1812,3 +1812,52 @@ remains **89%**; remaining POSIX ERE discrepancies are NOT
 assumed fixed by this narrow source-backed change. Physical
 Hyprland acceptance T503 remains 51%; authorized T504
 remains 0%. No live Mako, session bus or user config changed.
+
+## glibc GNU word/buffer boundary regex parity
+
+Mako v1.11.0 criteria.c calls glibc
+regcomp(REG_EXTENDED|REG_NOSUB). Independently compiled C-locale
+glibc probes establish that escaped < and > (backslash plus angle)
+are zero-width start/end-of-word assertions; escaped backtick and
+escaped apostrophe are zero-width start/end-of-input assertions.
+These become literal punctuation when escaped inside a POSIX
+bracket class. Other escaped ASCII letters, including A and z,
+remain LITERAL under glibc; Rust syntax for those letters is not
+accepted directly from the Mako config.
+
+src/config.rs lowers source GNU word assertions to Rust
+\b{start}/\b{end}, and source input-buffer assertions to
+Rust \A/\z in ASCII (-u) byte-regex mode. The positional behavior,
+non-Unicode word classes, bracket punctuation and doubled literal
+backslash are covered by unit regressions. The lowerer only runs
+on summary~/body~ regex values; normal strings remain unchanged.
+
+The private D-Bus test loads an actual Mako-style config file with
+double backslash escaping, because upstream parse_criteria consumes
+one escape level BEFORE compiling the regex. It verifies Notify
+selection for whole words, substring exclusions, literal angle
+punctuation, whole-input assertions and literal backtick/apostrophe
+classes, reloading the same private service between configurations
+and checking revision numbers. No production service/bus accessed.
+
+Acceptance run:
+[GitHub Actions 40139535424](https://github.com/sguzman/posthorn/actions/runs/40139535424)
+passed BOTH test and headless-wayland on
+[implementation commit 183bed3](https://github.com/sguzman/posthorn/commit/183bed3e416da395b432aa2ba748b96340a55d15).
+The test job passed 293 Rust unit tests and 73 private D-Bus
+tests; the 1x, 1.25x, 2x, multi-output, pointer/input-region and
+layout compositor checks all passed.
+
+Earlier intermediate runs 40139248594, 40139354427, and
+40139453718 were RED because synthetic tests initially lacked
+the second backslash layer and then contained an unexpanded test
+placeholder. Both errors were identified from logs, corrected
+in commits 72197e3 and 183bed3, and verified by the final
+fully green acceptance run. No failure was treated as success.
+
+**Task T102 98% -> 99% (delta +1 percentage point).**
+P1 remains 90% (delta 0pp), strict M0 remains 89%
+(delta 0pp). A 99% task is NOT evidence of universal POSIX ERE
+equivalence. Physical Hyprland test gate remains T503 51%,
+and T504 production switch remains 0%. No live Mako,
+personal configuration, session bus or compositor was modified.
