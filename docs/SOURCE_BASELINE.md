@@ -354,25 +354,28 @@ speaker acceptance.
 
 ## Icon theme scale selection from Mako's source path
 
-Mako v1.11 `icon.c:resolve_icon` searches `root/*/*/name.*`. It first
-tries to parse the icon's nominal size from the first wildcard path
-component and uses the second component only when the first is
-unsized. Importantly, Mako reads the `@scale` suffix from that same
-size-bearing component, not from whichever component happens to
-contain an `@`.
+Mako v1.11 `icon.c:resolve_icon` searches `root/*/*/name.*`. It
+parses the nominal size from the first wildcard path component and
+falls back to the second only when the first parses as zero or overflows.
+After that selection, the pinned C source calls
+`strchr(relative_path, '@')`: the search begins at the size-bearing
+component but **continues through the remaining category directory
+and filename**, taking the first `@` it finds. Thus
+`64x64/apps@2/name.png` has scale 2, whereas
+`apps@2/64x64/name.png` has scale 1 because the parser has already
+advanced past `apps@2`. The earlier claim that only the size-bearing
+component supplies the scale was incorrect.
 
-Posthorn now follows this ordering, including signed C `strtol` decimal
-prefixes and the resulting 64-bit to 32-bit narrowing for nominal sizes.
-A nonzero negative size in the first component prevents fallback to the
-second; an invalid or zero size permits it, as in Mako. Tests cover this
-distinction, overflow, both directory layouts, and ensure that
-`64x64/apps@2` does not incorrectly outrank `64x64@2/apps` at 2×.
-A Cairo-renderer test also paints differently colored PNGs to verify the
-actual selected pixels at 1× and 2× without changing popup geometry.
-Rust, D-Bus integration and headless Wayland CI passed at
-[commit 788b090](https://github.com/sguzman/posthorn/actions/runs/39981803700).
-These acceptance cases do not prove complete monitor-hotplug or live
-Hyprland parity.
+Posthorn now matches this remaining-path scan, retaining the existing
+signed C `strtol` semantics and nominal-size narrowing. Source-matched
+regressions test both directory layouts, a filename `@2` suffix,
+first-`@` precedence (including an invalid suffix), invalid first
+size fallback, actual differently colored PNGs at 1× and 2×, and
+unchanged popup geometry. Both Rust/private D-Bus and isolated Sway
+scaling, multi-output and pointer acceptance passed at
+[commit d2e4e00](https://github.com/sguzman/posthorn/actions/runs/40122881673).
+This does not prove live mixed-DPI Hyprland monitor acceptance, and
+the 99% T402 parity gate remains incomplete.
 
 ## Relative and non-UTF-8 file icon URLs
 
