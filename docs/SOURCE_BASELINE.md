@@ -868,8 +868,8 @@ retaining a stale tuple or rearming the timer. Both CI jobs passed at
 Mako's `criteria.c:match_criteria` compares `[output=...]` against
 the particular `notif->surface->surface_output` supplied by the
 compositor, not a shared daemon-wide output. Posthorn now supports
-independently observed per-notification output identities (including
-an explicitly unmapped state). The existing single-surface private
+output observations scoped to a notification's associated Mako surface
+identity (including an explicitly unmapped state). The existing single-surface private
 presenter continues to report its single observed output as a
 fallback for notifications with no independent observation. The
 specific observation is retained on direct-ID replacement and cleared
@@ -897,3 +897,43 @@ real surfaces. Output hotplug/reassignment across truly simultaneous
 surfaces and physical Hyprland multi-monitor QA remain outstanding.
 No production D-Bus ownership, installed Mako, or desktop autostart
 was changed.
+
+## One compositor output per shared Mako surface
+
+Pinned Mako v1.11.0 `criteria.c:apply_each_criteria` associates
+multiple notifications with **one** `mako_surface` when their selected
+configured-output/layer/anchor tuples are identical.
+`wayland.c:surface_handle_enter` stores the compositor-entered output
+on that `mako_surface` itself. Its `surface_handle_leave` clears it.
+Consequently, two notifications that share a tuple **cannot**
+simultaneously observe distinct compositor outputs. An earlier Posthorn
+test modeled that impossible situation, despite green CI.
+
+Posthorn now retains the exact surface tuple on each active
+notification. Updating an entered/left output for one notification
+updates all active notifications associated with that same surface.
+Direct-ID replacement preserves the tuple; fresh notifications can
+join an existing compatible surface and inherit its observed output;
+reassignment between different tuples carries the target surface's
+observation; stack-tag replacements and archived history do not retain
+the previous surface association. Mode and config reapplication
+clear the surface tuples and reconstruct them.
+
+The independent-output test fixtures were corrected to use two
+**genuinely distinct surface tuples**. A new regression verifies that
+two notifications sharing one tuple both track the same output, and
+that a direct-ID replacement retains it. Another source-aligned
+regression simulates a new `wl_surface.enter` after a previously
+unmapped tuple becomes visible again, before expecting output-scoped
+replacement timeout selection. Both CI jobs passed at
+[7a86a43](https://github.com/sguzman/posthorn/actions/runs/40043446892):
+**268 Rust unit tests, 61 private D-Bus tests**, plus isolated
+1×, 1.25× and 2× Sway compositor checks.
+
+These verified invariants are **not** yet proof of a full multi-layer
+or multi-output live renderer. The development presenter still maps a
+single layer-shell notification surface. Its replacement must support
+actual simultaneous compositor surfaces and separate enter/leave
+callbacks before any corresponding 100% acceptance claim. The user's
+installed Mako, live Hyprland session and production D-Bus owner remain
+untouched.
