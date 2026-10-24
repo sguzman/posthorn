@@ -45,6 +45,19 @@ This is implementation and private-compositor evidence, not physical
 mixed-DPI Hyprland monitor acceptance. The original installed Mako
 service and production notification name remain unchanged.
 
+## Real compositor mixed-DPI icon selection and pointer extent
+
+The private two-output Sway acceptance fixture creates a 1× notification
+on HEADLESS-1 while toggling HEADLESS-2 between 2× and 1×. It verifies
+the selected 2× and 1× icon colors and the resulting actual popup heights,
+then sends Wayland virtual-pointer clicks near the painted bottom edge to
+prove that the live input region follows reflow. The test makes no requests
+on the workstation D-Bus or Wayland session. The complete Rust, private
+D-Bus and 1×/1.25×/2× Sway CI matrix passed at
+[commit c06ecfd](https://github.com/sguzman/posthorn/actions/runs/40054674663).
+This is not acceptance on physical Hyprland monitors or touch devices.
+Production Mako remains untouched.
+
 ## Pinned v1.11.0 final notification margin
 
 Upstream `render.c` adds the first top margin and the greater of adjacent

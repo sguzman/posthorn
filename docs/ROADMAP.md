@@ -37,11 +37,11 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `██████████ 98%`
 - 🔄 T303 — Correct startup, bus ownership and config reload behavior — `████████░░ 77%`
 
-### 🪟 P4 — Wayland protocol and rendering — `██████████ 98%`
+### 🪟 P4 — Wayland protocol and rendering — `██████████ 99%`
 
 - 🧱 T401 — Layer-shell surfaces, anchors, output routing and scaling — `██████████ 99%`
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `██████████ 99%`
-- 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `██████████ 97%`
+- 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `██████████ 98%`
 
 ### 🎛️ P5 — CLI and exact workstation parity — `██████░░░░ 55%`
 
