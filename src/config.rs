@@ -130,6 +130,41 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
     normalized
 }
 
+/// glibc regcomp(REG_EXTENDED) does not recognize the additional
+/// Rust-regex ASCII classes [[:ascii:]] and [[:word:]]. Those are valid
+/// Rust classes, but an upstream Mako configuration containing either
+/// fails to load. Scan only real POSIX class elements inside brackets;
+/// escaped opening brackets and quoted literals are not class openers.
+fn has_rust_only_posix_class(pattern: &str) -> bool {
+    let mut chars=pattern.chars().peekable();
+    let mut in_class=false;
+    while let Some(ch)=chars.next() {
+        match ch {
+            '\\' => { chars.next(); }
+            '[' if !in_class => in_class=true,
+            '[' if in_class && chars.peek()==Some(&':') => {
+                chars.next(); // POSIX class-opening colon.
+                let mut name=String::new();
+                let mut terminated=false;
+                while let Some(next)=chars.next() {
+                    if next==':' && chars.peek()==Some(&']') {
+                        chars.next();
+                        terminated=true;
+                        break;
+                    }
+                    name.push(next);
+                }
+                if terminated && matches!(name.as_str(),"ascii"|"word") {
+                    return true;
+                }
+            }
+            ']' if in_class => in_class=false,
+            _ => {}
+        }
+    }
+    false
+}
+
 /// POSIX REG_EXTENDED rejects constructs beginning with unescaped "(?".
 /// Rust regex accepts inline flags and non-capturing/lookaround-style groups.
 /// A bare "(?" inside a bracket expression or an escaped "(" is not a group.
@@ -187,6 +222,9 @@ impl Selector {
             // enabling multiline anchors; -u keeps ASCII class semantics.
             if has_rust_only_group_extension(value) {
                 return Err("POSIX ERE does not support (? group extensions".into());
+            }
+            if has_rust_only_posix_class(value) {
+                return Err("glibc POSIX ERE does not recognize ASCII/word bracket classes".into());
             }
             let pattern = mako_posix_ere_escapes(value);
             Some(Regex::new(&format!("(?s-u:{pattern})"))
@@ -1114,6 +1152,37 @@ mod tests {
             fields.summary=no;
             assert!(!rule.matches(&fields), "{pattern} incorrectly matched {no:?}");
         }
+    }
+
+    #[test]
+    fn glibc_rejects_rust_only_ascii_and_word_posix_bracket_classes() {
+        // Verified against glibc regcomp(REG_EXTENDED | REG_NOSUB) in the
+        // C locale: these Rust extras produce REG_ECTYPE upstream.
+        for unsupported in [
+            "[[:ascii:]]", "[[:word:]]", "[^[:ascii:]]",
+            "[[:alpha:][:word:]]",
+        ] {
+            assert!(has_rust_only_posix_class(unsupported));
+            assert!(Selector::new("summary~",unsupported).is_err(),
+                "glibc must reject non-POSIX class {unsupported:?}");
+            assert!(Config::parse(&format!(
+                "[summary~={unsupported}]\nwidth=400\n"
+            )).is_err());
+        }
+        // The standard POSIX classes continue to compile, as does the
+        // glibc GNU word operator outside of bracket expressions.
+        for supported in [
+            "[[:alpha:]]", "[[:digit:]]", "[[:xdigit:]]",
+            "[[:blank:]]", r"\w+", "[[:alpha:][:digit:]]",
+        ] {
+            assert!(!has_rust_only_posix_class(supported));
+            assert!(Selector::new("summary~",supported).is_ok(),
+                "valid Mako POSIX/GNU class rejected: {supported:?}");
+        }
+        // Literal escaped '[' is not a POSIX bracket expression, so this
+        // guard must not reject it merely by scanning raw substrings.
+        assert!(!has_rust_only_posix_class(r"\[[:word:]]"));
+        assert!(!has_rust_only_posix_class(r"\[[:ascii:]]"));
     }
 
     #[test]
