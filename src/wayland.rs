@@ -354,7 +354,10 @@ impl Dispatch<wl_output::WlOutput, ()> for ConfigureState {
                 }
             }
             wl_output::Event::Scale{factor}=>{
-                let scale=factor.clamp(1,8) as u32;
+                // Mako v1.11.0 stores the actual wl_output.scale without an
+                // arbitrary 8x cap. Per-frame SHM allocation limits still
+                // guard large compositor values during presentation.
+                let scale=factor.max(1) as u32;
                 if let Some((_,value))=state.output_scales.iter_mut()
                     .find(|(proxy,_)|proxy==output){
                     *value=scale;
@@ -1075,7 +1078,7 @@ impl Drop for LivePresenter {
 /// sets wl_surface.buffer_scale to the same integer scale.
 pub fn scale_frame(frame:&PixelFrame,scale:u32)->Result<PixelFrame,String>{
     validate_frame(frame).map_err(str::to_owned)?;
-    if !(1..=8).contains(&scale){return Err("unsupported Wayland output scale".into());}
+    if scale==0 {return Err("invalid Wayland output scale".into());}
     let width=frame.width.checked_mul(scale).ok_or("scaled width overflow")?;
     let height=frame.height.checked_mul(scale).ok_or("scaled height overflow")?;
     let stride=width.checked_mul(4).ok_or("scaled stride overflow")?;
@@ -1230,7 +1233,13 @@ mod tests {
         assert_eq!(&scaled.pixels[16..32],&scaled.pixels[0..16]);
         assert_eq!(scale_frame(&frame,1).unwrap().pixels,frame.pixels);
         assert!(scale_frame(&frame,0).is_err());
-        assert!(scale_frame(&frame,9).is_err());
+        // Mako accepts a reported 9x scale; only actual pixel and SHM
+        // allocation bounds may reject it.
+        let nine=scale_frame(&frame,9).unwrap();
+        assert_eq!((nine.width,nine.height,nine.stride),(18,9,72));
+        assert_eq!(&nine.pixels[0..4],[10,20,30,255]);
+        assert_eq!(&nine.pixels[36..40],[40,50,60,128]);
+        assert!(scale_frame(&frame,u32::MAX).is_err());
         assert!(scale_frame(&PixelFrame{
             width:4096,height:4096,stride:16384,
             pixels:vec![0;4096*4096*4],

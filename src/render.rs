@@ -281,8 +281,8 @@ pub fn render_notification_group_with_icon_scale(
     note:&Notification,style:&Options,group_count:usize,
     pixel_scale:u32,icon_lookup_scale:u32,
 )->Result<PixelFrame,String>{
-    if !(1..=8).contains(&pixel_scale) {
-        return Err("unsupported notification pixel scale".into());
+    if pixel_scale==0 {
+        return Err("invalid notification pixel scale".into());
     }
     let width = integer_option(style, "width", 300);
     // One decode per frame. Both text measurement and painting consume the
@@ -1583,6 +1583,22 @@ mod tests {
         let style = Options::new();
         let result = render_notification(&note, &style);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn compositor_scale_above_eight_uses_checked_frame_bounds() {
+        // Mako accepts wl_output.scale 9. Render within the same
+        // conservative pixel/SHM caps used for any other scale.
+        let note=fixture();
+        let mut style=Options::new();
+        style.insert("width".into(),"80".into());
+        style.insert("height".into(),"60".into());
+        style.insert("padding".into(),"0".into());
+        let nine=render_notification_group_scaled(&note,&style,0,9).unwrap();
+        assert_eq!(nine.width,720);
+        assert_eq!(nine.height%9,0);
+        assert!(render_notification_group_scaled(&note,&style,0,0).is_err());
+        assert!(render_notification_group_scaled(&note,&style,0,4096).is_err());
     }
 
     #[test]

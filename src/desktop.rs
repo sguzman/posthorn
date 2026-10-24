@@ -284,8 +284,11 @@ fn snapshot_frame_for_surface(
     runtime:&SharedRuntime,pixel_scale:u32,icon_lookup_scale:u32,
     surface_key:Option<&(String,String,String)>,
 )->io::Result<Option<PixelFrame>>{
-    if !(1..=8).contains(&pixel_scale) {
-        return Err(other("unsupported compositor pixel scale"));
+    // The Wayland compositor may advertise scales above 8. Preserve the
+    // reported positive i32 value; downstream frame measurements enforce
+    // the actual SHM bounds instead of an arbitrary compositor scale cap.
+    if pixel_scale==0 || pixel_scale>i32::MAX as u32 {
+        return Err(other("invalid compositor pixel scale"));
     }
     let scale=pixel_scale as i32;
     let scale_margin=|raw:&String| {
