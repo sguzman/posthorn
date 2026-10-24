@@ -130,6 +130,60 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
     normalized
 }
 
+/// glibc's GNU POSIX ERE accepts omitted lower repetition bounds:
+/// a{,2} is a{0,2}, and a{,} is a{0,}. Rust regex's default parser
+/// rejects those spellings. Rewrite only real unescaped repeat tokens,
+/// never escaped literal braces or bracket-class members.
+fn mako_posix_ere_empty_min_repetitions(pattern:&str)->String{
+    let mut out=String::with_capacity(pattern.len());
+    let mut chars=pattern.chars().peekable();
+    let mut in_class=false;
+    while let Some(ch)=chars.next(){
+        match ch {
+            '\\' => {
+                out.push(ch);
+                if let Some(next)=chars.next(){out.push(next);}
+            }
+            '[' if !in_class => {
+                in_class=true;
+                out.push(ch);
+            }
+            '[' if in_class => {
+                out.push(ch);
+                // A POSIX class/collating/equivalence element owns its
+                // nested closing bracket; do not close the outer class.
+                if let Some(delimiter @ (':'|'.'|'='))=chars.peek().copied(){
+                    chars.next();
+                    out.push(delimiter);
+                    let mut previous='\0';
+                    for next in chars.by_ref(){
+                        out.push(next);
+                        if previous==delimiter && next==']'{break;}
+                        previous=next;
+                    }
+                }
+            }
+            ']' if in_class => {
+                in_class=false;
+                out.push(ch);
+            }
+            '{' if !in_class => {
+                let mut look=chars.clone();
+                let omitted_min=if look.next()==Some(','){
+                    while look.peek().is_some_and(char::is_ascii_digit){
+                        look.next();
+                    }
+                    look.peek()==Some(&'}')
+                }else{false};
+                if omitted_min {out.push_str("{0");}
+                else{out.push('{');}
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// glibc regcomp(REG_EXTENDED) does not recognize the additional
 /// Rust-regex ASCII classes [[:ascii:]] and [[:word:]], or Rust's
 /// [[:^alpha:]]-style per-class negation extension. A Mako configuration
@@ -228,7 +282,8 @@ impl Selector {
             if has_rust_only_posix_class(value) {
                 return Err("glibc POSIX ERE does not recognize this bracket class".into());
             }
-            let pattern = mako_posix_ere_escapes(value);
+            let pattern = mako_posix_ere_empty_min_repetitions(
+                &mako_posix_ere_escapes(value));
             Some(Regex::new(&format!("(?s-u:{pattern})"))
                 .map_err(|e| format!("invalid regex: {e}"))?)
         } else { None };
@@ -1154,6 +1209,38 @@ mod tests {
             fields.summary=no;
             assert!(!rule.matches(&fields), "{pattern} incorrectly matched {no:?}");
         }
+    }
+
+    #[test]
+    fn glibc_gnu_repetition_accepts_omitted_minimum_outside_brackets(){
+        // glibc REG_EXTENDED in the C locale accepts these spellings;
+        // Rust regex's default parser requires a numeric lower bound.
+        for (source, normalized) in [
+            (r"^a{,2}$",r"^a{0,2}$"),
+            (r"^a{,}$",r"^a{0,}$"),
+            (r"^a{,0}$",r"^a{0,0}$"),
+            (r"^[{,2}]$",r"^[{,2}]$"),
+            (r"^\{,2}$",r"^\{,2}$"),
+            (r"^[[:alpha:]]{,2}$",r"^[[:alpha:]]{0,2}$"),
+        ]{
+            assert_eq!(mako_posix_ere_empty_min_repetitions(source),normalized);
+        }
+        let mut traits=note("normal",&["default"]);
+        let bounded=Selector::new("summary~",r"^a{,2}$").unwrap();
+        for summary in ["","a","aa"]{
+            traits.summary=summary;
+            assert!(bounded.matches(&traits),"{summary:?} must match 0..=2");
+        }
+        traits.summary="aaa";
+        assert!(!bounded.matches(&traits));
+        let unbounded=Selector::new("summary~",r"^a{,}$").unwrap();
+        assert!(unbounded.matches(&traits));
+        traits.summary="bbb";
+        assert!(!unbounded.matches(&traits));
+        let literal=Selector::new("summary~",r"^\{,2}$").unwrap();
+        traits.summary="{,2}";
+        assert!(literal.matches(&traits),"escaped literal brace was rewritten");
+        assert!(Config::parse("[summary~=^a{,2}$]\nwidth=402\n").is_ok());
     }
 
     #[test]
