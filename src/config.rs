@@ -390,18 +390,27 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
+        // Mako v1.11.0 config.c:init_default_style marks every field
+        // in its root style.spec explicitly specified. Represent the
+        // complete root rather than relying on scattered UI fallbacks.
         let default = [
-            ("width", "300"), ("height", "100"), ("margin", "10"),
-            ("padding", "5"), ("border-size", "2"),
+            ("width", "300"), ("height", "100"),
+            ("outer-margin", "0"), ("margin", "10"), ("padding", "5"),
+            ("border-radius", "0"), ("border-size", "2"),
             ("background-color", "#285577FF"), ("text-color", "#FFFFFFFF"),
-            ("border-color", "#4C7899FF"), ("font", "monospace 10"),
+            ("border-color", "#4C7899FF"), ("progress-color", "#5588AAFF"),
+            ("icons", "1"), ("max-icon-size", "64"), ("icon-path", ""),
+            ("icon-border-radius", "0"), ("icon-location", "left"),
+            ("font", "monospace 10"),
             ("format", "<b>%s</b>\\n%b"), ("markup", "1"),
-            ("actions", "1"), ("default-timeout", "0"),
-            ("ignore-timeout", "0"), ("history", "1"),
-            ("max-visible", "5"), ("anchor", "top-right"), ("layer", "top"),
+            ("text-alignment", "left"), ("actions", "1"),
+            ("default-timeout", "0"), ("ignore-timeout", "0"),
+            ("group-by", "none"), ("invisible", "0"), ("history", "1"),
+            ("max-visible", "5"), ("output", ""),
+            ("anchor", "top-right"), ("layer", "top"),
             ("on-button-left", "invoke-default-action"),
             ("on-button-right", "dismiss"), ("on-button-middle", "none"),
-            ("on-touch", "dismiss"),
+            ("on-touch", "dismiss"), ("on-notify", "none"),
         ];
         Self {
             global: default.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
@@ -823,6 +832,37 @@ mod tests {
         Traits { app_name: "example", app_icon:"", category, desktop_entry:"", summary:"Saved",
             body:"All changes written", urgency:"normal", anchor:"top-right", output:"",
             modes, requested_timeout_ms:-1, actionable:false, group_index:-1, hidden:false }
+    }
+
+    #[test]
+    fn default_root_style_explicitly_matches_mako_v111_source() {
+        // config.c:init_default_style sets the complete style and marks
+        // style.spec entirely specified (memset(..., true, ...)).
+        let config=Config::default();
+        let expected=[
+            ("width","300"),("height","100"),("outer-margin","0"),
+            ("margin","10"),("padding","5"),("border-radius","0"),
+            ("border-size","2"),("icons","1"),("max-icon-size","64"),
+            ("icon-path",""),("icon-border-radius","0"),
+            ("icon-location","left"),("text-alignment","left"),
+            ("progress-color","#5588AAFF"),("group-by","none"),
+            ("invisible","0"),("output",""),("max-visible","5"),
+            ("on-notify","none"),("anchor","top-right"),
+        ];
+        for (key,value) in expected {
+            assert_eq!(config.global.get(key).map(String::as_str),Some(value),
+                "Mako root default missing or mismatched: {key}");
+        }
+        for (key,value) in &config.global {
+            validate_option(key,value).unwrap_or_else(|error|
+                panic!("Mako root style option {key}={value:?} invalid: {error}"));
+        }
+        let style=config.style_for(&note("success",&["default"]));
+        for (key,value) in expected {
+            assert_eq!(style.get(key).map(String::as_str),Some(value));
+        }
+        assert_eq!(config.rules.len(),0,
+            "built-in root style does not create user criteria sections");
     }
 
     #[test]
