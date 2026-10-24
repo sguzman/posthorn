@@ -1687,8 +1687,8 @@ root-style Pango render regression; and Sway 1x, fractional,
 2x, multi-output, click-through, pointer and layout regressions
 remained green.
 
-**T105: 84% → 86%; P1: 89% → 90%.** Strict M0 remains
-**88%**. Unfinished style/layout parity work remains separate:
+**T105: 84% → 86%; P1: 89% → 90%.** The task-weighted strict
+**M0 increases from 88% to 89%**, as calculated by progress.json. Unfinished style/layout parity work remains separate:
 this evidence does not constitute full physical Hyprland acceptance
 (T503: 51%) or an authorized live daemon cutover (T504: 0%).
 No installed Mako process, user's home configuration or
