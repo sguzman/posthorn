@@ -1223,7 +1223,8 @@ mod tests {
     fn modes_override_without_suppressing_colors() {
         let c=Config::parse("[category=success]\nbackground-color=#305747\n[mode=quiet]\non-notify=none\n").unwrap();
         let normal=c.style_for(&note("success", &["default"]));
-        assert!(!normal.contains_key("on-notify"));
+        assert_eq!(normal["on-notify"],"none",
+            "Mako root explicitly defaults on-notify to a no-op");
         let quiet=c.style_for(&note("success", &["default","quiet"]));
         assert_eq!(quiet["background-color"],"#305747");
         assert_eq!(quiet["on-notify"],"none");
