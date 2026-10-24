@@ -2323,6 +2323,39 @@ async fn out_of_range_urgency_does_not_match_normal_style_over_dbus()
 }
 
 #[tokio::test]
+async fn posix_c_locale_byte_regex_criteria_gate_private_notify()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Pinned Mako's regexec(REG_EXTENDED|REG_NOSUB) runs in the C
+    // locale. Unicode-aware Rust regex would dismiss the accented/CJK
+    // notifications, although Mako's ASCII class and GNU \w do not.
+    let cfg=Config::parse(
+        "[summary~=^[[:alpha:]]+$]\non-notify=dismiss\n\
+         [body~=^\\w+$]\non-notify=dismiss\n"
+    )?;
+    let (conn,runtime)=open_private_service(cfg).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    for (summary,body,should_close) in [
+        ("Ascii","","true"),
+        ("café","","false"),
+        ("東京","","false"),
+        ("digits123","é","false"),
+        ("digits123","ASCII_123","true"),
+    ] {
+        let expected_close=should_close=="true";
+        let id:u32=desktop.call("Notify",&(
+            "posix-locale",0u32,"",summary,body,
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        let store=runtime.store.lock().unwrap();
+        let active=store.active().iter().any(|note|note.id==id);
+        assert_eq!(!active,expected_close,
+            "POSIX C-locale regex mismatch for {summary:?}/{body:?}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn posix_dotall_summary_criteria_drive_private_dbus_on_notify()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
