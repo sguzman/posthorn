@@ -1384,3 +1384,35 @@ Mako replacement follows from it.
 P3/T303 advances **77% to 78%**; the P3 phase remains **91%**
 and M0 remains **88%** on their unchanged source-backed ledger.
 All prior unaccepted physical and cutover gates remain open.
+
+## Direct Notify replacement sound hooks and quiet-mode reactivation
+
+Pinned Mako **v1.11.0** `dbus/xdg.c:handle_notify` resolves and
+updates an existing notification when `replaces_id` is active, and
+still invokes `notification_execute_binding` for its effective
+`on-notify` style after grouping. `mode=quiet` can override that
+binding to `none`, suppressing notification sounds without dropping
+the notification. Mode changes themselves must not replay hooks.
+
+[Commit 060111a](https://github.com/sguzman/posthorn/commit/060111ad1659a69a9a8aedf717615dded03d4479)
+extends the existing **private D-Bus + disposable Sway** sound-hook
+acceptance at scale 1× with a real shell-command output file, not
+a physical audio device. The test delivers a categorized notification
+and waits for its `on-notify=exec` ID, then sends a second Notify
+with the **same active replaces_id**, verifies the returned ID is
+unchanged, and requires exactly one new hook invocation containing
+that original ID. It switches to quiet mode, replaces the notification
+again, and asserts no hook runs. Restoring default mode by itself
+must not execute a hook; one more replacement must resume the hook,
+again using the unchanged notification ID. The fixture is dismissed
+at the end, entirely within the isolated service.
+
+[GitHub Actions 40119691973](https://github.com/sguzman/posthorn/actions/runs/40119691973)
+passed both the Rust/unit/private-D-Bus job and the headless Wayland
+job including that full replacement/quiet lifecycle. This is
+accepted **hook/lifecycle parity**, not physical speaker, PipeWire or
+Hyprland sound QA; no Mako production process or user's session bus
+was accessed. **T502 advances 75% → 76%** and the separate Mako
+category/sound feature inventory to **76%**. The P5 average becomes
+**56%**, while the overall M0 milestone remains **88%**, T503 remains
+51% and T504 remains 0%.

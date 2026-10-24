@@ -43,17 +43,17 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `██████████ 99%`
 - 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `██████████ 98%`
 
-### 🎛️ P5 — CLI and exact workstation parity — `██████░░░░ 55%`
+### 🎛️ P5 — CLI and exact workstation parity — `██████░░░░ 56%`
 
 - ⌨️ T501 — Port makoctl operations with compatibility tests — `██████████ 95%`
-- 🔔 T502 — Reproduce category colors, per-category sounds and quiet mode — `████████░░ 75%`
+- 🔔 T502 — Reproduce category colors, per-category sounds and quiet mode — `████████░░ 76%`
 - 🧪 T503 — End-to-end on Hyprland, notify-send and Edge activation — `█████░░░░░ 51%`
 - 🚀 T504 — MVP inauguration and opt-in reversible Mako switch — `░░░░░░░░░░ 0%`
 
 **Feature inventory** (separate from task-based milestone percentage):
 
 - 🔔 Desktop notification parity — `██████████ 98%`
-- 🎨 Mako category coloring and sound parity — `████████░░ 75%`
+- 🎨 Mako category coloring and sound parity — `████████░░ 76%`
 - 📜 Mako history/control API parity — `██████████ 96%`
 
 ## 📑 M1 — Post-MVP TOML configuration — `░░░░░░░░░░ 0%`
