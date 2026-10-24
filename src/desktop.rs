@@ -1174,6 +1174,32 @@ mod tests {
     }
 
     #[test]
+    fn oversized_hidden_placeholder_does_not_widen_real_notification_canvas(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=100\nheight=40\nborder-size=0\nmargin=4\nmax-visible=1\n\
+             [hidden]\nwidth=500\nbackground-color=#BB2222\n"
+        ).unwrap());
+        let now=std::time::Instant::now();
+        for number in 0..2{
+            let id=runtime.store.lock().unwrap().push(Request{
+                summary:format!("Visible {number}"),..Request::default()
+            });
+            runtime.schedule_without_hook(id,now).unwrap();
+        }
+        let frame=snapshot_frame_scaled(&runtime,1).unwrap().unwrap();
+        assert_eq!(frame.width,108,
+            "Mako render.c excludes the synthetic hidden popup from max_width");
+        let double=snapshot_frame_scaled(&runtime,2).unwrap().unwrap();
+        assert_eq!(double.width,216);
+        assert!(frame.height>40,
+            "synthetic placeholder still contributes its own vertical space");
+        let hotspots=crate::input::input_rectangles(&runtime,None).unwrap();
+        assert_eq!(hotspots.len(),1,
+            "the synthetic hidden-count popup is not a clickable notification");
+        assert_eq!((hotspots[0].x,hotspots[0].width),(4,100));
+    }
+
+    #[test]
     fn grouping_hides_secondary_members_but_keeps_distinct_apps_visible() {
         let runtime=SharedRuntime::new(Config::parse(
             "group-by=app-name\nmax-visible=2\n"
