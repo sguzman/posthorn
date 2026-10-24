@@ -1296,6 +1296,102 @@ EOF
   busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
     org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako SetMode \
     's' default >/dev/null
+  # Pinned Mako dbus/xdg.c executes on-notify after BOTH fresh Notify and
+  # direct replaces_id, using the retained notification ID. Mode changes and
+  # style reloads alone must not re-execute it; quiet must suppress replacement
+  # hooks until the default mode is restored.
+  replace_reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn replacement hook QA' 0 '' 'First arrival' '' \
+    0 1 'category' 's' 'qa-audio-hook' 30000)"
+  [[ "$replace_reply" == u\ * ]] || { echo 'Invalid replacement fixture ID'; exit 1; }
+  replace_id="${replace_reply#u }"
+  before_replacement="$(wc -l < "$root/qa-hook.log")"
+  # There is no wait on the initial on-notify shell. Ensure it completes
+  # before comparing exactly how many later replacements triggered hooks.
+  for _ in {1..40}; do
+    if [[ "$(tail -n 1 "$root/qa-hook.log")" == "$replace_id" ]]; then
+      break
+    fi
+    sleep 0.1
+  done
+  [[ "$(tail -n 1 "$root/qa-hook.log")" == "$replace_id" ]] || {
+    echo 'First replacement-test notification did not execute its hook'
+    exit 1
+  }
+  before_replacement="$(wc -l < "$root/qa-hook.log")"
+  replaced="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn replacement hook QA' "$replace_id" '' 'Same ID replacement' '' \
+    0 1 'category' 's' 'qa-audio-hook' 30000)"
+  [[ "$replaced" == "u $replace_id" ]] || {
+    echo "Direct replacement changed the Freedesktop ID: $replaced"
+    exit 1
+  }
+  normal_replacement_fired=0
+  for _ in {1..40}; do
+    if [[ "$(wc -l < "$root/qa-hook.log")" -eq $((before_replacement+1)) ]]; then
+      normal_replacement_fired=1
+      break
+    fi
+    sleep 0.1
+  done
+  [[ "$normal_replacement_fired" == 1 ]] || {
+    echo 'Direct replacement did not execute its configured on-notify hook'
+    exit 1
+  }
+  [[ "$(tail -n 1 "$root/qa-hook.log")" == "$replace_id" ]] || {
+    echo 'Replacement hook did not receive the original notification ID'
+    exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako SetMode \
+    's' quiet >/dev/null
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn replacement hook QA' "$replace_id" '' 'Quiet replacement' '' \
+    0 1 'category' 's' 'qa-audio-hook' 30000 >/dev/null
+  sleep 0.3
+  [[ "$(wc -l < "$root/qa-hook.log")" -eq $((before_replacement+1)) ]] || {
+    echo 'Quiet-mode replacement incorrectly emitted a sound hook'
+    exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako SetMode \
+    's' default >/dev/null
+  sleep 0.2
+  [[ "$(wc -l < "$root/qa-hook.log")" -eq $((before_replacement+1)) ]] || {
+    echo 'Mode restoration incorrectly replayed a notification hook'
+    exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn replacement hook QA' "$replace_id" '' 'Default replacement' '' \
+    0 1 'category' 's' 'qa-audio-hook' 30000 >/dev/null
+  resumed=0
+  for _ in {1..40}; do
+    if [[ "$(wc -l < "$root/qa-hook.log")" -eq $((before_replacement+2)) ]]; then
+      resumed=1
+      break
+    fi
+    sleep 0.1
+  done
+  [[ "$resumed" == 1 ]] || {
+    echo 'Hook did not resume after quiet mode was cleared'
+    exit 1
+  }
+  [[ "$(tail -n 1 "$root/qa-hook.log")" == "$replace_id" ]] || {
+    echo 'Post-quiet replacement hook used the wrong notification ID'
+    exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications CloseNotification 'u' "$replace_id" >/dev/null
+  echo 'Private on-notify direct replacement/quiet reactivation lifecycle: OK'
   echo 'on-notify ID delivery and quiet-mode sound-hook suppression: OK'
 fi
 
