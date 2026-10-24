@@ -50,3 +50,62 @@ fn posthornctl_usage_writes_stderr_with_mako_exit_semantics() {
         ));
     }
 }
+
+#[test]
+fn check_config_accepts_mako_cli_overrides_without_starting_a_daemon(){
+    use std::process::Command;
+    let temp=tempfile::tempdir().unwrap();
+    let file=temp.path().join("mako.conf");
+    std::fs::write(&file,
+        "width=210\nmax-history=5\nsort=-time\n\
+         [category=warning]\nwidth=340\n"
+    ).unwrap();
+    let binary=env!("CARGO_BIN_EXE_posthorn");
+    let good=Command::new(binary).args([
+        "--check-config",file.to_str().unwrap(),
+        "--width=450","--font","Luciole 14",
+        "--sort","+priority","--sort","-priority",
+        "--max-history","2"
+    ]).env("DBUS_SESSION_BUS_ADDRESS","unix:path=/no/such/bus")
+      .env("WAYLAND_DISPLAY","not-a-real-display").output().unwrap();
+    assert!(good.status.success(),"CLI option handling failed: {good:?}");
+    let stdout=String::from_utf8_lossy(&good.stdout);
+    assert!(stdout.contains("2 history slots; 5 CLI overrides"),
+        "overrides did not apply after loading file: {stdout}");
+    assert!(stdout.contains(&file.display().to_string()));
+
+    // Mako's -c/--config selects the file before applying any later
+    // root overrides, including the last of repeated -c options.
+    let alternate=temp.path().join("other.conf");
+    std::fs::write(&alternate,"max-history=8\n").unwrap();
+    let explicit=Command::new(binary).args([
+        "--check-config",file.to_str().unwrap(),
+        "-c",file.to_str().unwrap(),
+        "--config",alternate.to_str().unwrap()
+    ]).output().unwrap();
+    assert!(explicit.status.success(),"{explicit:?}");
+    assert!(String::from_utf8_lossy(&explicit.stdout)
+        .contains("8 history slots; 0 CLI overrides"));
+
+    for options in [
+        vec!["--width","0"],
+        vec!["--width","440\nmax-history=0"],
+        vec!["--sort","bad"],
+        vec!["--on-notify","dismiss"],
+        vec!["--text-alignment","center"],
+        vec!["--config"],
+        vec!["--max-history","9223372036854775808"],
+    ]{
+        let output=Command::new(binary).args(["--check-config",
+            file.to_str().unwrap()]).args(&options).output().unwrap();
+        assert!(!output.status.success(),
+            "invalid CLI option passed: {options:?}");
+        assert!(output.stdout.is_empty(),
+            "failure must not print a successful parse result");
+    }
+    // No implicit production Mako replacement is introduced by making
+    // its syntax available in an explicitly safe validation command.
+    let no_daemon=Command::new(binary).args(["--width","450"]).output().unwrap();
+    assert!(!no_daemon.status.success(),
+        "bare Mako options must not start a notification daemon");
+}
