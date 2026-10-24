@@ -30,17 +30,47 @@ fn parse_mako_cli_args(arguments:&[String])
             if value.is_empty(){return Err("empty config path".into());}
             selected_config=Some(value.into());
         }else if let Some(option)=token.strip_prefix("--"){
-            let (name,value)=if let Some((name,value))=option.split_once('='){
-                (name,value.to_string())
-            }else{
-                i+=1;
-                (option,arguments.get(i).ok_or_else(||
-                    format!("--{option} requires a value"))?.clone())
+            let (provided,attached)=match option.split_once('='){
+                Some((name,value))=>(name,Some(value)),
+                None=>(option,None),
             };
-            if !posthorn::config::MAKO_CLI_STYLE_OPTIONS.contains(&name){
-                return Err(format!("unsupported Mako command-line option '--{name}'"));
+            if provided.is_empty(){return Err("empty long option".into());}
+            // GNU getopt_long accepts unique abbreviations, and selects
+            // the FIRST compatible declaration when several declarations
+            // have identical (flag, val, has_arg). All Mako style flags
+            // have (NULL, 0, required_argument); preserve the exact
+            // ordering in config.c rather than rejecting such prefixes.
+            let matched=if provided=="help"||provided=="config"
+                || posthorn::config::MAKO_CLI_STYLE_OPTIONS.contains(&provided){
+                provided
+            }else{
+                let style=posthorn::config::MAKO_CLI_STYLE_OPTIONS.iter()
+                    .copied().find(|name|name.starts_with(provided));
+                let config="config".starts_with(provided);
+                let help="help".starts_with(provided);
+                if (config||help) && (style.is_some() || (config&&help)){
+                    return Err(format!("ambiguous Mako option '--{provided}'"));
+                }
+                if config{"config"}
+                else if help{"help"}
+                else{style.ok_or_else(||
+                    format!("unsupported Mako command-line option '--{provided}'"))?}
+            };
+            if matched=="help"{
+                return Err("Mako --help is not a config override".into());
             }
-            overrides.push((name.into(),value));
+            let value=if let Some(value)=attached{value.to_owned()}
+                else{
+                    i+=1;
+                    arguments.get(i).ok_or_else(||
+                        format!("--{provided} requires a value"))?.clone()
+                };
+            if matched=="config"{
+                if value.is_empty(){return Err("empty config path".into());}
+                selected_config=Some(value);
+            }else{
+                overrides.push((matched.into(),value));
+            }
         }else if positional_path.is_none() && !token.starts_with('-'){
             positional_path=Some(token.into());
         }else{
