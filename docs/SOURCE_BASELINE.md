@@ -43,11 +43,16 @@ registered input region. The new unit regression and the complete isolated
 Sway suite passed at
 [af4b268](https://github.com/sguzman/posthorn/actions/runs/40047135969).
 
-These checks establish implementation and isolated compositor acceptance,
-not real-world click-through delivery to underlying Hyprland applications,
-physical touch, compositor cursor-theme appearance, or approval to replace
-installed Mako. In particular, live Mako, the production session bus,
-autostart and workstation configuration remain unchanged.
+An additional overlapping two-layer compositor probe sends two real virtual
+pointer clicks: one through the overlay's excluded input region, received
+by the underlying Top layer, and one inside the overlay region, received
+only by the Overlay layer. Both Rust and isolated Sway jobs passed at
+[3158fde](https://github.com/sguzman/posthorn/actions/runs/40047511507).
+This verifies **actual Sway input pass-through**, not just a geometry unit
+test or screenshot. Physical Hyprland delivery, real touchscreen behavior,
+compositor cursor-theme appearance, and approval to replace installed Mako
+remain separate hard gates. The production Mako service, D-Bus name,
+autostart, and workstation configuration remain untouched.
 
 ## Port map
 
