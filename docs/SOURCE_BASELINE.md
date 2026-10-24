@@ -1018,3 +1018,34 @@ the multi-renderer, simultaneous multi-surface pointer input on
 physical Hyprland, or the reversible live Mako replacement gate.
 The user's installed Mako, Hyprland/autostart and real notification
 D-Bus ownership remain untouched.
+
+## Simultaneous multi-surface acceptance at every isolated scale
+
+CI [40045421933](https://github.com/sguzman/posthorn/actions/runs/40045421933)
+passed all of the original 1×, 1.25×, and 2× Sway compositor
+acceptance gates **including** the opt-in private multi-surface
+D-Bus notification screenshot checks at each scale.
+The public Freedesktop notification bus was not acquired; all of these
+checks used an ephemeral D-Bus session and `org.posthorn.Development`.
+
+The same CI run launched a **separate two-monitor** Sway instance
+with virtual `HEADLESS-1` and `HEADLESS-2` outputs. Config selected
+`output=HEADLESS-1` globally and
+`[category=second] output=HEADLESS-2`. Notifications were delivered
+through private `Notify` calls. The `grim` screenshot for each named
+output showed **only** the intended surface's notification color;
+the opposite surface color was absent. The runner then unplugged
+`HEADLESS-2` and verified that Posthorn's private D-Bus service
+remained operational while `HEADLESS-1` retained its notification.
+
+The headless CI run passed **272 Rust unit tests, 65 private D-Bus
+tests**, three scale-specific compositor checks, and the independent
+two-output placement/unplug gate. These checks exercise real
+Wayland protocol objects and screenshots with isolated virtual
+monitors; they do **not** establish physical Hyprland acceptance,
+multi-surface input delivery across physical monitors, dynamic
+replug onto a differently named output, Edge-originated activation
+tokens, or the expressly opt-in Mako cutover. Accordingly, T401 stays
+under 100%, the workstation/end-to-end gate T503 advances only
+incrementally, and T504 remains 0%. Existing Mako, autostart, and
+the production notification bus are untouched.
