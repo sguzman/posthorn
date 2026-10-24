@@ -23,6 +23,12 @@ fn parse_mako_cli_args(arguments:&[String])
         }else if let Some(value)=token.strip_prefix("--config="){
             if value.is_empty(){return Err("empty config path".into());}
             selected_config=Some(value.into());
+        }else if let Some(value)=token.strip_prefix("-c"){
+            // GNU getopt_long("hc:") accepts -cPATH with the mandatory
+            // argument attached to the short option, not only -c PATH.
+            // The exact "-c" spelling is handled by the branch above.
+            if value.is_empty(){return Err("empty config path".into());}
+            selected_config=Some(value.into());
         }else if let Some(option)=token.strip_prefix("--"){
             let (name,value)=if let Some((name,value))=option.split_once('='){
                 (name,value.to_string())
