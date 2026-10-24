@@ -411,6 +411,20 @@ impl Default for Config {
     }
 }
 
+/// Mako v1.11 config.c:parse_config_arguments() long_options.
+/// This deliberately excludes on-notify, text-alignment and include:
+/// those work in config files, not as Mako command-line switches.
+pub const MAKO_CLI_STYLE_OPTIONS:&[&str]=&[
+    "font","background-color","text-color","width","height",
+    "outer-margin","margin","padding","border-size","border-color",
+    "border-radius","progress-color","icons","icon-location",
+    "icon-path","max-icon-size","icon-border-radius","markup",
+    "actions","format","max-visible","max-history","history",
+    "default-timeout","ignore-timeout","output","layer","anchor",
+    "sort","group-by","on-button-left","on-button-right",
+    "on-button-middle","on-touch",
+];
+
 impl Config {
     /// Resolve root style and matching user rules. Grouped/hidden built-in
     /// selectors and cross-output layout are deliberately not claimed as ported.
@@ -439,6 +453,45 @@ impl Config {
             }
         }
         style
+    }
+
+    /// Apply a Mako -style option *after* reading the config file, as
+    /// upstream parse_config_arguments does on its second getopt pass.
+    /// The private --check-config mode uses this without launching a
+    /// notification daemon. Never parse the value as additional file
+    /// lines: an argv value may contain newline characters.
+    pub fn apply_cli_override(&mut self,key:&str,value:&str)
+        -> Result<(),ConfigError>
+    {
+        if !MAKO_CLI_STYLE_OPTIONS.contains(&key) {
+            return Err(err("<cli>",format!("unsupported Mako command-line option '{key}'")));
+        }
+        match key {
+            "sort" => {
+                if !["+priority","-priority","+time","-time"].contains(&value) {
+                    return Err(err("<cli>",format!("invalid sort order '{value}'")));
+                }
+                self.sort.retain(|existing| &existing[1..]!=&value[1..]);
+                self.sort.push(value.into());
+            }
+            "max-history" => {
+                let value=parse_signed_mako(value)
+                    .ok_or_else(||err("<cli>","invalid max-history"))?;
+                self.max_history=value.max(0) as usize;
+            }
+            _ => {
+                validate_option(key,value).map_err(|why|err("<cli>",why))?;
+                // parse_directional with zero strtok_r tokens leaves the
+                // existing default/root style unchanged in source Mako.
+                if ["padding","margin","outer-margin","border-radius"].contains(&key)
+                    && value.split(',').all(str::is_empty) {
+                    return Ok(());
+                }
+                self.global.insert(key.into(),value.into());
+                self.root_padding_state.assign(key,value);
+            }
+        }
+        Ok(())
     }
 
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
@@ -770,6 +823,52 @@ mod tests {
         Traits { app_name: "example", app_icon:"", category, desktop_entry:"", summary:"Saved",
             body:"All changes written", urgency:"normal", anchor:"top-right", output:"",
             modes, requested_timeout_ms:-1, actionable:false, group_index:-1, hidden:false }
+    }
+
+    #[test]
+    fn cli_overrides_apply_after_config_without_mutating_scoped_rules() {
+        let mut cfg=Config::parse(
+            "width=200\nfont=monospace 10\nmax-history=4\n\
+             sort=-priority\n[category=warning]\nwidth=340\n"
+        ).unwrap();
+        for (key,value) in [
+            ("width","450"),("font","Luciole 14"),("max-history","3"),
+            ("sort","+priority"),("sort","+time")
+        ]{
+            cfg.apply_cli_override(key,value).unwrap();
+        }
+        assert_eq!(cfg.global["width"],"450");
+        assert_eq!(cfg.global["font"],"Luciole 14");
+        assert_eq!(cfg.max_history,3);
+        assert_eq!(cfg.sort,vec!["+priority","+time"]);
+        assert_eq!(cfg.style_for(&note("warning",&["default"]))["width"],"340",
+            "scoped criteria retain their source priority over CLI root style");
+        assert_eq!(cfg.style_for(&note("success",&["default"]))["width"],"450");
+        cfg.apply_cli_override("sort","-priority").unwrap();
+        assert_eq!(cfg.sort,vec!["+time","-priority"]);
+    }
+
+    #[test]
+    fn cli_overrides_validate_atomically_and_do_not_parse_injected_lines() {
+        let mut cfg=Config::parse("width=210\nmax-history=5\n").unwrap();
+        for (key,value) in [
+            ("width","0"),("width","320\nhistory=0"),
+            ("max-history","9223372036854775808"),("sort","random"),
+            ("include","/tmp/other.conf"),("on-notify","dismiss"),
+            ("text-alignment","center"),("width"," \tgarbage"),
+        ]{
+            assert!(cfg.apply_cli_override(key,value).is_err(),
+                "invalid/unsupported CLI override accepted: {key}={value:?}");
+            assert_eq!(cfg.global["width"],"210");
+            assert_eq!(cfg.max_history,5);
+            assert!(!cfg.global.contains_key("include"));
+        }
+        cfg.apply_cli_override("width"," 320").unwrap();
+        assert_eq!(cfg.global["width"]," 320",
+            "Mako strtol accepts leading space in numeric argument");
+        cfg.apply_cli_override("margin",",,,").unwrap();
+        assert_eq!(cfg.global["margin"],"10",
+            "empty strtok_r directional option preserves current root value");
     }
 
     #[test]
