@@ -1116,6 +1116,51 @@ async fn surface_visibility_counts_each_surface_over_private_dbus()
 }
 
 #[tokio::test]
+async fn surface_snapshot_keeps_per_surface_overflow_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "width=96\nheight=36\nborder-size=0\nmargin=0\nmax-visible=1\n\
+         background-color=#224466\n\
+         [category=left]\nanchor=bottom-left\nbackground-color=#887755\n\
+         [hidden]\nbackground-color=#BB2222\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let none=HashMap::<String,OwnedValue>::new();
+    let _:u32=desktop.call("Notify",&(
+        "surface-snapshot",0u32,"","Root-old","",Vec::<String>::new(),
+        none.clone(),-1i32
+    )).await?;
+    let left:HashMap<String,OwnedValue>=[(
+        "category".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("left"))?
+    )].into();
+    let _:u32=desktop.call("Notify",&(
+        "surface-snapshot",0u32,"","Left","",Vec::<String>::new(),
+        left,-1i32
+    )).await?;
+    let _:u32=desktop.call("Notify",&(
+        "surface-snapshot",0u32,"","Root-new","",Vec::<String>::new(),
+        none,-1i32
+    )).await?;
+    let views=posthorn::desktop::surface_visibility(&runtime)?;
+    let root=views.iter().find(|v|v.surface_key.2=="top-right")
+        .ok_or("missing root surface")?;
+    let left=views.iter().find(|v|v.surface_key.2=="bottom-left")
+        .ok_or("missing left surface")?;
+    let root_frame=posthorn::desktop::snapshot_surface_frame_scaled(
+        &runtime,&root.surface_key,1)?.ok_or("missing root frame")?;
+    let left_frame=posthorn::desktop::snapshot_surface_frame_scaled(
+        &runtime,&left.surface_key,1)?.ok_or("missing left frame")?;
+    let red=[0x22,0x22,0xBB,0xff];
+    assert!(root_frame.pixels.chunks_exact(4).any(|pixel|pixel==red));
+    assert!(!left_frame.pixels.chunks_exact(4).any(|pixel|pixel==red));
+    assert_eq!(root.hidden_count,1);
+    assert_eq!(left.hidden_count,0);
+    Ok(())
+}
+
+#[tokio::test]
 async fn max_visible_is_scoped_to_surface_tuple_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {

@@ -254,6 +254,22 @@ pub fn snapshot_frame_scaled(runtime:&SharedRuntime,pixel_scale:u32)
 fn snapshot_frame_with_icon_scale(
     runtime:&SharedRuntime,pixel_scale:u32,icon_lookup_scale:u32,
 )->io::Result<Option<PixelFrame>>{
+    snapshot_frame_for_surface(runtime,pixel_scale,icon_lookup_scale,None)
+}
+
+/// Rasterize ONLY the notifications and overflow placeholder belonging to
+/// one Mako (configured output, layer, anchor) surface identity. This is a
+/// headless/isolated rendering primitive; it does not map a Wayland surface.
+pub fn snapshot_surface_frame_scaled(
+    runtime:&SharedRuntime,surface_key:&(String,String,String),pixel_scale:u32,
+)->io::Result<Option<PixelFrame>>{
+    snapshot_frame_for_surface(runtime,pixel_scale,pixel_scale,Some(surface_key))
+}
+
+fn snapshot_frame_for_surface(
+    runtime:&SharedRuntime,pixel_scale:u32,icon_lookup_scale:u32,
+    surface_key:Option<&(String,String,String)>,
+)->io::Result<Option<PixelFrame>>{
     if !(1..=8).contains(&pixel_scale) {
         return Err(other("unsupported compositor pixel scale"));
     }
@@ -266,9 +282,28 @@ fn snapshot_frame_with_icon_scale(
     };
     let config=runtime.config();
     let projection=visible_projection(runtime)?;
-    let notes=projection.members;
-    let total=projection.total_count;
-    let hidden=projection.hidden_count;
+    let (notes,total,hidden)=if let Some(key)=surface_key{
+        let Some(view)=projection.surfaces.iter()
+            .find(|view|&view.surface_key==key)
+        else{return Ok(None)};
+        let notes=projection.members.into_iter()
+            .filter(|member|member.notification.surface_spec.as_ref()==Some(key))
+            .collect::<Vec<_>>();
+        (notes,view.total_count,view.hidden_count)
+    }else{
+        (projection.members,projection.total_count,projection.hidden_count)
+    };
+    // A mapped surface shares one compositor-entered output among its
+    // notifications. An explicitly unmapped surface must not borrow another
+    // surface's observed monitor. Use the legacy presenter observation only
+    // when no independent surface event exists.
+    let surface_output=if let Some(key)=surface_key{
+        let store=runtime.store.lock().map_err(|_|poisoned())?;
+        let observed=store.active().iter()
+            .find(|note|note.surface_spec.as_ref()==Some(key))
+            .and_then(|note|note.surface_output_override.clone());
+        Some(observed.unwrap_or_else(||runtime.surface_output()))
+    }else{None};
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let mut frames=Vec::with_capacity(notes.len());
     let mut margins=Vec::with_capacity(notes.len());
@@ -288,9 +323,12 @@ fn snapshot_frame_with_icon_scale(
         let traits=Traits{
             app_name:"",app_icon:"",category:"",desktop_entry:"",
             summary:"",body:"",urgency:"normal",
-            anchor:config.global.get("anchor")
-                .map(String::as_str).unwrap_or("top-right"),
-            output:config.global.get("output").map(String::as_str).unwrap_or(""),
+            anchor:surface_key.map(|key|key.2.as_str()).unwrap_or_else(|| 
+                config.global.get("anchor").map(String::as_str).unwrap_or("top-right")),
+            output:surface_output.as_ref()
+                .map(|output|output.as_deref().unwrap_or(""))
+                .unwrap_or_else(||config.global.get("output")
+                    .map(String::as_str).unwrap_or("")),
             modes:&mode_views,requested_timeout_ms:-1,
             actionable:false,group_index:-1,hidden:true,
         };
@@ -303,9 +341,9 @@ fn snapshot_frame_with_icon_scale(
                 .unwrap_or(PopupMargins::uniform(10*scale)));
         }
     }
-    let align=stack_alignment(config.global.get("anchor")
-        .map(String::as_str).unwrap_or("top-right"));
-    compose_mako_stack(&frames,&margins,align).map_err(other)
+    let anchor=surface_key.map(|key|key.2.as_str()).unwrap_or_else(|| 
+        config.global.get("anchor").map(String::as_str).unwrap_or("top-right"));
+    compose_mako_stack(&frames,&margins,stack_alignment(anchor)).map_err(other)
 }
 
 struct DesktopClick {
@@ -651,6 +689,45 @@ mod tests {
             PopupMargins{top:7,right:0,bottom:3,left:0},
         ];
         assert_eq!(vertical_spacing(&margins),vec![9,7]);
+    }
+
+    #[test]
+    fn surface_specific_frames_do_not_mix_notifications_or_hidden_placeholders(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=96\nheight=36\nborder-size=0\nmargin=0\nmax-visible=1\n\
+             background-color=#224466\n\
+             [category=left]\nanchor=bottom-left\nbackground-color=#887755\n\
+             [hidden]\nbackground-color=#BB2222\n"
+        ).unwrap());
+        let now=std::time::Instant::now();
+        let root_old=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(root_old,now).unwrap();
+        let left=runtime.store.lock().unwrap().push(Request{
+            category:"left".into(),..Request::default()
+        });
+        runtime.schedule_without_hook(left,now).unwrap();
+        let root_new=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(root_new,now).unwrap();
+        let views=surface_visibility(&runtime).unwrap();
+        let root=views.iter().find(|v|v.surface_key.2=="top-right").unwrap();
+        let side=views.iter().find(|v|v.surface_key.2=="bottom-left").unwrap();
+        let root_frame=snapshot_surface_frame_scaled(&runtime,&root.surface_key,1)
+            .unwrap().expect("root surface");
+        let side_frame=snapshot_surface_frame_scaled(&runtime,&side.surface_key,1)
+            .unwrap().expect("side surface");
+        let has=|frame:&PixelFrame,color:[u8;4]|{
+            frame.pixels.chunks_exact(4).any(|pixel|pixel==color)
+        };
+        assert!(has(&root_frame,[0x66,0x44,0x22,0xff]));
+        assert!(has(&root_frame,[0x22,0x22,0xBB,0xff]),
+            "overflow placeholder belongs to the root surface");
+        assert!(!has(&root_frame,[0x55,0x77,0x88,0xff]));
+        assert!(has(&side_frame,[0x55,0x77,0x88,0xff]));
+        assert!(!has(&side_frame,[0x22,0x22,0xBB,0xff]),
+            "other surface's hidden counter cannot create a side placeholder");
+        assert!(!has(&side_frame,[0x66,0x44,0x22,0xff]));
+        let missing=("DP-NOT-PRESENT".into(),"top".into(),"center".into());
+        assert!(snapshot_surface_frame_scaled(&runtime,&missing,1).unwrap().is_none());
     }
 
     #[test]
