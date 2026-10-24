@@ -43,15 +43,18 @@ async fn body_markup_enabled_and_disabled_are_distinct_on_the_dbus_render_path()
 
     // Cairo ARGB32 uses little-endian BGRA bytes on Linux. Look for a
     // strongly red glyph pixel, not a brittle exact antialiased screenshot.
-    let red_ink = |pixels: &[u8]| pixels.chunks_exact(4).any(|px| {
+    // Do not mistake subpixel antialiasing fringes in white text for a
+    // red glyph: only count saturated red pixels with little green/blue.
+    let saturated_red_pixels = |pixels: &[u8]| pixels.chunks_exact(4).filter(|px| {
         let (blue, green, red) = (px[0], px[1], px[2]);
-        red > 100 && red > green.saturating_add(70)
-            && red > blue.saturating_add(70)
-    });
-    assert!(red_ink(&markup_frame.pixels),
-        "valid sender Pango markup must color rendered glyphs");
-    assert!(!red_ink(&plain_frame.pixels),
-        "markup=0 must escape sender tags, not apply their foreground color");
+        red > 220 && green < 60 && blue < 60 && px[3] > 220
+    }).count();
+    let marked_red = saturated_red_pixels(&markup_frame.pixels);
+    let plain_red = saturated_red_pixels(&plain_frame.pixels);
+    assert!(marked_red > 10,
+        "valid sender Pango markup must fill multiple glyph pixels red; got {marked_red}");
+    assert!(marked_red > plain_red.saturating_mul(4),
+        "markup=0 must not color text red: marked={marked_red}, plain={plain_red}");
 
     // Malformed markup is a valid notification body. Mako escapes it
     // rather than discarding the message or failing the render.
