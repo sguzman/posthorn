@@ -1026,6 +1026,69 @@ if [[ "$expired" != 1 ]]; then
   /usr/bin/python3 "$root/check-dismissed.py" "$root/after-expiry.png"
   exit 1
 fi
+# Pinned Mako v1.11.0 reset_notification() destroys the previous timer
+# when Notify replaces an active ID, then schedules a fresh timer from the
+# replacement payload. Verify this against the private D-Bus and live Sway
+# popup, not only the deterministic Rust timer unit.
+if [[ "$test_scale" == 1 ]]; then
+  timer_first="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn timer replacement QA' 0 '' 'Original timeout' '' 0 1 \
+    'category' 's' 'warning' 1200)"
+  [[ "$timer_first" == u\ * ]] || { echo 'Invalid timer replacement ID'; exit 1; }
+  timer_id="${timer_first#u }"
+  # Keep the original deadline pending before replacing it. The extended
+  # notification must stay live beyond the original 1200ms lifetime.
+  sleep 0.2
+  timer_second="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn timer replacement QA' "$timer_id" '' 'Extended timeout' '' 0 1 \
+    'category' 's' 'warning' 3000)"
+  [[ "$timer_second" == "u $timer_id" ]] || {
+    echo 'Timed Notify replacement did not retain the original ID'
+    exit 1
+  }
+  sleep 1.35
+  timer_live="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListNotifications)"
+  [[ "$timer_live" == *'Extended timeout'* &&
+     "$timer_live" != *'Original timeout'* ]] || {
+    echo 'The original expiration timer closed or reverted the replacement'
+    echo "$timer_live"
+    exit 1
+  }
+  grim "$root/timer-replaced-visible.png"
+  ./target/debug/examples/qa_png_probe \
+    "$root/timer-replaced-visible.png" '#715536' 300 present >/dev/null || {
+    echo 'Replacement popup disappeared at the original timer deadline'
+    exit 1
+  }
+  timer_closed=0
+  for _ in {1..28}; do
+    sleep 0.15
+    timer_live="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+      org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListNotifications)"
+    if [[ "$timer_live" != *'Extended timeout'* ]]; then
+      timer_closed=1
+      break
+    fi
+  done
+  [[ "$timer_closed" == 1 ]] || {
+    echo 'Replacement deadline did not close the active notification'
+    exit 1
+  }
+  timer_history="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListHistory)"
+  [[ "$timer_history" == *'Extended timeout'* &&
+     "$timer_history" != *'Original timeout'* ]] || {
+    echo 'Expiry history did not retain only the replacement payload'
+    exit 1
+  }
+  echo 'Private compositor timer replacement: old deadline canceled; replacement expired into history OK'
+fi
+
 # Reload must repaint active Wayland popups without replacing the D-Bus
 # service, and a rejected reload must preserve the last good style.
 busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call org.posthorn.Development \
