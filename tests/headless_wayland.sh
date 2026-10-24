@@ -132,6 +132,7 @@ max-visible=1
 background-color=#E5923C
 [category=left]
 anchor=bottom-left
+layer=overlay
 background-color=#2DB3C1
 EOF_MULTI
   ./target/debug/posthorn --experimental-private-multi-desktop "$root/multi.conf" \
