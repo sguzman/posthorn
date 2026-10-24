@@ -306,8 +306,8 @@ mod tests {
         let root=&views.iter().find(|v|v.surface_key.2=="top-right").unwrap().surface_key;
         let side=&views.iter().find(|v|v.surface_key.2=="bottom-left").unwrap().surface_key;
         let local=click(10.0,10.0,273);
-        assert_eq!(hit_test_on_surface(&runtime,local,*root).unwrap().unwrap().0,newest);
-        assert_eq!(hit_test_on_surface(&runtime,local,*side).unwrap().unwrap().0,left);
+        assert_eq!(hit_test_on_surface(&runtime,local,root).unwrap().unwrap().0,newest);
+        assert_eq!(hit_test_on_surface(&runtime,local,side).unwrap().unwrap().0,left);
         assert_ne!(newest,left);
         assert!(!views.iter().any(|v|v.notification_ids.contains(&older)));
         let unknown=("none".into(),"top".into(),"center".into());
