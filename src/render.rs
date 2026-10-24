@@ -531,12 +531,38 @@ pub fn compose_mako_stack(
     frames:&[PixelFrame],margins:&[crate::wayland::PopupMargins],
     alignment:StackAlignment,
 )->Result<Option<PixelFrame>,String>{
+    compose_mako_stack_with_visible_count(frames,margins,alignment,frames.len())
+}
+
+/// Pinned Mako v1.11 render.c does not add its synthetic hidden-count popup
+/// to max_width, even though that popup contributes height. Keep the normal
+/// compositor unchanged; opt in only when the final frame is synthetic.
+pub fn compose_mako_stack_with_visible_count(
+    frames:&[PixelFrame],margins:&[crate::wayland::PopupMargins],
+    alignment:StackAlignment,visible_count:usize,
+)->Result<Option<PixelFrame>,String>{
+    if visible_count>frames.len(){return Err("visible notification count exceeds stack".into());}
     if frames.is_empty(){
         if margins.is_empty(){return Ok(None);}
         return Err("popup margin count mismatch".into());
     }
     let sizes:Vec<_>=frames.iter().map(|f|(f.width,f.height)).collect();
-    let (width,height,positions)=mako_stack_geometry(&sizes,margins,alignment)?;
+    let (all_width,height,all_positions)=mako_stack_geometry(&sizes,margins,alignment)?;
+    let width=if visible_count>0 && visible_count<frames.len(){
+        mako_stack_geometry(&sizes[..visible_count],&margins[..visible_count],alignment)?.0
+    }else{all_width};
+    // Compute X against Mako's real-notification width, not against the
+    // synthetic hidden popup's width. Y still includes that popup.
+    let positions=all_positions.into_iter().zip(frames.iter().zip(margins))
+        .map(|((_,y),(frame,margin))|{
+            let x=match alignment{
+                StackAlignment::Left=>i64::from(margin.left),
+                StackAlignment::Right=>i64::from(width)-i64::from(frame.width)
+                    -i64::from(margin.right),
+                StackAlignment::Center=>(i64::from(width)-i64::from(frame.width))/2,
+            };
+            (x as i32,y)
+        }).collect::<Vec<_>>();
     let stride=width.checked_mul(4).ok_or("popup stride overflow")?;
     let size=u64::from(stride)*u64::from(height);
     let mut pixels=vec![0u8;size as usize];
