@@ -1078,6 +1078,38 @@ async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_d
 }
 
 #[tokio::test]
+async fn max_visible_is_scoped_to_surface_tuple_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "max-visible=1\n[category=left]\nanchor=bottom-left\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let options=HashMap::<String,OwnedValue>::new();
+    let a:u32=desktop.call("Notify",&(
+        "visibility",0u32,"","Old root","",Vec::<String>::new(),
+        options.clone(),-1i32
+    )).await?;
+    let left:HashMap<String,OwnedValue>=[(
+        "category".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("left"))?
+    )].into();
+    let b:u32=desktop.call("Notify",&(
+        "visibility",0u32,"","Left","",Vec::<String>::new(),
+        left,-1i32
+    )).await?;
+    let c:u32=desktop.call("Notify",&(
+        "visibility",0u32,"","New root","",Vec::<String>::new(),
+        options,-1i32
+    )).await?;
+    let selected=posthorn::desktop::visible_members_indexed(&runtime)?
+        .into_iter().map(|m|m.notification.id).collect::<Vec<_>>();
+    assert_eq!(selected,vec![c,b]);
+    assert!(!selected.contains(&a));
+    Ok(())
+}
+
+#[tokio::test]
 async fn compositor_output_changes_reselect_history_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {

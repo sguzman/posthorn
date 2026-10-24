@@ -125,7 +125,10 @@ fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
     let total_count=by_id.len();
     let mut selected=Vec::new();
     let mut hidden_count=0usize;
-    let mut displayed_groups=0usize;
+    // Mako render.c considers only the notifications attached to its
+    // current surface, so max-visible is independently counted per
+    // (configured output, layer, anchor) identity.
+    let mut displayed_groups=std::collections::HashMap::<(String,String,String),usize>::new();
     for group in group_ordered_scoped(runtime,by_id,&modes).map_err(other)? {
         let count=group.ids.len();
         for (index,id) in group.ids.iter().enumerate() {
@@ -138,7 +141,10 @@ fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
                 let style=style_for_note_index(runtime,note,&modes,group_index);
                 let limit=style.get("max-visible")
                     .and_then(|v|crate::config::parse_signed_mako(v)).unwrap_or(5);
-                if limit>=0&&displayed_groups>=limit as usize {
+                let surface_key=note.surface_spec.clone()
+                    .unwrap_or_else(||("".into(),"top".into(),"top-right".into()));
+                let used=displayed_groups.get(&surface_key).copied().unwrap_or(0);
+                if limit>=0&&used>=limit as usize {
                     // Upstream increments hidden count for every excluded
                     // notification, including secondary grouped members.
                     hidden_count+=1;
@@ -151,7 +157,9 @@ fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
                 selected.push(VisibleMember{
                     notification:note.clone(),group_count:real_count,group_index,
                 });
-                if group_index<=0 {displayed_groups+=1;}
+                if group_index<=0 {
+                    *displayed_groups.entry(surface_key).or_default()+=1;
+                }
             }
         }
     }
@@ -601,6 +609,27 @@ mod tests {
             PopupMargins{top:7,right:0,bottom:3,left:0},
         ];
         assert_eq!(vertical_spacing(&margins),vec![9,7]);
+    }
+
+    #[test]
+    fn max_visible_is_counted_per_associated_surface_not_globally(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "max-visible=1\n[category=left]\nanchor=bottom-left\n"
+        ).unwrap());
+        let now=std::time::Instant::now();
+        let older=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(older,now).unwrap();
+        let left=runtime.store.lock().unwrap().push(Request{
+            category:"left".into(),..Request::default()
+        });
+        runtime.schedule_without_hook(left,now).unwrap();
+        let newest=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(newest,now).unwrap();
+        let selected=visible_members_indexed(&runtime).unwrap()
+            .into_iter().map(|m|m.notification.id).collect::<Vec<_>>();
+        assert_eq!(selected,vec![newest,left],
+            "independent bottom-left notification must not consume top-right max-visible");
+        assert!(!selected.contains(&older));
     }
 
     #[test]
