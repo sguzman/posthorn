@@ -1494,7 +1494,10 @@ mod tests {
         // the existing 1x antialiasing pattern.
         assert_ne!(native.pixels,stretched.pixels);
         assert!(render_notification_group_scaled(&note,&style,0,0).is_err());
-        assert!(render_notification_group_scaled(&note,&style,0,9).is_err());
+        let scale_nine=render_notification_group_scaled(&note,&style,0,9).unwrap();
+        assert_eq!(scale_nine.width,logical.width*9);
+        assert_eq!(scale_nine.height,logical.height*9);
+        assert!(render_notification_group_scaled(&note,&style,0,4096).is_err());
     }
 
     #[test]
