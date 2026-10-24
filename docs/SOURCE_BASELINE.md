@@ -1551,3 +1551,50 @@ Sway acceptance, including scaling and output regressions, on
 No claim of complete POSIX regex equivalence or physical Hyprland
 parity is made; T503 remains 51%, T504 remains 0%, and installed
 Mako and the user's real session remain untouched.
+
+## glibc-only POSIX class validation and GNU empty-minimum repetitions
+
+The pinned Mako **v1.11.0** criteria.c compiles summary~ and body~
+with glibc regcomp(REG_EXTENDED | REG_NOSUB) in the process's default
+C locale. A local C-locale regcomp comparison confirmed that glibc
+**rejects** [[:ascii:]], [[:word:]] and the Rust-only per-class
+negation [[:^alpha:]] (REG_ECTYPE). Rust's regex accepts those names,
+so silently loading these expressions would disagree with Mako's
+configuration validation. A scanner in src/config.rs now rejects
+those unsupported bracket-class spellings while preserving real glibc
+classes such as [[:alpha:]] and [[:digit:]], GNU \w,
+and escaped literal opening brackets. The guard does not conflate a
+**whole-class** negative [^[:alpha:]] with Rust's unsupported
+**named-class** negation.
+
+The same C-locale comparison confirmed that glibc accepts the GNU
+repetition spellings a{,2} and a{,} as a{0,2} and a{0,},
+respectively. Rust regex parsing normally requires the minimum.
+Posthorn normalizes only unescaped {,digits} / {,} outside bracket
+expressions and preserves \{,2} literals, so it accepts the
+source-compatible syntax without accidentally changing literal text.
+
+Unit tests cover all three invalid class families, valid POSIX/GNU
+patterns, ASCII and non-ASCII matches, bounded and unbounded
+omitted-minimum repetitions, and escaped braces. Private D-Bus
+integration tests reject each invalid class through Reload while
+verifying that the **last accepted configuration stays active**.
+They then successfully reload a valid [[:alpha:]] rule and verify
+ASCII/non-ASCII Notify hook selection; another private service
+delivers 0, 1, 2 and 3 a characters through the GNU {,2} matcher
+and checks the resulting dismissals.
+
+Both jobs of [CI 40129325687](https://github.com/sguzman/posthorn/actions/runs/40129325687)
+passed on [commit ea6730b](https://github.com/sguzman/posthorn/commit/ea6730bc9a6d0e747bda1bc9f48fd7b332e4f400).
+The Rust and private D-Bus suites include explicit accepted lines for
+glibc_rejects_rust_only_ascii_and_word_posix_bracket_classes,
+glibc_gnu_repetition_accepts_omitted_minimum_outside_brackets,
+private_reload_rejects_glibc_unsupported_posix_classes_without_style_loss,
+and gnu_empty_min_repetition_matches_live_private_notification_criteria.
+All headless Sway graphics/scaling/input regressions remain green.
+
+**T102: 96% → 97%**. P1 remains **89%**, and M0 remains **88%**.
+Other POSIX ERE edge cases and real Hyprland acceptance remain
+unfinished. T503 remains 51%; T504 stays at 0% with **no authorized
+production cutover**. No installed Mako instance, session bus or user
+configuration was modified.
