@@ -70,3 +70,5 @@ jobs:
         run: dbus-run-session -- bash tests/headless_input_region.sh
       - name: Verify mixed-output DPI icon selection and bottom-edge pointer routing
         run: dbus-run-session -- bash tests/headless_mixed_scale.sh
+      - name: Verify signed Mako padding on actual compositor mode redraw
+        run: dbus-run-session -- bash tests/headless_signed_padding.sh
