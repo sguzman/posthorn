@@ -4,7 +4,7 @@
 
 - Upstream: https://github.com/emersion/mako
 - Baseline: **v1.11.0**, published 2026-03-26.
-- Later upstream check: `master` commit `cce37cd3405f64eee1b07d4656b5ecbbc912b46d` (2026-06-30). Its restored trailing bottom margin is now reflected in Posthorn's signed popup geometry; the other post-1.11 changes are README/CI changes. This does not establish complete Mako behavior parity.
+- **Version boundary:** post-v1.11.0 Mako `master` commit `cce37cd3405f64eee1b07d4656b5ecbbc912b46d` (2026-06-30) changed the trailing bottom-margin behavior. The pinned **v1.11.0** `render.c` does **not** add `pending_bottom_margin` to the final `rendered_height`; Posthorn deliberately retains that omission. Later upstream behavior must not silently enter the strict-port MVP. Full runtime parity remains unverified.
 - Mako license: MIT; credit preserved here. Posthorn code is an independent Rust implementation, not a copy-paste translation of upstream C.
 
 ## Strict MVP contract
@@ -23,6 +23,18 @@ change how they call the Freedesktop Notification protocol. Until parity:
   general channels, and a broker are **explicitly deferred**.
 - Keep Mako active in `config-store` until side-by-side tests prove parity.
 - Never try to run both notification servers on the same session bus name.
+
+## Pinned v1.11.0 final notification margin
+
+Upstream `render.c` adds the first top margin and the greater of adjacent
+top/bottom margins when stacking notifications. Its final `rendered_height`
+omits the last pending bottom margin. Posthorn previously implemented a
+later Mako `master` correction, which incorrectly grew the bottom of its
+strict-v1.11 surface. The source-backed correction is in
+[`d1ab406`](https://github.com/sguzman/posthorn/commit/d1ab40618ebdac22c1693a4e3b1f5116f4e32d76).
+The corresponding per-category desktop fixture was corrected at
+[`a5a638e`](https://github.com/sguzman/posthorn/commit/a5a638e416d9b51fc987fe6e37a5a7d29bab112a).
+Only passing CI for the latter counts as acceptance.
 
 ## Pointer cursor and compositor input regions
 
