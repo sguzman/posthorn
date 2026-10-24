@@ -1447,3 +1447,21 @@ integration as an independent gate.
 **88%**, T503 remains 51% and T504 remains 0%. This was run only on
 the development D-Bus name and disposable Sway output, never on
 the live Mako daemon or workstation session.
+
+## Private D-Bus Pango body-markup acceptance
+
+Pinned Mako v1.11.0 `notification.c:format_text` validates sender Pango body markup
+before embedding it in formatted text; invalid sender markup is escaped.
+The isolated regression in `tests/private_markup.rs` sends a valid red
+foreground span over private D-Bus, verifies that the original `Notify`
+body survives and renders red glyph ink via Cairo/Pango, and checks that
+`markup=0` leaves the sender's tags non-operative. It also delivers a
+malformed body and verifies that rendering succeeds rather than dropping
+the notification. The accepted test counts saturated red pixels so that
+subpixel-antialiasing fringes in uncolored text do not cause false positives.
+
+Both Rust/private D-Bus tests and isolated headless Sway acceptance
+(1×, 1.25×, 2×, multi-output and pointer regressions) passed at
+[commit 1aab5af](https://github.com/sguzman/posthorn/actions/runs/40121480856).
+This does not prove physical Hyprland acceptance, full T205 parity, or
+readiness to switch the production notification daemon.
