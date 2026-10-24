@@ -937,3 +937,29 @@ actual simultaneous compositor surfaces and separate enter/leave
 callbacks before any corresponding 100% acceptance claim. The user's
 installed Mako, live Hyprland session and production D-Bus owner remain
 untouched.
+
+## Independent max-visible counting per associated surface
+
+Pinned Mako v1.11.0 `render.c` loops over each surface separately,
+ignores notifications where `notif->surface != surface`, and starts
+`visible_count` from zero for each surface. In particular,
+`max-visible=1` allows one eligible group on a top-right surface
+**and another** eligible group on a bottom-left surface. A daemon-wide
+counter incorrectly suppresses one of them.
+
+Posthorn now scopes its projected visible-group count by the stored
+(configured output, layer, anchor) surface tuple, instead of using
+one cross-surface count. Focused Rust and private D-Bus tests send
+multiple notifications into two distinct surface identities and verify
+that a newer top-right notification hides an older one while a
+bottom-left notification remains eligible. Both CI jobs passed at
+[0d8e8c5](https://github.com/sguzman/posthorn/actions/runs/40043801396):
+**269 unit tests, 62 private D-Bus tests**, plus 1×, 1.25× and 2×
+isolated Sway compositor acceptance.
+
+The synthetic hidden-count placeholder remains aggregated in the
+single-surface frame path, and the live presenter still draws one
+layer-shell popup. Actual independent surface geometry, per-surface
+hidden placeholders and simultaneous multi-output painting remain
+unverified and are not claimed complete. Production Mako, Hyprland
+configuration and the real notification bus were not changed.
