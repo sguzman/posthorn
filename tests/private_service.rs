@@ -1910,8 +1910,8 @@ async fn private_reload_rejects_glibc_unsupported_posix_classes_without_style_lo
     std::fs::write(&path,"background-color=#305747\n")?;
     let (conn,runtime)=open_private_service_from_path(&path).await?;
     let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
-    for invalid in ["[[:ascii:]]", "[[:word:]]"] {
-        // Rust regex accepts these names; pinned Mako glibc does not.
+    for invalid in ["[[:ascii:]]", "[[:word:]]", "[[:^alpha:]]"] {
+        // Rust regex accepts these class extensions; pinned Mako glibc does not.
         std::fs::write(&path,format!(
             "background-color=#684148\n[summary~={invalid}]\nwidth=250\n"
         ))?;
