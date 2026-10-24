@@ -43,6 +43,10 @@ for _ in {1..60}; do
   sleep 0.15
 done
 [[ -n "$ipc" && -S "$ipc" ]] || { echo 'Two-output Sway IPC unavailable'; cat "$root/sway.log"; exit 1; }
+# Pin the two virtual outputs to explicit non-overlapping logical rectangles
+# so the virtual-pointer test has deterministic compositor coordinates.
+swaymsg -s "$ipc" 'output HEADLESS-1 pos 0 0' >/dev/null
+swaymsg -s "$ipc" 'output HEADLESS-2 pos 1280 0' >/dev/null
 cat >"$root/multi-output.conf" <<'EOF_CONFIG'
 width=180
 height=62
@@ -103,6 +107,36 @@ for _ in {1..60}; do
 done
 if [[ "$correct" != 1 ]]; then
   echo 'Notifications were not isolated to their configured Wayland outputs'
+  cat "$root/posthorn.log"
+  exit 1
+fi
+# Right-click the second monitor's actual popup with the compositor's
+# virtual-pointer protocol. The notification on monitor one must stay mapped.
+# This exercises surface-local hit-testing and actual pointer event routing,
+# not only unit-test coordinate geometry.
+POSTHORN_HEADLESS_POINTER_TEST=1 \
+  ./target/debug/examples/qa_virtual_pointer 2440 20 2560 720 273
+independent_click=0
+for _ in {1..50}; do
+  if grim -o HEADLESS-1 "$root/one-after-click.png" 2>/dev/null &&
+     grim -o HEADLESS-2 "$root/two-after-click.png" 2>/dev/null &&
+     ./target/debug/examples/qa_png_probe \
+       "$root/one-after-click.png" '#E5923C' 300 present >/dev/null 2>&1 &&
+     ./target/debug/examples/qa_png_probe \
+       "$root/two-after-click.png" '#2DB3C1' 100 absent >/dev/null 2>&1
+  then
+    independent_click=1
+    break
+  fi
+  if ! kill -0 "$posthorn_pid" 2>/dev/null; then
+    echo 'Multi-output renderer exited during pointer delivery'
+    cat "$root/posthorn.log"
+    exit 1
+  fi
+  sleep 0.15
+done
+if [[ "$independent_click" != 1 ]]; then
+  echo 'Second-output pointer did not dismiss only its own notification'
   cat "$root/posthorn.log"
   exit 1
 fi
