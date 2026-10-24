@@ -1349,3 +1349,38 @@ gates. The previously established live Mako and physical Hyprland
 acceptance restrictions remain unchanged. **T105 83% → 84%**,
 **P1 stays 89%**, **M0 stays 88%**; no post-MVP work was started
 and no installed compositor, Mako service or real D-Bus owner changed.
+
+## Private compositor transactional configuration reload and geometry restoration
+
+Pinned Mako v1.11.0 `dbus/mako.c:handle_reload` calls
+`reload_config` and `reapply_config` for a successful reload; an
+invalid configuration produces `fr.emersion.Mako.InvalidConfig`
+without changing the prior active configuration. The earlier
+Posthorn source parity work proved that the configured layer-shell
+`outer-margin` is the componentwise maximum across **all** criteria,
+including unmatched ones.
+
+[Commit 83a26f3](https://github.com/sguzman/posthorn/commit/83a26f3a69dc49f507b11067ab7fe67d6a710d6e)
+extends the existing disposable private Sway + private D-Bus
+`headless_superstyle_margin.sh` acceptance suite. It retains
+**one existing notification ID** and takes real compositor screenshots
+through this sequence:
+1. Start with unmatched criteria contributing top 32/right 85;
+2. Rewrite those same criteria to top 12/right 40, invoke Mako `Reload`,
+   and require the **existing** popup to relocate correctly;
+3. Insert an invalid option in the config, require a rejected D-Bus
+   `Reload` response, and verify top 12/right 40 is preserved;
+4. Restore the valid file, invoke `Reload` and require the existing
+   popup to return to top 32/right 85 without sending another Notify.
+
+[CI 40118186038](https://github.com/sguzman/posthorn/actions/runs/40118186038)
+passed both the Rust/private-D-Bus tests and the full disposable
+headless Sway job including this **runtime screenshot** test.
+This verifies rollback behavior and geometry updates on the
+development name and compositor only. No claim about physical
+Hyprland, the real org.freedesktop.Notifications owner, or production
+Mako replacement follows from it.
+
+P3/T303 advances **77% to 78%**; the P3 phase remains **91%**
+and M0 remains **88%** on their unchanged source-backed ledger.
+All prior unaccepted physical and cutover gates remain open.
