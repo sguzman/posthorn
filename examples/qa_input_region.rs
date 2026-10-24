@@ -25,7 +25,11 @@ fn main()->Result<(),Box<dyn Error>>{
     let mut args=std::env::args().skip(1);
     let ready=args.next().ok_or("missing readiness marker")?;
     let events=args.next().ok_or("missing input events marker")?;
-    if args.next().is_some(){return Err("expected READY_PATH EVENTS_PATH".into());}
+    let flip_request=args.next().ok_or("missing region update request path")?;
+    let flip_ack=args.next().ok_or("missing region update acknowledgment path")?;
+    if args.next().is_some(){
+        return Err("expected READY_PATH EVENTS_PATH FLIP_REQUEST FLIP_ACK".into());
+    }
     let mut lower=LivePresenter::connect()?;
     let mut upper=LivePresenter::connect()?;
     let base=opaque(160,100,[0x2D,0xB3,0xC1]);
@@ -34,13 +38,11 @@ fn main()->Result<(),Box<dyn Error>>{
         Some(&base),ScreenCorner::TopLeft,PopupMargins::uniform(0),
         PopupLayer::Top,"",
     )?;
-    upper.update_frame_on_output(
+    upper.update_native_frame_with_input_rectangles(
         Some(&overlay),ScreenCorner::TopLeft,PopupMargins::uniform(0),
         PopupLayer::Overlay,"",
+        &[InputRect{x:80,y:0,width:80,height:100}],
     )?;
-    upper.set_notification_input_rectangles(&[InputRect{
-        x:80,y:0,width:80,height:100,
-    }])?;
     let mut both_mapped=false;
     for _ in 0..80 {
         lower.poll_events()?;
@@ -57,9 +59,22 @@ fn main()->Result<(),Box<dyn Error>>{
     let mut writer=std::fs::OpenOptions::new().create_new(true).append(true)
         .open(&events)?;
     std::fs::write(ready,"overlapping headless input regions mapped\n")?;
+    let mut flipped=false;
     for _ in 0..600{
         lower.poll_events()?;
         upper.poll_events()?;
+        if !flipped && std::path::Path::new(&flip_request).exists(){
+            // Same logical size => LivePresenter.redraw_active, not layer
+            // recreation. The compositor must apply the NEW input region
+            // with the new frame in the same wl_surface.commit transaction.
+            upper.update_native_frame_with_input_rectangles(
+                Some(&overlay),ScreenCorner::TopLeft,PopupMargins::uniform(0),
+                PopupLayer::Overlay,"",
+                &[InputRect{x:0,y:0,width:80,height:100}],
+            )?;
+            flipped=true;
+            std::fs::write(&flip_ack,"input region swapped on live surface\n")?;
+        }
         for click in lower.take_clicks(){
             if click.button==273{
                 writeln!(writer,"lower")?;
