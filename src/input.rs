@@ -338,6 +338,34 @@ mod tests {
     }
 
     #[test]
+    fn stacked_hotspots_exclude_real_gap_and_match_both_notifications(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=110\nheight=40\nmargin=4,12,8,12\nborder-size=0\nmax-visible=2\n"
+        ).unwrap());
+        let now=std::time::Instant::now();
+        for summary in ["older","newer"]{
+            let id=runtime.store.lock().unwrap().push(Request{
+                summary:summary.into(),..Request::default()
+            });
+            runtime.schedule_without_hook(id,now).unwrap();
+        }
+        let rects=input_rectangles(&runtime,None).unwrap();
+        assert_eq!(rects.len(),2);
+        assert!(rects.iter().all(|rect|rect.width==110 && rect.x==12));
+        assert_eq!(rects[0].y,4);
+        assert_eq!(rects[1].y-(rects[0].y+rects[0].height),8,
+            "Mako inter-notification gap is max(previous bottom, next top)");
+        for rect in &rects {
+            let target=click((rect.x+1) as f64,(rect.y+1) as f64,273);
+            assert!(hit_test(&runtime,target).unwrap().is_some());
+        }
+        let gap=click((rects[0].x+1) as f64,
+            (rects[0].y+rects[0].height+4) as f64,273);
+        assert!(hit_test(&runtime,gap).unwrap().is_none(),
+            "transparent compositor input gap must pass clicks through");
+    }
+
+    #[test]
     fn surface_scoped_hit_testing_cannot_retarget_other_surface(){
         let runtime=SharedRuntime::new(Config::parse(
             "width=110\nheight=32\nborder-size=0\nmargin=0\nmax-visible=1\n\
