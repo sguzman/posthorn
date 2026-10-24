@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::config::{Options, Traits};
 use crate::grouping::group_ordered_scoped;
 use crate::notification::Notification;
-use crate::render::{compose_mako_stack,render_notification_group_with_icon_scale,render_hidden_placeholder_scaled,PixelFrame,StackAlignment};
+use crate::render::{compose_mako_stack,compose_mako_stack_with_visible_count,mako_stack_geometry,render_notification_group_with_icon_scale,render_hidden_placeholder_scaled,PixelFrame,StackAlignment};
 use crate::runtime::SharedRuntime;
 use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins};
 
@@ -318,6 +318,7 @@ fn snapshot_frame_for_surface(
             pixel_scale,icon_lookup_scale
         ).map_err(other)?);
     }
+    let visible_count=frames.len();
     if hidden>0 {
         let mode_views:Vec<&str>=modes.iter().map(String::as_str).collect();
         let traits=Traits{
@@ -332,8 +333,27 @@ fn snapshot_frame_for_surface(
             modes:&mode_views,requested_timeout_ms:-1,
             actionable:false,group_index:-1,hidden:true,
         };
-        let style=config.style_for(&traits);
+        let mut style=config.style_for(&traits);
         if !style.get("invisible").is_some_and(|x|x=="1"||x=="true"){
+            // Mako's max_width excludes the synthetic [hidden] popup. It
+            // paints that popup with notif_width clamped to the real
+            // notification surface width, and may clip it at the edge.
+            if visible_count>0 {
+                let dimensions=frames.iter().map(|frame|(frame.width,frame.height))
+                    .collect::<Vec<_>>();
+                let anchor=surface_key.map(|key|key.2.as_str()).unwrap_or_else(||
+                    config.global.get("anchor").map(String::as_str).unwrap_or("top-right"));
+                let (canvas_width,_,_)=mako_stack_geometry(
+                    &dimensions,&margins,stack_alignment(anchor)
+                ).map_err(other)?;
+                let logical_width=(canvas_width/pixel_scale).max(1);
+                let configured=style.get("width")
+                    .and_then(|v|crate::config::parse_nonnegative_mako(v))
+                    .unwrap_or(300) as u32;
+                if configured>logical_width {
+                    style.insert("width".into(),logical_width.to_string());
+                }
+            }
             frames.push(render_hidden_placeholder_scaled(hidden,total,&style,pixel_scale)
                 .map_err(other)?);
             margins.push(style.get("margin")
@@ -341,9 +361,15 @@ fn snapshot_frame_for_surface(
                 .unwrap_or(PopupMargins::uniform(10*scale)));
         }
     }
-    let anchor=surface_key.map(|key|key.2.as_str()).unwrap_or_else(|| 
+    let anchor=surface_key.map(|key|key.2.as_str()).unwrap_or_else(||
         config.global.get("anchor").map(String::as_str).unwrap_or("top-right"));
-    compose_mako_stack(&frames,&margins,stack_alignment(anchor)).map_err(other)
+    if visible_count>0 && visible_count<frames.len(){
+        compose_mako_stack_with_visible_count(
+            &frames,&margins,stack_alignment(anchor),visible_count
+        ).map_err(other)
+    }else{
+        compose_mako_stack(&frames,&margins,stack_alignment(anchor)).map_err(other)
+    }
 }
 
 struct DesktopClick {
