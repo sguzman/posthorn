@@ -2369,6 +2369,30 @@ async fn out_of_range_urgency_does_not_match_normal_style_over_dbus()
 }
 
 #[tokio::test]
+async fn gnu_empty_min_repetition_matches_live_private_notification_criteria()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // glibc REG_EXTENDED accepts {,2} as {0,2}, whereas the Rust
+    // regex parser needs the explicit zero inserted by Posthorn.
+    let cfg=Config::parse(
+        "[summary~=^a{,2}$]\non-notify=dismiss\n"
+    )?;
+    let (conn,runtime)=open_private_service(cfg).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    for (summary,close) in [("",true),("a",true),("aa",true),("aaa",false)]{
+        let id:u32=desktop.call("Notify",&(
+            "gnu-repetition",0u32,"",summary,"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        let active=runtime.store.lock().unwrap().active().iter()
+            .any(|note|note.id==id);
+        assert_eq!(active,!close,
+            "GNU {{,2}} quantifier selected wrong on-notify rule for {summary:?}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn posix_c_locale_byte_regex_criteria_gate_private_notify()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
