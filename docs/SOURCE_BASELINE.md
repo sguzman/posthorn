@@ -24,6 +24,31 @@ change how they call the Freedesktop Notification protocol. Until parity:
 - Keep Mako active in `config-store` until side-by-side tests prove parity.
 - Never try to run both notification servers on the same session bus name.
 
+## Pointer cursor and compositor input regions
+
+Pinned Mako v1.11.0 `wayland.c` selects the compositor's default
+`wp_cursor_shape_manager_v1` cursor at `wl_pointer.enter`, falling back to
+the theme's `left_ptr` cursor when that protocol is absent. Posthorn's
+private presenter now follows both branches using the Rust Wayland protocol
+and cursor crates. The combined implementation passed Rust, private D-Bus,
+and all isolated compositor jobs at
+[953bb0a](https://github.com/sguzman/posthorn/actions/runs/40046958828).
+
+Mako also sends a per-surface `wl_region` union of actual notification
+hotspots, rather than making the entire popup layer-shell canvas clickable.
+Posthorn's private single- and multi-surface renderers now apply input
+rectangles from the **same geometry computation used by binding hit-tests**;
+transparent margins and inter-notification gaps are left outside that
+registered input region. The new unit regression and the complete isolated
+Sway suite passed at
+[af4b268](https://github.com/sguzman/posthorn/actions/runs/40047135969).
+
+These checks establish implementation and isolated compositor acceptance,
+not real-world click-through delivery to underlying Hyprland applications,
+physical touch, compositor cursor-theme appearance, or approval to replace
+installed Mako. In particular, live Mako, the production session bus,
+autostart and workstation configuration remain unchanged.
+
 ## Port map
 
 | Upstream source | Posthorn scope | State |
