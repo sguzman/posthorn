@@ -2331,7 +2331,7 @@ async fn posix_c_locale_byte_regex_criteria_gate_private_notify()
     // notifications, although Mako's ASCII class and GNU \w do not.
     let cfg=Config::parse(
         "[summary~=^[[:alpha:]]+$]\non-notify=dismiss\n\
-         [body~=^\\w+$]\non-notify=dismiss\n"
+         [body~=^\\\\w+$]\non-notify=dismiss\n"
     )?;
     let (conn,runtime)=open_private_service(cfg).await?;
     let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
