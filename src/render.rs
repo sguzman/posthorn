@@ -1152,11 +1152,11 @@ mod tests {
     }
 
     #[test]
-    fn actual_icon_pixels_follow_mako_selected_size_component_scale(){
+    fn actual_icon_pixels_follow_mako_relative_path_scale(){
         let dir=tempfile::tempdir().unwrap();
         for (folder,rgba) in [
-            ("16x16/apps@2",0xFF0000FF),
-            ("16x16@2/apps",0x00FF00FF),
+            ("16x16/apps",0xFF0000FF),
+            ("16x16/apps@2",0x00FF00FF),
         ] {
             let path=dir.path().join(folder).join("posthorn.png");
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -1183,9 +1183,9 @@ mod tests {
             (frame.height as usize/2)*frame.stride as usize+6*4
         };
         assert_eq!(&native.pixels[index(&native)..index(&native)+4],
-            &[0,0,255,255],"Mako picks first size-bearing component at 1x");
+            &[0,0,255,255],"Mako selects the unscaled category asset at 1x");
         assert_eq!(&hidpi.pixels[index(&hidpi)..index(&hidpi)+4],
-            &[0,255,0,255],"2x must not trust @2 in an unselected path component");
+            &[0,255,0,255],"Mako reads @2 from a later category at 2x");
     }
 
     #[test]

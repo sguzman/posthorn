@@ -103,8 +103,9 @@ fn icon_files(dir:&Path,name:&str)->Vec<PathBuf>{
 
 /// Mako's glob is root/*/*/name.*. It reads strtol() from the first
 /// directory and falls back to the second only when the first is unsized.
-/// Its @scale suffix is read from that SAME directory component, not from
-/// any later component that happens to contain an '@'.
+/// After choosing where to read the size, strchr() searches the ENTIRE
+/// remaining relative path for the first '@': later category directories
+/// and even a filename extension can supply the scale.
 fn signed_size_prefix(component:&str)->Option<i32>{
     // Upstream uses (int32_t)strtol(component, NULL, 10). A completely
     // nonnumeric component is zero, but a NEGATIVE nonzero first component
@@ -125,18 +126,29 @@ fn signed_size_prefix(component:&str)->Option<i32>{
     };
     Some(wide as i32)
 }
-fn theme_icon_size(first:&str,second:&str)->Option<(u32,u32)>{
+fn theme_icon_size(first:&str,second:&str,filename:&str)->Option<(u32,u32)>{
     let from_first=signed_size_prefix(first);
-    let (signed,component)=match from_first{
-        Some(0)|None=>(signed_size_prefix(second)?,second),
-        Some(size)=>(size,first),
+    let (signed,starts_at_first)=match from_first{
+        Some(0)|None=>(signed_size_prefix(second)?,false),
+        Some(size)=>(size,true),
     };
     let nominal=u32::try_from(signed).ok().filter(|size|*size>0)?;
-    let scale=component.split_once('@')
-        .and_then(|(_,suffix)|signed_size_prefix(suffix))
-        .and_then(|size|u32::try_from(size).ok())
-        .unwrap_or(0);
-    let scale=if component.contains('@'){scale}else{1};
+    // icon.c's strchr(relative_path, '@') begins at whichever directory
+    // strtol selected, then searches through the REST of the path.
+    // In particular, root/64x64/apps@2/name.png is a 2x asset, whereas
+    // root/apps@2/64x64/name.png is 1x: the first component gets skipped.
+    let suffix=if starts_at_first {
+        [first,second,filename].iter()
+            .find_map(|part|part.split_once('@').map(|(_,tail)|tail))
+    }else{
+        [second,filename].iter()
+            .find_map(|part|part.split_once('@').map(|(_,tail)|tail))
+    };
+    let scale=match suffix {
+        Some(tail)=>signed_size_prefix(tail)
+            .and_then(|size|u32::try_from(size).ok()).unwrap_or(0),
+        None=>1,
+    };
     Some((nominal,scale))
 }
 
@@ -173,9 +185,12 @@ pub fn resolve_icon_scaled(
                 let path=second.path();
                 if !path.is_dir(){continue;}
                 let second_name=second.file_name().to_string_lossy().into_owned();
-                let Some((size,scale))=theme_icon_size(&first_name,&second_name)
-                    else{continue};
                 for file in icon_files(&path,name){
+                    let Some(file_name)=file.file_name() else{continue};
+                    let file_name=file_name.to_string_lossy();
+                    let Some((size,scale))=
+                        theme_icon_size(&first_name,&second_name,&file_name)
+                        else{continue};
                     if size==max_size && scale==max_scale {
                         exact.push(file);
                     }else if size<physical_cap {
@@ -382,14 +397,21 @@ mod tests {
     }
 
     #[test]
-    fn source_mako_icon_scale_uses_only_the_size_bearing_component(){
-        assert_eq!(theme_icon_size("64x64","apps@2"),Some((64,1)));
-        assert_eq!(theme_icon_size("apps@2","64x64"),Some((64,1)));
-        assert_eq!(theme_icon_size("64x64@2","apps"),Some((64,2)));
-        assert_eq!(theme_icon_size("apps","64x64@2"),Some((64,2)));
-        assert_eq!(theme_icon_size("64x64@garbage","apps"),Some((64,0)));
-        assert_eq!(theme_icon_size("64x64@+2stuff","apps"),Some((64,2)));
-        assert_eq!(theme_icon_size("apps","+64x64@2"),Some((64,2)));
+    fn mako_icon_scale_scans_the_remaining_relative_path(){
+        // icon.c uses strchr(relative_path, '@'), not strchr(size_part).
+        assert_eq!(theme_icon_size("64x64","apps@2","posthorn.png"),Some((64,2)));
+        assert_eq!(theme_icon_size("apps@2","64x64","posthorn.png"),Some((64,1)));
+        assert_eq!(theme_icon_size("64x64@2","apps","posthorn.png"),Some((64,2)));
+        assert_eq!(theme_icon_size("apps","64x64@2","posthorn.png"),Some((64,2)));
+        assert_eq!(theme_icon_size("64x64","apps","posthorn.png@2"),Some((64,2)));
+        assert_eq!(theme_icon_size("64x64@3","apps@2","posthorn.png"),Some((64,3)));
+        assert_eq!(theme_icon_size("64x64@garbage","apps","posthorn.png"),Some((64,0)));
+        assert_eq!(theme_icon_size("64x64@+2stuff","apps","posthorn.png"),Some((64,2)));
+        assert_eq!(theme_icon_size("apps","+64x64@2","posthorn.png"),Some((64,2)));
+        // Once the first parse fails, scanning starts from the second dir.
+        assert_eq!(theme_icon_size("apps@3","64x64@2","posthorn.png"),Some((64,2)));
+        assert_eq!(theme_icon_size("64x64","apps@wrong","posthorn.png@2"),
+            Some((64,0)), "strchr stops at the first @, even if its suffix is invalid");
     }
 
     #[test]
@@ -402,10 +424,10 @@ mod tests {
             "Mako narrows its 64-bit strtol result to a 32-bit icon size");
         assert_eq!(signed_size_prefix("9223372036854775808x64"),None,
             "strtol reports overflow rather than narrowing");
-        assert_eq!(theme_icon_size("-1","64x64"),None,
+        assert_eq!(theme_icon_size("-1","64x64","posthorn.png"),None,
             "a nonzero signed first-directory size prevents fallback");
-        assert_eq!(theme_icon_size("apps","64x64"),Some((64,1)));
-        assert_eq!(theme_icon_size("4294967360","apps"),Some((64,1)));
+        assert_eq!(theme_icon_size("apps","64x64","posthorn.png"),Some((64,1)));
+        assert_eq!(theme_icon_size("4294967360","apps","posthorn.png"),Some((64,1)));
     }
 
     #[test]
@@ -420,19 +442,28 @@ mod tests {
     }
 
     #[test]
-    fn icon_lookup_rejects_hidpi_suffix_on_unselected_directory_component(){
+    fn icon_lookup_accepts_later_scale_suffix_when_size_is_first(){
         let root=tempfile::tempdir().unwrap();
-        // Both sizes are 64, but Mako reads scale from the first
-        // component when it contains the nominal size. apps@2 therefore
-        // does NOT make 64x64/apps@2 an exact match at 2x.
-        for rel in ["64x64/apps@2","64x64@2/apps"] {
+        // The second component is still searched by strchr() after the
+        // nominal size was read from the first component.
+        for rel in ["64x64/apps","64x64/apps@2"] {
             let dir=root.path().join(rel);
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("posthorn.png"),b"fixture").unwrap();
         }
+        let root=root.path();
+        assert_eq!(resolve_icon_scaled("posthorn",root.to_str().unwrap(),64,1),
+            Some(root.join("64x64/apps/posthorn.png")));
+        assert_eq!(resolve_icon_scaled("posthorn",root.to_str().unwrap(),64,2),
+            Some(root.join("64x64/apps@2/posthorn.png")));
+        // The glob also permits filename suffixes that contain an @.
+        let second=tempfile::tempdir().unwrap();
+        let dir=second.path().join("64x64/apps");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("posthorn.png@2"),b"fixture").unwrap();
         assert_eq!(resolve_icon_scaled(
-            "posthorn",root.path().to_str().unwrap(),64,2
-        ),Some(root.path().join("64x64@2/apps/posthorn.png")));
+            "posthorn",second.path().to_str().unwrap(),64,2
+        ),Some(dir.join("posthorn.png@2")));
     }
 
     #[test]
