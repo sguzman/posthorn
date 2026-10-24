@@ -1771,3 +1771,44 @@ aggregate remains **89%**. This closes a documented CLI parity
 gap, NOT Mako full startup parity or user workstation QA.
 T503 stays at 51%; opt-in T504 stays at 0%. The installed
 Mako, real bus owner and user's live session remain untouched.
+
+## C-locale POSIX collating/equivalence class matching
+
+Pinned Mako v1.11.0 criteria.c uses glibc
+regcomp(REG_EXTENDED|REG_NOSUB) under the default C locale.
+Independently compiled C-locale regcomp/regexec probes verified
+that [[.a.]] and [[=a=]] match a single 'a' byte, NOT the
+literal dot/equal delimiters; that [a[.b.]c] matches only
+a, b and c; that [[.a.]-[.z.]] expresses an ordinary range;
+and that multi-character collating elements such as [[.ch.]],
+[[=ab=]], and named [[.newline.]] are invalid (REG_ECOLLATE).
+They also verified correct parsing of literal ], backslash and
+other punctuation inside such elements.
+
+Rust regex interprets some of the syntax as nested sets instead
+of POSIX collation. src/config.rs now lowers *only* syntactically
+nested C-locale single-byte collating/equivalence elements,
+escapes literal punctuation with Rust character-class rules,
+keeps valid POSIX [:alpha:] named classes intact, and rejects
+multi-character/UTF-8 elements that source glibc cannot compile.
+No unsafe C FFI or new runtime dependency was introduced.
+
+Unit tests cover matching a versus dot/equal, ranges, embedded
+elements, named classes, literal punctuation and invalid
+collation spellings. A private D-Bus test loads the rule through
+a file, exercises actual Notify dismissal/retention, rejects an
+invalid multi-character element on Reload with last-good-state
+and revision preservation, then reloads the equivalent [=a=]
+form and repeats the notification checks.
+
+[GitHub Actions 40135401347](https://github.com/sguzman/posthorn/actions/runs/40135401347)
+passed BOTH test and headless-wayland on
+[implementation commit 0adb46a](https://github.com/sguzman/posthorn/commit/0adb46a92f8fe14209921797b95200d92fd3bd6a).
+Sway 1x, 1.25x, 2x, output, input-region, pointer, padding and
+layout acceptance remained green.
+
+**T102: 97% -> 98%.** P1 remains **90%**, strict M0
+remains **89%**; remaining POSIX ERE discrepancies are NOT
+assumed fixed by this narrow source-backed change. Physical
+Hyprland acceptance T503 remains 51%; authorized T504
+remains 0%. No live Mako, session bus or user config changed.
