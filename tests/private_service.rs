@@ -2339,8 +2339,8 @@ async fn posix_c_locale_byte_regex_criteria_gate_private_notify()
         ("Ascii","","true"),
         ("café","","false"),
         ("東京","","false"),
-        ("digits123","é","false"),
-        ("digits123","ASCII_123","true"),
+        ("has-digit1","é","false"),
+        ("has-digit1","ASCII_123","true"),
     ] {
         let expected_close=should_close=="true";
         let id:u32=desktop.call("Notify",&(
