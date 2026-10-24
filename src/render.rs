@@ -700,6 +700,29 @@ mod tests {
     }
 
     #[test]
+    fn signed_horizontal_padding_increases_mako_text_layout_width(){
+        // v1.11.0 computes text_layout_width as width minus the signed
+        // left and right padding. Negative sides give Pango MORE room
+        // before text is clipped at the actual popup surface edge.
+        let mut note=fixture();
+        note.summary="ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ".into();
+        let mut zero=Options::new();
+        for (key,value) in [
+            ("width","84"),("height","250"),("border-size","0"),
+            ("font","monospace 16"),("format","%s"),("padding","0"),
+        ]{zero.insert(key.into(),value.into());}
+        let mut negative=zero.clone();
+        negative.insert("padding".into(),"0,-16,0,-16".into());
+        let pad=Padding::parse(&negative);
+        assert_eq!((pad.left,pad.right),(-16,-16));
+        let original=measure_notification_height(&note,&zero).unwrap();
+        let expanded=measure_notification_height(&note,&negative).unwrap();
+        assert!(expanded<original,
+            "negative horizontal insets increase wrap width and reduce text lines");
+        assert_eq!(render_notification(&note,&negative).unwrap().height,expanded);
+    }
+
+    #[test]
     fn large_corner_radius_can_extend_beyond_mako_text_height_cap() {
         let note=fixture();
         let mut style=Options::new();
