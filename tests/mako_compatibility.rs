@@ -87,6 +87,18 @@ fn check_config_accepts_mako_cli_overrides_without_starting_a_daemon(){
     assert!(String::from_utf8_lossy(&explicit.stdout)
         .contains("8 history slots; 0 CLI overrides"));
 
+    // GNU getopt_long("hc:") permits an attached short -c argument.
+    // Mako treats this identically to the two-argv -c PATH spelling.
+    let joined=format!("-c{}",alternate.display());
+    let compact=Command::new(binary).args([
+        "--check-config",file.to_str().unwrap(),joined.as_str(),
+        "--width","480"
+    ]).output().unwrap();
+    assert!(compact.status.success(),"{compact:?}");
+    assert!(String::from_utf8_lossy(&compact.stdout)
+        .contains("8 history slots; 1 CLI overrides"),
+        "joined -c must select the later config while retaining style args");
+
     for options in [
         vec!["--width","0"],
         vec!["--width","440\nmax-history=0"],
