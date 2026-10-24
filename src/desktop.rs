@@ -102,11 +102,28 @@ pub fn visible_members(runtime:&SharedRuntime)
         .map(|m|(m.notification,m.group_count)).collect())
 }
 
+/// The compositor renders each Mako surface independently. Keep its
+/// projection counters independent of the legacy single-popup composite.
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub struct SurfaceVisibility {
+    pub surface_key:(String,String,String),
+    pub notification_ids:Vec<u32>,
+    pub hidden_count:usize,
+    pub total_count:usize,
+}
+
 #[derive(Debug)]
 struct VisibleProjection {
     members:Vec<VisibleMember>,
     hidden_count:usize,
     total_count:usize,
+    surfaces:Vec<SurfaceVisibility>,
+}
+
+/// Source-backed surface-local projection for the future multi-surface
+/// presenter. Does not create or map any Wayland surface itself.
+pub fn surface_visibility(runtime:&SharedRuntime)->io::Result<Vec<SurfaceVisibility>>{
+    Ok(visible_projection(runtime)?.surfaces)
 }
 
 pub fn visible_members_indexed(runtime:&SharedRuntime)
@@ -125,6 +142,23 @@ fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
     let total_count=by_id.len();
     let mut selected=Vec::new();
     let mut hidden_count=0usize;
+    let mut surface_views=Vec::<SurfaceVisibility>::new();
+    // Surface objects persist independently of visible notifications. Use
+    // active notification order to produce a deterministic view for each
+    // associated identity (the actual presenter owns surface creation).
+    for note in by_id{
+        let key=note.surface_spec.clone()
+            .unwrap_or_else(||("".into(),"top".into(),"top-right".into()));
+        if let Some(view)=surface_views.iter_mut()
+            .find(|v|v.surface_key==key){
+            view.total_count+=1;
+        }else{
+            surface_views.push(SurfaceVisibility{
+                surface_key:key,notification_ids:Vec::new(),
+                hidden_count:0,total_count:1,
+            });
+        }
+    }
     // Mako render.c considers only the notifications attached to its
     // current surface, so max-visible is independently counted per
     // (configured output, layer, anchor) identity.
@@ -148,6 +182,10 @@ fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
                     // Upstream increments hidden count for every excluded
                     // notification, including secondary grouped members.
                     hidden_count+=1;
+                    if let Some(view)=surface_views.iter_mut()
+                        .find(|v|v.surface_key==surface_key){
+                        view.hidden_count+=1;
+                    }
                     continue;
                 }
                 if style.get("invisible").is_some_and(|v|
@@ -157,6 +195,10 @@ fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
                 selected.push(VisibleMember{
                     notification:note.clone(),group_count:real_count,group_index,
                 });
+                if let Some(view)=surface_views.iter_mut()
+                    .find(|v|v.surface_key==surface_key){
+                    view.notification_ids.push(note.id);
+                }
                 if group_index<=0 {
                     *displayed_groups.entry(surface_key).or_default()+=1;
                 }
@@ -164,7 +206,7 @@ fn visible_projection(runtime:&SharedRuntime)->io::Result<VisibleProjection>{
         }
     }
     Ok(VisibleProjection{
-        members:selected,hidden_count,total_count,
+        members:selected,hidden_count,total_count,surfaces:surface_views,
     })
 }
 
@@ -609,6 +651,32 @@ mod tests {
             PopupMargins{top:7,right:0,bottom:3,left:0},
         ];
         assert_eq!(vertical_spacing(&margins),vec![9,7]);
+    }
+
+    #[test]
+    fn surface_visibility_reports_local_hidden_counts_and_totals(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "max-visible=1\n[category=left]\nanchor=bottom-left\n"
+        ).unwrap());
+        let now=std::time::Instant::now();
+        let first=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(first,now).unwrap();
+        let left=runtime.store.lock().unwrap().push(Request{
+            category:"left".into(),..Request::default()
+        });
+        runtime.schedule_without_hook(left,now).unwrap();
+        let last=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(last,now).unwrap();
+        let views=surface_visibility(&runtime).unwrap();
+        assert_eq!(views.len(),2);
+        let root=views.iter().find(|v|v.surface_key.2=="top-right").unwrap();
+        let side=views.iter().find(|v|v.surface_key.2=="bottom-left").unwrap();
+        assert_eq!(root.total_count,2);
+        assert_eq!(root.hidden_count,1);
+        assert_eq!(root.notification_ids,vec![last]);
+        assert_eq!(side.total_count,1);
+        assert_eq!(side.hidden_count,0);
+        assert_eq!(side.notification_ids,vec![left]);
     }
 
     #[test]

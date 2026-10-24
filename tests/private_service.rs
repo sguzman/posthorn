@@ -1078,6 +1078,44 @@ async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_d
 }
 
 #[tokio::test]
+async fn surface_visibility_counts_each_surface_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "max-visible=1\n[category=left]\nanchor=bottom-left\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let opts=HashMap::<String,OwnedValue>::new();
+    let a:u32=desktop.call("Notify",&(
+        "surfaces",0u32,"","Old","",Vec::<String>::new(),opts.clone(),-1i32
+    )).await?;
+    let left_hints:HashMap<String,OwnedValue>=[(
+        "category".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("left"))?
+    )].into();
+    let b:u32=desktop.call("Notify",&(
+        "surfaces",0u32,"","Left","",Vec::<String>::new(),left_hints,-1i32
+    )).await?;
+    let c:u32=desktop.call("Notify",&(
+        "surfaces",0u32,"","New","",Vec::<String>::new(),opts,-1i32
+    )).await?;
+    let surfaces=posthorn::desktop::surface_visibility(&runtime)?;
+    assert_eq!(surfaces.len(),2);
+    let root=surfaces.iter().find(|s|s.surface_key.2=="top-right")
+        .ok_or("missing top-right surface")?;
+    let left=surfaces.iter().find(|s|s.surface_key.2=="bottom-left")
+        .ok_or("missing bottom-left surface")?;
+    assert_eq!(root.total_count,2);
+    assert_eq!(root.hidden_count,1);
+    assert_eq!(root.notification_ids,vec![c]);
+    assert!(!root.notification_ids.contains(&a));
+    assert_eq!(left.total_count,1);
+    assert_eq!(left.hidden_count,0);
+    assert_eq!(left.notification_ids,vec![b]);
+    Ok(())
+}
+
+#[tokio::test]
 async fn max_visible_is_scoped_to_surface_tuple_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
