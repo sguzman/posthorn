@@ -496,11 +496,11 @@ pub fn mako_stack_geometry(
         ));
         end=end.checked_add(i64::from(*h)).ok_or("popup height overflow")?;
     }
-    // Mako master 2026-06-30 (cce37cd) restores the final bottom margin
-    // that v1.11.0 accidentally omitted. Retain its signed value so
-    // negative bottom margins clip the last notification if configured.
-    end=end.checked_add(i64::from(margins.last().unwrap().bottom))
-        .ok_or("final popup bottom margin overflow")?;
+    // Pinned Mako v1.11.0 render.c returns total_height immediately after
+    // drawing the last notification. It intentionally does NOT add that
+    // final notification's pending bottom margin (whether positive or
+    // negative). Newer Mako master later changed this, but strict MVP
+    // must reproduce the pinned release, including this quirk.
     if !(1..=4096).contains(&end) || width*end*4>64*1024*1024 {
         return Err("popup stack exceeds safe Wayland bounds".into());
     }
@@ -1131,18 +1131,18 @@ mod tests {
     }
 
     #[test]
-    fn latest_mako_bottom_margin_extends_and_can_clip_last_popup() {
+    fn pinned_mako_v1_11_omits_final_bottom_margin_even_when_negative() {
         use crate::wayland::PopupMargins;
         let margins=[PopupMargins{top:2,right:0,bottom:5,left:0}];
         let (width,height,coords)=mako_stack_geometry(
             &[(12,10)],&margins,StackAlignment::Left
         ).unwrap();
-        assert_eq!((width,height),(12,17));
+        assert_eq!((width,height),(12,12));
         assert_eq!(coords,vec![(0,2)]);
         let negative=[PopupMargins{bottom:-3,..margins[0]}];
         assert_eq!(mako_stack_geometry(
             &[(12,10)],&negative,StackAlignment::Left
-        ).unwrap().1,9);
+        ).unwrap().1,12);
     }
 
     #[test]
@@ -1190,7 +1190,7 @@ mod tests {
             crate::wayland::PopupMargins{top:4,right:3,bottom:2,left:6},
         ];
         let (w,h,left)=mako_stack_geometry(&[(100,20),(80,10)],&m,StackAlignment::Left).unwrap();
-        assert_eq!((w,h),(120,48));
+        assert_eq!((w,h),(120,46));
         assert_eq!(left,vec![(13,5),(6,36)]);
         let (_,_,right)=mako_stack_geometry(&[(100,20),(80,10)],&m,StackAlignment::Right).unwrap();
         assert_eq!(right,vec![(13,5),(37,36)]);
@@ -1200,7 +1200,7 @@ mod tests {
         };
         let composed=compose_mako_stack(&[frame(100,20,9),frame(80,10,7)],&m,
             StackAlignment::Left).unwrap().unwrap();
-        assert_eq!((composed.width,composed.height),(120,48));
+        assert_eq!((composed.width,composed.height),(120,46));
         assert!(composed.pixels[0..(5*120*4) as usize].iter().all(|v|*v==0));
         assert_eq!(composed.pixels[(5*120+13)*4],9);
         assert_eq!(composed.pixels[(36*120+6)*4],7);
@@ -1260,7 +1260,7 @@ mod tests {
         let clipped=compose_mako_stack_with_visible_count(
             &frames,&limits,StackAlignment::Right,1
         ).unwrap().unwrap();
-        assert_eq!((clipped.width,clipped.height),(8,7));
+        assert_eq!((clipped.width,clipped.height),(8,6));
         let pixel=|x:usize,y:usize|{
             let off=y*clipped.stride as usize+x*4;
             &clipped.pixels[off..off+4]
