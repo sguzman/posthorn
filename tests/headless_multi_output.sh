@@ -150,4 +150,4 @@ busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s introspect \
 grim -o HEADLESS-1 "$root/after-unplug.png"
 ./target/debug/examples/qa_png_probe \
   "$root/after-unplug.png" '#E5923C' 300 present >/dev/null
-echo 'Independent HEADLESS-1/HEADLESS-2 routing, screenshot isolation, output unplug, private bus alive: OK'
+echo 'Independent HEADLESS-1/HEADLESS-2 routing, isolated pointer dismissal, surviving popup and output unplug: OK'

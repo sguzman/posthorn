@@ -159,7 +159,7 @@
               "id": "T403",
               "emoji": "🖱️",
               "name": "Pointer, touch, button bindings and XDG activation",
-              "progress": 92
+              "progress": 93
             }
           ]
         },
@@ -184,7 +184,7 @@
               "id": "T503",
               "emoji": "🧪",
               "name": "End-to-end on Hyprland, notify-send and Edge activation",
-              "progress": 50
+              "progress": 51
             },
             {
               "id": "T504",

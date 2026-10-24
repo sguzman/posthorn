@@ -1049,3 +1049,31 @@ tokens, or the expressly opt-in Mako cutover. Accordingly, T401 stays
 under 100%, the workstation/end-to-end gate T503 advances only
 incrementally, and T504 remains 0%. Existing Mako, autostart, and
 the production notification bus are untouched.
+
+## Pointer events stay on the selected compositor output
+
+Pinned Mako v1.11.0 `wayland.c` resolves pointer events from the
+underlying Wayland surface, not a global concatenated screen geometry.
+Posthorn's opt-in multi-surface desktop now gives every independently
+mapped output/layer/anchor surface a dedicated compositor input stream
+and uses `hit_test_on_surface` to resolve local coordinates.
+
+The isolated two-virtual-output Sway acceptance positions
+`HEADLESS-1` at (0,0) and `HEADLESS-2` at (1280,0).
+After matching each surface's notification background color in its
+own screenshot, the test sends an actual compositor virtual-pointer
+right-click inside the second output's notification. It then verifies
+that the second notification's color is **absent** from the second
+output while the first output's notification color remains **present**.
+The test additionally removes `HEADLESS-2` and verifies the daemon
+remains registered on the isolated D-Bus name and still displays the
+survivor on `HEADLESS-1`.
+
+CI [40045890584](https://github.com/sguzman/posthorn/actions/runs/40045890584)
+passed both jobs: **272 Rust unit tests, 65 private D-Bus
+tests**, the three isolated display-scale suites, and the
+two-output/surface-local pointer/dismissal/unplug acceptance. This
+establishes scoped input delivery in disposable Sway, **not** a
+physical Hyprland pointer/touch/XDG activation-token acceptance or
+permission to replace a user's installed Mako. Consequently T403
+and T503 advance only slightly; T504 remains 0%.
