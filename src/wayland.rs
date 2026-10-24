@@ -632,6 +632,25 @@ struct LiveSurface {
     frame: ShmAllocation,
 }
 
+/// Wayland applies buffered content and input changes in one surface
+/// transaction. Some callers intentionally leave the region unspecified
+/// (the independent full-surface QA fixtures); daemon notification callers
+/// always supply the exact Mako hotspots, including an empty region.
+fn apply_notification_input_region(
+    compositor:&wl_compositor::WlCompositor,qh:&QueueHandle<ConfigureState>,
+    surface:&wl_surface::WlSurface,rects:Option<&[crate::input::InputRect]>,
+){
+    let Some(rects)=rects else{return};
+    let region=compositor.create_region(qh,());
+    for rect in rects{
+        if rect.width>0&&rect.height>0 {
+            region.add(rect.x,rect.y,rect.width,rect.height);
+        }
+    }
+    surface.set_input_region(Some(&region));
+    region.destroy();
+}
+
 impl LivePresenter {
     pub fn connect() -> Result<Self, Box<dyn std::error::Error>> {
         let conn = Connection::connect_to_env()?;
@@ -748,7 +767,7 @@ impl LivePresenter {
         &mut self, frame: Option<&PixelFrame>, corner: ScreenCorner,
         margins: PopupMargins, selected_layer: PopupLayer, output_name:&str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.update_frame_on_output_impl(frame,corner,margins,selected_layer,output_name,false)
+        self.update_frame_on_output_impl(frame,corner,margins,selected_layer,output_name,false,None)
     }
 
     /// Accept a frame already rasterized at the compositor's integer scale.
@@ -757,13 +776,26 @@ impl LivePresenter {
         &mut self,frame:Option<&PixelFrame>,corner:ScreenCorner,
         margins:PopupMargins,selected_layer:PopupLayer,output_name:&str,
     ) -> Result<(),Box<dyn std::error::Error>> {
-        self.update_frame_on_output_impl(frame,corner,margins,selected_layer,output_name,true)
+        self.update_frame_on_output_impl(frame,corner,margins,selected_layer,output_name,true,None)
+    }
+
+    /// Commit the notification-only pointer/touch region atomically with the
+    /// Cairo frame. Without this, the compositor briefly treats transparent
+    /// popup margins as interactive between two surface commits.
+    pub fn update_native_frame_with_input_rectangles(
+        &mut self,frame:Option<&PixelFrame>,corner:ScreenCorner,
+        margins:PopupMargins,selected_layer:PopupLayer,output_name:&str,
+        input_rects:&[crate::input::InputRect],
+    )->Result<(),Box<dyn std::error::Error>>{
+        self.update_frame_on_output_impl(
+            frame,corner,margins,selected_layer,output_name,true,Some(input_rects)
+        )
     }
 
     fn update_frame_on_output_impl(
         &mut self, frame: Option<&PixelFrame>, corner: ScreenCorner,
         margins: PopupMargins, selected_layer: PopupLayer, output_name:&str,
-        native:bool,
+        native:bool,input_rects:Option<&[crate::input::InputRect]>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(frame) = frame { validate_frame(frame)?; }
         self.reclaim_released();
@@ -794,7 +826,7 @@ impl LivePresenter {
             layer:selected_layer,output_name:output_name.into(),scale,
         };
         if self.active.as_ref().is_some_and(|live|live.spec==spec){
-            return self.redraw_active(frame,native);
+            return self.redraw_active(frame,native,input_rects);
         }
         // Geometry changes recreate the layer. They must obey the same
         // outstanding-buffer bound as same-size redraws.
@@ -844,6 +876,7 @@ impl LivePresenter {
         surface.set_buffer_scale(scale as i32);
         surface.attach(Some(&buffer), 0, 0);
         surface.damage_buffer(0, 0, physical.width as i32, physical.height as i32);
+        apply_notification_input_region(&self.compositor,&self.qh,&surface,input_rects);
         surface.commit();
         self.conn.flush()?;
         self.active = Some(LiveSurface {
@@ -857,8 +890,10 @@ impl LivePresenter {
     /// re-entering the layer-shell handshake. In particular, this preserves
     /// compositor focus and avoids a visible surface teardown/flicker on
     /// ordinary message replacement.
-    fn redraw_active(&mut self,frame:&PixelFrame,native:bool)
-        -> Result<(),Box<dyn std::error::Error>>
+    fn redraw_active(
+        &mut self,frame:&PixelFrame,native:bool,
+        input_rects:Option<&[crate::input::InputRect]>,
+    )->Result<(),Box<dyn std::error::Error>>
     {
         if self.retired.len() >= 32 {
             return Err("Wayland compositor has not released 32 old buffers".into());
@@ -876,6 +911,9 @@ impl LivePresenter {
         live.surface.set_buffer_scale(live.spec.scale as i32);
         live.surface.attach(Some(&buffer),0,0);
         live.surface.damage_buffer(0,0,physical.width as i32,physical.height as i32);
+        apply_notification_input_region(
+            &self.compositor,&self.qh,&live.surface,input_rects
+        );
         live.surface.commit();
         // Never destroy or drop the old allocation until wl_buffer.release.
         // The compositor might still be reading the old frame.
@@ -998,14 +1036,9 @@ impl LivePresenter {
         &mut self,rects:&[crate::input::InputRect],
     )->Result<(),Box<dyn std::error::Error>>{
         let Some(live)=self.active.as_ref() else{return Ok(())};
-        let region=self.compositor.create_region(&self.qh,());
-        for rect in rects {
-            if rect.width>0 && rect.height>0 {
-                region.add(rect.x,rect.y,rect.width,rect.height);
-            }
-        }
-        live.surface.set_input_region(Some(&region));
-        region.destroy();
+        apply_notification_input_region(
+            &self.compositor,&self.qh,&live.surface,Some(rects)
+        );
         live.surface.commit();
         self.conn.flush()?;
         Ok(())
