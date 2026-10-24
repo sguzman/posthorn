@@ -1649,3 +1649,47 @@ acceptance suite remained green.
 stays **88%**. This is tested PRIVATE service behavior,
 NOT normal/default production startup, live Hyprland validation or
 authorization for cutover. T503 remains 51%; T504 remains 0%.
+
+## Explicit upstream Mako v1.11 root-style initialization
+
+The pinned upstream config.c:init_default_style initializes EVERY root
+style member and explicitly marks all style.spec fields specified.
+Posthorn previously retained defaults for the visible primary colors
+and dimensions but omitted many other initialized properties from the
+actual root Options, relying instead on independent fallback values
+scattered across the renderer, icon service and runtime.
+
+[Implementation commit 7b4877b](https://github.com/sguzman/posthorn/commit/7b4877bd7633e40d3efbc83b0b12b8a106d7531d)
+adds the missing explicit root defaults, including outer-margin 0,
+border-radius 0, progress-color #5588AAFF, icons enabled,
+max-icon-size 64, icon-path empty, icon-border-radius 0,
+icon-location left, text-alignment left, group-by none,
+invisible false, output empty, and on-notify none. The earlier
+default values, ordered user criteria and root padding state remain
+unchanged. This reproduces the upstream root style initialization
+rather than merely making its renderer fallback behavior appear close.
+
+The new config unit test verifies all upstream root fields, validates
+their option values and checks the resolved ordinary-notification
+style. A separate private D-Bus regression sends a real Notify,
+checks the live style projection and GetCapabilities, then rasterizes
+its Pango/Cairo frame. The test correctly uses the Mako height value
+as a MAXIMUM: the short test message measures a smaller actual frame.
+Another legacy test expectation was corrected because Mako's
+default on-notify binding is explicitly none, not an absent map key.
+
+[GitHub Actions run 40132626637](https://github.com/sguzman/posthorn/actions/runs/40132626637)
+passed BOTH full jobs on
+[commit db54f24](https://github.com/sguzman/posthorn/commit/db54f24ad97acd353ad6831073b32077adb71658).
+The Rust all-targets suite reported 290 passing unit tests; the
+private D-Bus suite reported 71 passing tests, including the new
+root-style Pango render regression; and Sway 1x, fractional,
+2x, multi-output, click-through, pointer and layout regressions
+remained green.
+
+**T105: 84% → 86%; P1: 89% → 90%.** Strict M0 remains
+**88%**. Unfinished style/layout parity work remains separate:
+this evidence does not constitute full physical Hyprland acceptance
+(T503: 51%) or an authorized live daemon cutover (T504: 0%).
+No installed Mako process, user's home configuration or
+production notification bus was touched.
