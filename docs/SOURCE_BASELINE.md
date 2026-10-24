@@ -832,3 +832,68 @@ passed 263 Rust unit tests, 57 private D-Bus tests and all isolated
 anchor parity; real multi-surface output reassignment and physical
 Hyprland acceptance remain unverified. The user's installed Mako,
 autostart, and production D-Bus ownership are untouched.
+
+## Existing surface tuple matching and recomputation on mode changes
+
+Pinned Mako v1.11.0 `criteria.c:apply_each_criteria` searches its
+persistent `state->surfaces` for an existing surface with the newly
+selected **configured output, layer and anchor**. If one matches, the
+notification switches association; if not, a notification with an
+existing surface keeps it, and a notification with NULL surface creates
+one. The search runs after initial style and timeout selection. Surface
+identity is independent of the configured monitor's eventual
+`wl_surface.enter` output.
+
+Posthorn now records those reusable identity triplets. A direct-ID
+replacement can relocate to a previously created matching surface,
+but a different layer or configured output does not qualify; its
+initial timeout is still based on its old association. Focused Rust and
+private D-Bus regressions exercise this behavior. Both isolated CI
+jobs were green at
+[4c834d4](https://github.com/sguzman/posthorn/actions/runs/40042134097).
+
+Pinned `dbus/mako.c:reapply_config` destroys *all* old surfaces,
+clears each active notification's surface and group-index, reapplies
+styles, and rebuilds associations in active list order. Posthorn
+now invalidates its identity registry and active surface associations
+on mode/config reapplication, regenerates surface identities alongside
+grouping, and preserves existing expiration deadlines. Unit and
+private D-Bus mode-transition regressions prove that a mode may move
+an active notification from top-right to bottom-left and back without
+retaining a stale tuple or rearming the timer. Both CI jobs passed at
+[d1c2df3](https://github.com/sguzman/posthorn/actions/runs/40042280919).
+
+## Per-notification output selectors and output-change history
+
+Mako's `criteria.c:match_criteria` compares `[output=...]` against
+the particular `notif->surface->surface_output` supplied by the
+compositor, not a shared daemon-wide output. Posthorn now supports
+independently observed per-notification output identities (including
+an explicitly unmapped state). The existing single-surface private
+presenter continues to report its single observed output as a
+fallback for notifications with no independent observation. The
+specific observation is retained on direct-ID replacement and cleared
+on new/tag objects and mode/config surface reconstruction. Rust and
+private D-Bus tests verify two notifications with distinct outputs
+can match distinct `[output]` criteria and that replacement selects
+its own surface's pre-regroup timeout. Both CI jobs passed at
+[1d1106c](https://github.com/sguzman/posthorn/actions/runs/40042525507).
+
+Mako's `render.c` reapplies criteria after compositor assignment.
+Consequently, output changes can affect active `history` settings
+without retroactively rescheduling expiration timers. Posthorn now
+refreshes its active history-policy map on single-surface
+`wl_surface.enter`/leave observations as well as independently
+observed notification output changes. The last acceptance suite passed
+**267 Rust unit tests, 59 private D-Bus tests**, and isolated
+1×/1.25×/2× Sway compositor tests at
+[01334a3](https://github.com/sguzman/posthorn/actions/runs/40042641411).
+
+**Limitations:** This is surface identity, criteria, and state-model
+parity; the current private live presenter still maps one layer-shell
+notification surface, and the new per-notification observation API
+is not a claim that it currently maps or renders multiple independent
+real surfaces. Output hotplug/reassignment across truly simultaneous
+surfaces and physical Hyprland multi-monitor QA remain outstanding.
+No production D-Bus ownership, installed Mako, or desktop autostart
+was changed.
