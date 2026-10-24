@@ -2013,6 +2013,59 @@ async fn control_reload_swaps_styles_and_preserves_last_good_file()
 }
 
 #[tokio::test]
+async fn posix_c_collating_classes_match_private_notify_and_reject_bad_reload()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::open_private_service_from_path;
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("mako.conf");
+    std::fs::write(&path,
+        "[summary~=^[[.a.]]$]\non-notify=dismiss\n"
+    )?;
+    let (conn,runtime)=open_private_service_from_path(&path).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    for (source,closed) in [("a",true),(".",false),("=",false),("b",false)] {
+        let id:u32=desktop.call("Notify",&(
+            "posix-collating",0u32,"",source,"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        let active=runtime.store.lock().unwrap().active().iter()
+            .any(|note|note.id==id);
+        assert_eq!(active,!closed,
+            "C-locale [[.a.]] selected wrong notification {source:?}");
+    }
+    std::fs::write(&path,
+        "[summary~=^[[.ab.]]$]\non-notify=dismiss\n"
+    )?;
+    let failed:zbus::Result<()>=control.call("Reload",&()).await;
+    assert!(failed.is_err(),"glibc-invalid multi-byte collation must reject Reload");
+    assert_eq!(runtime.revision(),0);
+    let id:u32=desktop.call("Notify",&(
+        "posix-collating",0u32,"","a","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert!(runtime.store.lock().unwrap().active().iter().all(|n|n.id!=id),
+        "invalid Reload lost the previous accepted collation rule");
+
+    std::fs::write(&path,
+        "[summary~=^[[=a=]]$]\non-notify=dismiss\n"
+    )?;
+    let _:()=control.call("Reload",&()).await?;
+    assert_eq!(runtime.revision(),1);
+    for (source,closed) in [("a",true),("=",false),(".",false)]{
+        let id:u32=desktop.call("Notify",&(
+            "posix-equivalence",0u32,"",source,"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .any(|n|n.id==id),!closed,
+            "equivalence class [[=a=]] selected wrong notification {source:?}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn private_reload_rejects_glibc_unsupported_posix_classes_without_style_loss()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
