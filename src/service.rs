@@ -59,7 +59,15 @@ async fn open_named_runtime(runtime:SharedRuntime,name:&str)
 pub async fn open_private_service_from_path(path:&Path)
     -> Result<(Connection,SharedRuntime),Box<dyn std::error::Error+Send+Sync>>
 {
-    let runtime=SharedRuntime::from_path(path)?;
+    open_private_service_from_path_with_cli_overrides(path,&[]).await
+}
+
+/// Exercise original Mako CLI style precedence on a disposable private bus.
+/// This is not a production startup path and cannot seize the real name.
+pub async fn open_private_service_from_path_with_cli_overrides(
+    path:&Path,overrides:&[(String,String)]
+)->Result<(Connection,SharedRuntime),Box<dyn std::error::Error+Send+Sync>>{
+    let runtime=SharedRuntime::from_path_with_cli_overrides(path,overrides)?;
     Ok(open_named_runtime(runtime,PRIVATE_BUS_NAME).await?)
 }
 
