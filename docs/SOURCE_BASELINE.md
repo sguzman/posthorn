@@ -1077,3 +1077,32 @@ establishes scoped input delivery in disposable Sway, **not** a
 physical Hyprland pointer/touch/XDG activation-token acceptance or
 permission to replace a user's installed Mako. Consequently T403
 and T503 advance only slightly; T504 remains 0%.
+
+## Mixed layer-shell layers and symmetric pointer routing in isolated Sway
+
+Mako v1.11.0 `criteria.c:apply_each_criteria` includes the selected
+layer in the reusable surface identity, and `wayland.c` maps that layer
+with `zwlr_layer_shell_v1_get_layer_surface`. Posthorn's opt-in
+`--experimental-private-multi-desktop` now has acceptance evidence
+for a default `top` notification and an independently anchored
+`overlay` notification **simultaneously visible** at each isolated
+1×, 1.25× and 2× Sway scale. Both jobs passed at
+[run 40046442239](https://github.com/sguzman/posthorn/actions/runs/40046442239).
+
+A later two-headless-monitor regression exercises real compositor
+pointer input both ways: clicking unused space on `HEADLESS-2`
+must keep both notifications; right-clicking the notification on the
+second output must leave the first notification mapped; sending
+a new second-output notification must remap that popup; then clicking
+the first output must preserve the second. Finally the first popup
+is restored before unplugging the second monitor. The compositor
+screenshots assert the surviving notification color and the absence
+of only the dismissed notification color at each transition.
+
+[CI run 40046494158](https://github.com/sguzman/posthorn/actions/runs/40046494158)
+passed **272 Rust unit tests, 65 private D-Bus tests**, all three
+Sway scale suites, and the two-output gap-click, bidirectional
+dismissal, remapping and unplug acceptance. All runs use the
+private test D-Bus name, never the user's desktop notification owner.
+This does not prove real Hyprland focus/activation parity or
+authorize production Mako replacement.
