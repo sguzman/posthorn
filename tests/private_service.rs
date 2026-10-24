@@ -2013,6 +2013,62 @@ async fn control_reload_swaps_styles_and_preserves_last_good_file()
 }
 
 #[tokio::test]
+async fn private_reload_accepts_gnu_word_start_and_end_criteria()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::open_private_service_from_path;
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("mako.conf");
+    std::fs::write(&path,
+        "[summary~=\\<cat\\>]\non-notify=dismiss\n"
+    )?;
+    let (conn,runtime)=open_private_service_from_path(&path).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    for (title,closed) in [
+        ("cat",true),("a cat!",true),("bobcat",false),
+        ("catnip",false),("café cat",true),
+    ] {
+        let id:u32=desktop.call("Notify",&(
+            "gnu-word-boundaries",0u32,"",title,"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .any(|note|note.id==id),!closed,
+            "GNU word-boundary rule selected wrong title {title:?}");
+    }
+    std::fs::write(&path,
+        "[summary~=^\\<cat\\>]\non-notify=dismiss\n"
+    )?;
+    let _:()=control.call("Reload",&()).await?;
+    assert_eq!(runtime.revision(),1);
+    for (title,closed) in [("cat",true),("cat!",true),("a cat",false)]{
+        let id:u32=desktop.call("Notify",&(
+            "gnu-word-reload",0u32,"",title,"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .any(|note|note.id==id),!closed);
+    }
+    // In glibc a backslash-angle inside [] is a literal punctuation
+    // member, not a zero-width assertion; check both spellings live.
+    std::fs::write(&path,
+        "[summary~=^[\\<\\>]$]\non-notify=dismiss\n"
+    )?;
+    let _:()=control.call("Reload",&()).await?;
+    assert_eq!(runtime.revision(),2);
+    for (title,closed) in [("<",true),(">",true),("cat",false)] {
+        let id:u32=desktop.call("Notify",&(
+            "gnu-word-class",0u32,"",title,"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .any(|note|note.id==id),!closed);
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn posix_c_collating_classes_match_private_notify_and_reject_bad_reload()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
