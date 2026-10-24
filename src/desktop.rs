@@ -757,8 +757,8 @@ mod tests {
         let remaining=runtime.store.lock().unwrap().active()[0].clone();
         let style=style_for_note(&runtime,&remaining,&["default".into()]);
         let measured=crate::render::measure_notification_height(&remaining,&style).unwrap();
-        assert_eq!(after.height,measured+8,
-            "the remaining popup keeps both its top and trailing bottom margin");
+        assert_eq!(after.height,measured+4,
+            "pinned Mako v1.11.0 retains the top margin but omits the final bottom margin");
     }
 
     #[test]
