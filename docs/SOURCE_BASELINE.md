@@ -1725,3 +1725,49 @@ aggregate remains **89%**. Full Mako startup parity and physical
 Hyprland acceptance are still incomplete. T503 remains 51%;
 T504 remains 0%. No live daemon, notification bus or personal
 configuration was modified.
+
+## GNU getopt_long abbreviated-option parity on isolated CLI
+
+Pinned Mako v1.11.0 config.c:parse_config_arguments uses GNU
+getopt_long with its ordered long_options table. glibc accepts
+abbreviated long flags such as --wid=480 and --hist=0. A compiled
+glibc getopt_long C probe confirmed another less-obvious case:
+when multiple Mako style options have the same flag/val and argument
+shape, a colliding abbreviation selects the FIRST compatible
+declaration, not necessarily an ambiguity error. For example,
+--ico=0 resolves to icons (rather than icon-location or icon-path).
+An abbreviation colliding with --help and a style option that
+have DIFFERENT argument and val descriptors remains ambiguous.
+
+The Posthorn --check-config and --experimental-private-service
+parsers now mirror this glibc matching order, retaining
+full-name preference, validation of required argument values,
+--config selection, safety isolation, and rejection of unknown
+or truly ambiguous flags. The behavior is deliberately NOT
+enabled for the normal production bus/desktop startup path.
+No new executable binary or post-MVP scope was added.
+
+[Implementation commit 0880cd4](https://github.com/sguzman/posthorn/commit/0880cd490f997c4fb368e7b96f7a62ecb26bba37)
+adds the ordered prefix matcher. Config-check subprocess tests
+verify --conf, --wid, --heig, --hist, --ico, and --mar,
+verify that --max=0 rejects using max-icon-size's minimum, and
+reject --he=100/--h=1 when help conflicts with style arguments.
+The private process-level D-Bus acceptance fixture was also
+updated to launch the real executable using abbreviated
+--default-t 75 and --max-h 0; it verifies notification expiry,
+history suppression, persistent overrides on Reload and that
+org.freedesktop.Notifications never becomes owned.
+
+[GitHub Actions run 40134167830](https://github.com/sguzman/posthorn/actions/runs/40134167830)
+passed BOTH test and headless-wayland on
+[implementation commit 1399c02](https://github.com/sguzman/posthorn/commit/1399c0236997945b7740269289e314980b93403c).
+The test job passed all Rust unit tests, private D-Bus integration,
+process CLI tests, synthetic QA safety checks and roadmap
+consistency. Sway's 1x, 1.25x, 2x, multi-output, input regions,
+mixed-DPI, pointer and style acceptance remained green.
+
+**T303: 83% → 84%.** P3 remains **93%**, and the strict M0
+aggregate remains **89%**. This closes a documented CLI parity
+gap, NOT Mako full startup parity or user workstation QA.
+T503 stays at 51%; opt-in T504 stays at 0%. The installed
+Mako, real bus owner and user's live session remain untouched.
