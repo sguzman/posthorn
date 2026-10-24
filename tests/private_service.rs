@@ -1885,8 +1885,9 @@ async fn private_cli_process_uses_cli_timeout_and_reloads_without_public_bus_own
     let path=dir.path().join("mako.conf");
     std::fs::write(&path,"default-timeout=0\nmax-history=5\n")?;
     let binary=env!("CARGO_BIN_EXE_posthorn");
+    let joined_config=format!("-c{}",path.display());
     let mut process=ProcessGuard(Command::new(binary)
-        .args(["--experimental-private-service",path.to_str().unwrap(),
+        .args(["--experimental-private-service",joined_config.as_str(),
             "--default-timeout","75","--max-history","0"])
         .stdout(Stdio::null()).stderr(Stdio::null()).spawn()?);
     let conn=zbus::Connection::session().await?;
