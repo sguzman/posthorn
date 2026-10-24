@@ -3,9 +3,78 @@ use std::env;
 use std::path::Path;
 use std::process::ExitCode;
 
+/// In pinned Mako, getopt parses --config on the first pass, loads the
+/// source, then replays every style argument in original argv order.
+/// This validates those semantics without owning a notification bus name.
+fn check_config_with_mako_cli(arguments:&[String])->Result<(Config,String,usize),String>{
+    let mut positional_path:Option<String>=None;
+    let mut selected_config:Option<String>=None;
+    let mut overrides:Vec<(String,String)>=Vec::new();
+    let mut i=0;
+    while i<arguments.len(){
+        let token=arguments[i].as_str();
+        if token=="-c"||token=="--config" {
+            i+=1;
+            let value=arguments.get(i).ok_or_else(||
+                format!("{token} requires a path"))?;
+            if value.is_empty(){return Err("empty config path".into());}
+            selected_config=Some(value.clone());
+        }else if let Some(value)=token.strip_prefix("--config="){
+            if value.is_empty(){return Err("empty config path".into());}
+            selected_config=Some(value.into());
+        }else if let Some(option)=token.strip_prefix("--"){
+            let (name,value)=if let Some((name,value))=option.split_once('='){
+                (name,value.to_string())
+            }else{
+                i+=1;
+                (option,arguments.get(i).ok_or_else(||
+                    format!("--{option} requires a value"))?.clone())
+            };
+            if !posthorn::config::MAKO_CLI_STYLE_OPTIONS.contains(&name){
+                return Err(format!("unsupported Mako command-line option '--{name}'"));
+            }
+            overrides.push((name.into(),value));
+        }else if positional_path.is_none() && !token.starts_with('-'){
+            positional_path=Some(token.into());
+        }else{
+            return Err(format!("unexpected argument '{token}'"));
+        }
+        i+=1;
+    }
+    let path=selected_config.or(positional_path);
+    let (mut config,source)=if let Some(path)=path {
+        let config=Config::from_path(Path::new(&path)).map_err(|e|e.to_string())?;
+        (config,path)
+    }else{
+        let (config,path)=Config::from_mako_defaults().map_err(|e|e.to_string())?;
+        (config,path.map(|p|p.display().to_string())
+            .unwrap_or_else(||"Mako built-in defaults".into()))
+    };
+    // CLI options modify only the root style, so scoped config sections
+    // retain their higher-priority matching behavior.
+    for (key,value) in &overrides{
+        config.apply_cli_override(key,value).map_err(|e|e.to_string())?;
+    }
+    Ok((config,source,overrides.len()))
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
-    let mut args = env::args().skip(1);
+    let arguments=env::args().skip(1).collect::<Vec<_>>();
+    if arguments.first().is_some_and(|first|first=="--check-config"){
+        return match check_config_with_mako_cli(&arguments[1..]){
+            Ok((config,source,count))=>{
+                println!("Parsed config from {source}: {} criteria rules; {} history slots; {} CLI overrides",
+                    config.rules.len(),config.max_history,count);
+                ExitCode::SUCCESS
+            }
+            Err(error)=>{
+                eprintln!("posthorn --check-config: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let mut args=arguments.into_iter();
     match (args.next().as_deref(), args.next()) {
         (Some("--version"), None) => {
             println!("posthorn {} (Mako parity target {})", env!("CARGO_PKG_VERSION"), posthorn::MAKO_BASELINE);
@@ -25,23 +94,6 @@ async fn main() -> ExitCode {
                      It uses org.posthorn.Development, NOT org.freedesktop.Notifications.");
             ExitCode::SUCCESS
         }
-        (Some("--check-config"), None) => match Config::from_mako_defaults() {
-            Ok((config,source)) => {
-                let source=source.as_ref().map(|path|path.display().to_string())
-                    .unwrap_or_else(||"Mako built-in defaults".into());
-                println!("Parsed config from {source}: {} criteria rules; {} history slots",
-                    config.rules.len(),config.max_history);
-                ExitCode::SUCCESS
-            }
-            Err(error) => { eprintln!("{error}"); ExitCode::FAILURE }
-        },
-        (Some("--check-config"), Some(path)) => match Config::from_path(Path::new(&path)) {
-            Ok(config) => {
-                println!("Parsed config: {} criteria rules; {} history slots", config.rules.len(), config.max_history);
-                ExitCode::SUCCESS
-            }
-            Err(error) => { eprintln!("{error}"); ExitCode::FAILURE }
-        },
         (Some("--experimental-popup-preview"), Some(path)) => {
             use posthorn::notification::{NotificationStore, Request, Urgency};
             use posthorn::config::Traits;
