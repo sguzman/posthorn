@@ -1598,3 +1598,54 @@ Other POSIX ERE edge cases and real Hyprland acceptance remain
 unfinished. T503 remains 51%; T504 stays at 0% with **no authorized
 production cutover**. No installed Mako instance, session bus or user
 configuration was modified.
+
+## Mako CLI option precedence and persistent private-service reload
+
+Pinned Mako v1.11.0 config.c:parse_config_arguments performs TWO
+getopt passes: it first loads the selected -c/--config file, then
+applies supported global options in original command-line order.
+reload_config repeats that operation on each configuration reload
+without rearming existing notification timers.
+
+Posthorn now exposes the upstream Mako long-option set through
+--check-config PATH, including --key=value and --key value forms,
+repeated options, and file selection via -c/--config. Global
+overrides apply after reading the file, while matching section
+criteria retain priority over the root. Invalid options, missing
+values, numeric invalidity and multiline numeric argument
+injection are rejected. Validation never launches a daemon.
+
+SharedRuntime::from_path_with_cli_overrides records the original
+arguments and replays them on Reload AFTER parsing new disk content,
+but BEFORE swapping the accepted configuration. Last-good style
+and revision survive invalid source; existing notification
+deadlines are not restarted. A private-only service launcher accepts
+the same options through --experimental-private-service PATH,
+followed by supported Mako long options. The previous duplicate
+fallback launcher was removed. The only bus name it may acquire
+is org.posthorn.Development, not org.freedesktop.Notifications.
+
+Acceptance covers Config option precedence and schema, an isolated
+process invoking the actual posthorn executable, and an independent
+private D-Bus client. The process test verifies --default-timeout 75
+and --max-history 0, reloads contradictory source defaults, then
+verifies both overrides remain effective without a restart. It also
+checks standard-bus nonownership and automatically terminates
+the fixture process. Separate tests verify rollback after invalid
+Reload and that inappropriate experimental-mode arguments are
+not silently discarded.
+
+[GitHub Actions run 40131320279](https://github.com/sguzman/posthorn/actions/runs/40131320279)
+passed BOTH test and headless-wayland on
+[implementation commit 9dcdfad](https://github.com/sguzman/posthorn/commit/9dcdfaddb4e9d00f37d37ad401b3439f4dd7c912).
+Its CI log explicitly passes the Rust CLI/Reload tests,
+check_config_accepts_mako_cli_overrides_without_starting_a_daemon,
+private_dbus_reload_replays_cli_precedence_without_restarting_service
+and private_cli_process_uses_cli_timeout_and_reloads_without_public_bus_ownership.
+The Sway 1x, fractional scale, 2x, multi-output, pointer and styling
+acceptance suite remained green.
+
+**T303: 78% → 82%**; P3 rises **91% → 93%**. Strict M0
+stays **88%**. This is tested PRIVATE service behavior,
+NOT normal/default production startup, live Hyprland validation or
+authorization for cutover. T503 remains 51%; T504 remains 0%.
