@@ -121,7 +121,7 @@ impl Padding {
 
 fn paint_icon(
     cr:&cairo::Context,icon:&IconPixels,x:f64,y:f64,scale:f64,
-    border_radius:f64,
+    logical_width:u32,logical_height:u32,border_radius:f64,
 )->Result<(),String>
 {
     let mut bitmap=cairo::ImageSurface::create(cairo::Format::ARgb32,
@@ -145,7 +145,11 @@ fn paint_icon(
     // Radius is configured in rendered pixels, so translate it back through
     // the icon's local scaling transform before constructing the clip path.
     let r=(border_radius/scale).max(0.0);
-    rounded(cr,0.0,0.0,f64::from(icon.width),f64::from(icon.height),
+    // icon.c truncates (int)(source_size * icon->scale) before
+    // render.c constructs its clipping rectangle. Cairo still paints the
+    // source at the full fractional scale inside that integer-sized clip.
+    rounded(cr,0.0,0.0,
+        f64::from(logical_width)/scale,f64::from(logical_height)/scale,
         CornerRadii{tl:r,tr:r,br:r,bl:r});
     cr.clip();
     let result=(||{
@@ -199,8 +203,8 @@ fn measure_height_with_icon(
     let max_size=integer_option(style,"max-icon-size",64);
     let icon_size=icon.as_ref().map(|img|{
         let ratio=1.0f64.min(f64::from(max_size)/f64::from(img.width.max(img.height)));
-        ((f64::from(img.width)*ratio).round() as u32,
-         (f64::from(img.height)*ratio).round() as u32)
+        ((f64::from(img.width)*ratio) as u32,
+         (f64::from(img.height)*ratio) as u32)
     });
     let horizontal_extra=if icon_location=="right" {padding.right}
         else{padding.left};
@@ -381,29 +385,24 @@ pub fn render_notification_group_with_icon_scale(
         let max_size=f64::from(integer_option(style,"max-icon-size",64));
         let w=f64::from(icon.width);
         let h=f64::from(icon.height);
-        let horizontal=location=="left"||location=="right";
-        let reserved=if horizontal{available_w}else{available_h};
-        let at_side=match location{
-            "right"=>right,"top"=>top,"bottom"=>bottom,_=>left,
-        };
-        let max_length=(reserved-at_side-1.0).max(0.0);
-        let scale=1.0f64.min(max_size/w.max(h))
-            .min(interior_w/w).min(interior_h/h)
-            .min(max_length/if horizontal{w}else{h});
+        // Mako icon.c scales ONLY against max-icon-size, then truncates
+        // logical icon dimensions. It does not shrink the icon a second
+        // time to fit text space or the notification's measured height.
+        let scale=1.0f64.min(max_size/w.max(h));
         if scale>0.0{
-            let (iw,ih)=(w*scale,h*scale);
+            let (iw,ih)=((w*scale).trunc(),(h*scale).trunc());
             let x=match location {
                 "right"=>f64::from(width)-border-right-iw,
-                "top"|"bottom"=>border+left+(interior_w-iw)/2.0,
+                "top"|"bottom"=>(f64::from(width)-iw)/2.0,
                 _=>border+left,
             };
             let y=match location {
                 "bottom"=>f64::from(height)-border-bottom-ih,
-                "left"|"right"=>border+top+(interior_h-ih)/2.0,
+                "left"|"right"=>(f64::from(height)-ih)/2.0,
                 _=>border+top,
             };
             let icon_radius=integer_option(style,"icon-border-radius",0) as f64;
-            paint_icon(&context,&icon,x,y,scale,icon_radius)?;
+            paint_icon(&context,&icon,x,y,scale,iw as u32,ih as u32,icon_radius)?;
             match location {
                 "right"=>available_w=(available_w-iw-2.0*right).max(1.0),
                 "top"=>{text_y+=ih+top;available_h=(available_h-ih-2.0*top).max(1.0)},
@@ -998,6 +997,64 @@ mod tests {
             "top-icon offset must equal icon height + one additional top padding");
         assert!(top.0>bare.0+30,
             "Mako centers text horizontally below a top icon");
+    }
+
+    #[test]
+    fn fractional_icon_scaling_truncates_dimensions_without_second_shrink(){
+        // Mako v1.11.0 icon.c uses (int)(source_dimension * scale).
+        // A 12x7 image at max-icon-size=8 occupies an 8x4 logical clip,
+        // NOT 8x5. The full 8-pixel width must still be painted when the
+        // measured four-pixel popup cannot contain all 4.67 source pixels.
+        let mut note=fixture();
+        note.summary.clear();
+        note.body.clear();
+        note.image_data=crate::icons::decode_raw_image(
+            12,7,48,true,8,4,&[255,0,0,255].repeat(12*7));
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","100"),("height","50"),("border-size","0"),
+            ("padding","0"),("format","%s"),("max-icon-size","8"),
+            ("icon-location","left"),("background-color","#000000FF"),
+        ] {style.insert(key.into(),value.into());}
+        assert_eq!(measure_notification_height(&note,&style).unwrap(),4,
+            "fractional icon logical height must truncate, not round");
+        let frame=render_notification(&note,&style).unwrap();
+        assert_eq!((frame.width,frame.height),(100,4));
+        let at=|x:usize,y:usize|{
+            let p=y*frame.stride as usize+x*4;
+            frame.pixels[p..p+4].to_vec()
+        };
+        assert_eq!(at(7,3),vec![0,0,255,255],
+            "renderer must retain all eight Mako icon pixels");
+        assert_eq!(at(8,3),vec![0,0,0,255],
+            "fractional image must be clipped at integer icon width");
+    }
+
+    #[test]
+    fn vertical_icons_ignore_asymmetric_text_padding_when_centering(){
+        // Pinned render.c centers vertical icons using
+        // (notif_width - icon.width - border_size)/2, independent of
+        // the left/right text padding.
+        let mut note=fixture();
+        note.summary.clear();
+        note.body.clear();
+        note.image_data=crate::icons::decode_raw_image(
+            12,7,48,true,8,4,&[255,0,0,255].repeat(12*7));
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","100"),("height","50"),("border-size","0"),
+            ("padding","5,8,5,2"),("format","%s"),("max-icon-size","8"),
+            ("icon-location","top"),("background-color","#000000FF"),
+        ] {style.insert(key.into(),value.into());}
+        let frame=render_notification(&note,&style).unwrap();
+        let at=|x:usize,y:usize|{
+            let p=y*frame.stride as usize+x*4;
+            frame.pixels[p..p+4].to_vec()
+        };
+        assert_eq!(at(45,5),vec![0,0,0,255]);
+        assert_eq!(at(46,5),vec![0,0,255,255]);
+        assert_eq!(at(53,5),vec![0,0,255,255]);
+        assert_eq!(at(54,5),vec![0,0,0,255]);
     }
 
     #[test]
