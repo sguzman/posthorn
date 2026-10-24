@@ -294,13 +294,18 @@ mod tests {
              [category=left]\nanchor=bottom-left\n"
         ).unwrap());
         let now=std::time::Instant::now();
-        let older=runtime.store.lock().unwrap().push(Request::default());
+        let older=runtime.store.lock().unwrap().push(Request{
+            summary:"Older root notification".into(),..Request::default()
+        });
         runtime.schedule_without_hook(older,now).unwrap();
         let left=runtime.store.lock().unwrap().push(Request{
-            category:"left".into(),..Request::default()
+            category:"left".into(),summary:"Left notification".into(),
+            ..Request::default()
         });
         runtime.schedule_without_hook(left,now).unwrap();
-        let newest=runtime.store.lock().unwrap().push(Request::default());
+        let newest=runtime.store.lock().unwrap().push(Request{
+            summary:"Newer root notification".into(),..Request::default()
+        });
         runtime.schedule_without_hook(newest,now).unwrap();
         let views=crate::desktop::surface_visibility(&runtime).unwrap();
         let root=&views.iter().find(|v|v.surface_key.2=="top-right").unwrap().surface_key;
