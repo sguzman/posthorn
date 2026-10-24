@@ -561,8 +561,8 @@ pub fn compose_mako_stack_with_visible_count(
                     -i64::from(margin.right),
                 StackAlignment::Center=>(i64::from(width)-i64::from(frame.width))/2,
             };
-            (x as i32,y)
-        }).collect::<Vec<_>>();
+            Ok((i32::try_from(x).map_err(|_|"popup horizontal offset overflow")?,y))
+        }).collect::<Result<Vec<_>,String>>()?;
     let stride=width.checked_mul(4).ok_or("popup stride overflow")?;
     let size=u64::from(stride)*u64::from(height);
     let mut pixels=vec![0u8;size as usize];
