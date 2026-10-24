@@ -99,20 +99,22 @@ fn rounded(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, radius: CornerRa
     cr.close_path();
 }
 
-/// Mako's directional padding is top,right,bottom,left. Clamp negative
-/// values when measuring text, matching the nonnegative physical inset.
+/// Pinned Mako v1.11.0 accepts signed padding on all four sides.
+/// Its render.c uses these values directly in its Pango layout dimensions,
+/// icon offsets and notification height. Clamping negatives to zero makes
+/// legitimate Mako configurations display differently.
 #[derive(Clone,Copy,Debug)]
-struct Padding {top:u32,right:u32,bottom:u32,left:u32}
+struct Padding {top:i32,right:i32,bottom:i32,left:i32}
 impl Padding {
     fn parse(style:&Options)->Self{
         let raw=style.get("padding").map(String::as_str).unwrap_or("5");
         let margin=crate::wayland::PopupMargins::parse_mako(raw)
             .unwrap_or(crate::wayland::PopupMargins::uniform(5));
         Self{
-            top:margin.top.max(0) as u32,
-            right:margin.right.max(0) as u32,
-            bottom:margin.bottom.max(0) as u32,
-            left:margin.left.max(0) as u32,
+            top:margin.top,
+            right:margin.right,
+            bottom:margin.bottom,
+            left:margin.left,
         }
     }
 }
@@ -190,10 +192,8 @@ fn measure_height_with_icon(
     }
     let border=integer_option(style,"border-size",2).min(width/2);
     let padding=Padding::parse(style);
-    let width_padding=border.saturating_mul(2)
-        .saturating_add(padding.left).saturating_add(padding.right);
-    let height_padding=border.saturating_mul(2)
-        .saturating_add(padding.top).saturating_add(padding.bottom);
+    let width_padding=i64::from(border)*2+i64::from(padding.left)+i64::from(padding.right);
+    let height_padding=i64::from(border)*2+i64::from(padding.top)+i64::from(padding.bottom);
     let icon_location=style.get("icon-location").map(String::as_str).unwrap_or("left");
     let vertical=icon_location=="top"||icon_location=="bottom";
     let max_size=integer_option(style,"max-icon-size",64);
@@ -206,14 +206,12 @@ fn measure_height_with_icon(
         else{padding.left};
     let vertical_extra=if icon_location=="bottom" {padding.bottom}
         else{padding.top};
-    let text_width=width.saturating_sub(width_padding)
-        .saturating_sub(if !vertical {
-            icon_size.map_or(0,|(w,_)|w.saturating_add(horizontal_extra.saturating_mul(2)))
-        }else{0}).max(1);
-    let text_height=cap.saturating_sub(height_padding)
-        .saturating_sub(if vertical {
-            icon_size.map_or(0,|(_,h)|h.saturating_add(vertical_extra.saturating_mul(2)))
-        }else{0}).max(1);
+    let text_width=(i64::from(width)-width_padding-if !vertical {
+        icon_size.map_or(0,|(w,_)|i64::from(w)+i64::from(horizontal_extra)*2)
+    }else{0}).clamp(1,4096) as i32;
+    let text_height=(i64::from(cap)-height_padding-if vertical {
+        icon_size.map_or(0,|(_,h)|i64::from(h)+i64::from(vertical_extra)*2)
+    }else{0}).clamp(1,4096) as i32;
 
     let markup=style.get("markup")
         .is_none_or(|v|v=="1"||v.eq_ignore_ascii_case("true"));
@@ -229,26 +227,27 @@ fn measure_height_with_icon(
     layout.set_font_description(Some(&pango::FontDescription::from_string(
         style.get("font").map(String::as_str).unwrap_or("monospace 10")
     )));
-    layout.set_width((text_width as i32).saturating_mul(pango::SCALE));
-    layout.set_height((text_height as i32).saturating_mul(pango::SCALE));
+    layout.set_width(text_width.saturating_mul(pango::SCALE));
+    layout.set_height(text_height.saturating_mul(pango::SCALE));
     layout.set_wrap(pango::WrapMode::WordChar);
     layout.set_ellipsize(pango::EllipsizeMode::End);
     set_mako_formatted_text(&layout,&text);
     let measured=if layout.character_count()>0{
         layout.pixel_size().1.max(0) as u32
     }else{0};
-    let text=measured.min(text_height);
+    let text=i64::from(measured).min(i64::from(text_height));
     let content=if let Some((_,icon_h))=icon_size{
-        if vertical{text.saturating_add(icon_h).saturating_add(vertical_extra)}
-        else{text.max(icon_h)}
+        if vertical{text+i64::from(icon_h)+i64::from(vertical_extra)}
+        else{text.max(i64::from(icon_h))}
     }else{text};
-    // Mako caps Pango text layout height, not the final notification
-    // rectangle: very large corner radii may push the popup above height.
-    let actual=content.saturating_add(height_padding)
-        .max(CornerRadii::parse(style).required_height(border))
+    // Mako uses signed padding both inside its Pango layout and when
+    // adding the notification's surrounding insets. Keep the arithmetic
+    // signed until after checking the safe physical popup bounds.
+    let actual=(content+height_padding)
+        .max(i64::from(CornerRadii::parse(style).required_height(border)))
         .max(1);
     if actual>4096{return Err("notification exceeds safe height".into());}
-    Ok(actual)
+    Ok(actual as u32)
 }
 
 pub fn render_notification(note: &Notification, style: &Options) -> Result<PixelFrame, String> {
