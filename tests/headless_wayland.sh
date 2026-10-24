@@ -26,13 +26,13 @@ export WLR_HEADLESS_OUTPUTS=1
 export WLR_RENDERER=pixman
 export XDG_CURRENT_DESKTOP=sway
 
-# Exercise D-Bus and compositor behavior at 1x, 1.25x and 2x outputs.
+# Exercise D-Bus and compositor behavior at 1x, 1.25x, 2x and 9x outputs.
 # The larger outputs keep four notifications visible at once. Fractional
 # output smoke does not claim wp_fractional_scale_v1 buffer negotiation.
 test_scale="${POSTHORN_TEST_SCALE:-1}"
 case "$test_scale" in
   1) resolution="1280x720";;
-  1.25|2) resolution="1920x1080";;
+  1.25|2|9) resolution="1920x1080";;
   *) echo "Unsupported acceptance test scale: $test_scale"; exit 1;;
 esac
 # Compile the Rust virtual pointer QA client before sending any
@@ -87,6 +87,100 @@ done
   cat "$root/sway.log"
   exit 1
 }
+
+# Verify a genuinely mapped 9x output and the Posthorn compositor
+# path independently of all 1x/1.25x/2x fixtures. At 1920x1080 pixels
+# Sway exposes only about 213x120 *logical* pixels, so this deliberately
+# uses a tiny popup to stay within the output and SHM safety bounds.
+if [[ "$test_scale" == 9 ]]; then
+  output_info="$(swaymsg -s "$startup_ipc" -t get_outputs)"
+  if ! grep -Eq '"scale":[[:space:]]*9(\\.0+)?[,}]' <<< "$output_info"; then
+    echo 'Headless compositor did not advertise a real 9x output'
+    printf '%s\\n' "$output_info"
+    exit 1
+  fi
+  cat > "$root/nine.conf" <<'EOF_NINE'
+width=64
+height=65
+margin=1
+padding=2
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+background-color=#305747
+text-color=#FFFFFFFF
+EOF_NINE
+  grim "$root/nine-baseline.png"
+  ./target/debug/posthorn --experimental-private-desktop "$root/nine.conf" \\
+    >"$root/nine-posthorn.log" 2>&1 &
+  posthorn_pid=$!
+  ready=0
+  for _ in {1..60}; do
+    if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=2s introspect \\
+        org.posthorn.Development /org/freedesktop/Notifications >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    if ! kill -0 "$posthorn_pid" 2>/dev/null; then
+      cat "$root/nine-posthorn.log"
+      echo '9x private Posthorn exited before D-Bus registration'
+      exit 1
+    fi
+    sleep 0.15
+  done
+  [[ "$ready" == 1 ]] || { echo '9x private D-Bus registration timed out'; exit 1; }
+
+  reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \\
+    org.posthorn.Development /org/freedesktop/Notifications \\
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \\
+    'Posthorn 9x QA' 0 '' 'Nine' '' 0 0 30000)"
+  [[ "$reply" == u\\ * ]] || { echo "9x Notify failed: $reply"; exit 1; }
+  id="${reply#u }"
+  painted=0
+  for _ in {1..45}; do
+    if grim "$root/nine-visible.png" 2>/dev/null &&
+      ./target/debug/examples/qa_png_probe \\
+        "$root/nine-visible.png" '#305747' 350 increase "$root/nine-baseline.png" \\
+        >/dev/null 2>&1; then
+      painted=1
+      break
+    fi
+    if ! kill -0 "$posthorn_pid" 2>/dev/null; then
+      cat "$root/nine-posthorn.log"
+      echo '9x daemon exited before rendering notification'
+      exit 1
+    fi
+    sleep 0.15
+  done
+  [[ "$painted" == 1 ]] || {
+    cat "$root/nine-posthorn.log"
+    echo '9x private notification failed compositor pixel acceptance'
+    exit 1
+  }
+
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \\
+    org.posthorn.Development /org/freedesktop/Notifications \\
+    org.freedesktop.Notifications CloseNotification u "$id" >/dev/null
+  cleared=0
+  for _ in {1..45}; do
+    if grim "$root/nine-cleared.png" 2>/dev/null &&
+      ./target/debug/examples/qa_png_probe \\
+        "$root/nine-cleared.png" '#305747' 45 restored "$root/nine-baseline.png" \\
+        >/dev/null 2>&1; then
+      cleared=1
+      break
+    fi
+    sleep 0.15
+  done
+  [[ "$cleared" == 1 ]] || {
+    cat "$root/nine-posthorn.log"
+    echo '9x private notification did not disappear after CloseNotification'
+    exit 1
+  }
+  echo 'Actual Sway output scale 9x: private notification painted and dismissed'
+  exit 0
+fi
 
 # Test two genuine compositor layer surfaces simultaneously. This is a
 # development-only Wayland acceptance probe, not the production renderer.

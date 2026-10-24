@@ -64,6 +64,8 @@ jobs:
         run: POSTHORN_TEST_SCALE=1.25 dbus-run-session -- bash tests/headless_wayland.sh
       - name: Verify 2x HiDPI private popup and close/repaint
         run: POSTHORN_TEST_SCALE=2 dbus-run-session -- bash tests/headless_wayland.sh
+      - name: Verify actual 9x compositor scale private popup and dismissal
+        run: POSTHORN_TEST_SCALE=9 dbus-run-session -- bash tests/headless_wayland.sh
       - name: Verify private multi-surface named output routing and unplug
         run: dbus-run-session -- bash tests/headless_multi_output.sh
       - name: Verify compositor click-through input regions
