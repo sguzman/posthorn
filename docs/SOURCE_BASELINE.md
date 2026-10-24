@@ -66,6 +66,18 @@ compositor cursor-theme appearance, and approval to replace installed Mako
 remain separate hard gates. The production Mako service, D-Bus name,
 autostart, and workstation configuration remain untouched.
 
+Posthorn's private desktop now submits each frame and its exact notification
+`wl_region` in **one Wayland commit**, both on initial surface mapping and
+same-size buffer redraw. This prevents an intermediate committed frame from
+temporarily claiming input over transparent margins. The guarded private Sway
+probe remaps the top overlay input region in-place, then verifies four real
+pointer deliveries to the correct upper/lower layer. Full Rust and Sway CI
+passed at [33f80ed](https://github.com/sguzman/posthorn/actions/runs/40053422778).
+A separate unit regression verifies adjacent notification hotspots and that
+their max(bottom,top) transparent gap is not click-targetable; full CI passed
+at [2363c25](https://github.com/sguzman/posthorn/actions/runs/40053551698).
+Neither private compositor suite substitutes for real workstation Hyprland QA.
+
 ## Port map
 
 | Upstream source | Posthorn scope | State |
