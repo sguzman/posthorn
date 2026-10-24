@@ -57,7 +57,7 @@ fn main()->Result<(),Box<dyn Error>>{
     let mut writer=std::fs::OpenOptions::new().create_new(true).append(true)
         .open(&events)?;
     std::fs::write(ready,"overlapping headless input regions mapped\n")?;
-    for _ in 0..180{
+    for _ in 0..600{
         lower.poll_events()?;
         upper.poll_events()?;
         for click in lower.take_clicks(){
