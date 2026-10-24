@@ -122,12 +122,14 @@ wait_disappearance(){
 # With the second monitor at scale=2, the 1x popup MUST show the green
 # @2 theme icon rather than its red 1x sibling.
 notify
-read -r x1_min x1_max y1_min y1_max <<<"$(read_bounds '#00FF00' '#FF0000' "$root/max-2x.png")"
+bounds="$(read_bounds '#00FF00' '#FF0000' "$root/max-2x.png")" || exit 1
+read -r x1_min x1_max y1_min y1_max <<<"$bounds"
 tall_height=$((y1_max-y1_min+1))
 # A live scale change must reselect the red 1x icon and shrink the
 # SAME notification on HEADLESS-1 without replacing its D-Bus ID.
 swaymsg -s "$ipc" 'output HEADLESS-2 scale 1' >/dev/null
-read -r x2_min x2_max y2_min y2_max <<<"$(read_bounds '#FF0000' '#00FF00' "$root/max-1x.png")"
+bounds="$(read_bounds '#FF0000' '#00FF00' "$root/max-1x.png")" || exit 1
+read -r x2_min x2_max y2_min y2_max <<<"$bounds"
 short_height=$((y2_max-y2_min+1))
 [[ "$tall_height" -ge $((short_height+5)) ]] || {
   echo "Icon-scale change did not reflow popup: tall=$tall_height, short=$short_height"
@@ -147,7 +149,8 @@ wait_disappearance
 swaymsg -s "$ipc" 'output HEADLESS-2 scale 2' >/dev/null
 sleep 0.35
 notify
-read -r x3_min x3_max y3_min y3_max <<<"$(read_bounds '#00FF00' '#FF0000' "$root/max-2x-restored.png")"
+bounds="$(read_bounds '#00FF00' '#FF0000' "$root/max-2x-restored.png")" || exit 1
+read -r x3_min x3_max y3_min y3_max <<<"$bounds"
 [[ $((y3_max-y3_min+1)) -ge $((short_height+5)) ]] || {
   echo 'Restored 2x monitor did not produce the tall popup'
   cat "$root/posthorn.log"
