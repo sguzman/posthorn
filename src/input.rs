@@ -405,9 +405,9 @@ mod tests {
             crate::render::render_notification_group_with_icon_scale(
                 &note,&style,0,2,2,
             ).unwrap();
-        assert_eq!(high[0].height,rendered_1x_with_2x_icon.height,
+        assert_eq!(high[0].height as u32,rendered_1x_with_2x_icon.height,
             "Wayland logical hotspot must equal the selected themed frame height");
-        assert_eq!(high[0].height*2,rendered_2x_with_2x_icon.height,
+        assert_eq!((high[0].height as u32)*2,rendered_2x_with_2x_icon.height,
             "physical 2x buffer size must not distort logical hit testing");
         assert!(high[0].height>low[0].height,
             "the selected 2x icon is much taller than the 1x theme asset");
