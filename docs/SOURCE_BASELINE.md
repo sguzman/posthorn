@@ -39,8 +39,20 @@ demonstrates that a -3px top and -2px bottom inset reduce notification
 height by 5px and that Cairo uses that same measured height. Full Rust,
 private D-Bus, and isolated 1×/1.25×/2×/mixed-DPI Sway CI passed for
 [9196333](https://github.com/sguzman/posthorn/actions/runs/40055215486).
-This validates one signed-padding path, not exact complete Pango pixel
-parity on real Hyprland.
+A second Rust regression checks Mako's signed *horizontal*
+insets: negative left/right padding expands the Pango wrapping region
+and reduces the wrapped notification height. The full suite at
+[1d43f2d](https://github.com/sguzman/posthorn/actions/runs/40055659262)
+is green.
+
+An independent private Sway screenshot acceptance also renders a live
+notification and switches its mode among zero padding, -3px top/-2px
+bottom, and back to zero. The measured popup heights must shrink
+exactly 5px and then recover without restarting or replacing the
+notification. Required headless CI passed at
+[9149e52](https://github.com/sguzman/posthorn/actions/runs/40055526248).
+This validates signed insets and real Sway redraw, not exact complete
+Pango pixel parity on the user's physical Hyprland session.
 
 ## Scale-aware notification hitboxes and themed icons
 
