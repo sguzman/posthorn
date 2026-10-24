@@ -35,6 +35,23 @@ fn ordered_visible(runtime:&SharedRuntime)
 pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
     -> io::Result<Option<(u32,NotifyBinding)>>
 {
+    hit_test_impl(runtime,click,None)
+}
+
+/// Hit-test in the coordinate system of one independently rendered Mako
+/// surface, not the concatenated legacy preview. Its geometry must match
+/// snapshot_surface_frame_scaled for the same identity.
+pub fn hit_test_on_surface(
+    runtime:&SharedRuntime,click:PointerClick,
+    surface_key:&(String,String,String),
+)->io::Result<Option<(u32,NotifyBinding)>>{
+    hit_test_impl(runtime,click,Some(surface_key))
+}
+
+fn hit_test_impl(
+    runtime:&SharedRuntime,click:PointerClick,
+    surface_key:Option<&(String,String,String)>,
+)->io::Result<Option<(u32,NotifyBinding)>>{
     let config=runtime.config();
     if !click.x.is_finite()||!click.y.is_finite()||click.x<0.0||click.y<0.0 {
         return Ok(None);
@@ -46,7 +63,10 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
         274=>"on-button-middle",
         _=>return Ok(None),
     };
-    let (notes,modes)=ordered_visible(runtime)?;
+    let (all_notes,modes)=ordered_visible(runtime)?;
+    let notes=all_notes.into_iter().filter(|entry|{
+        surface_key.is_none_or(|key|entry.notification.surface_spec.as_ref()==Some(key))
+    }).collect::<Vec<_>>();
     // Layer-shell's surface width is the largest notification width.
     // Narrow notifications may be left, centered, or right aligned.
     let mut margins=Vec::with_capacity(notes.len());
@@ -66,8 +86,9 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
         ).map_err(error)? as f64;
         Ok::<(f64,f64),io::Error>((w,h))
     }).collect::<io::Result<Vec<_>>>()?;
-    let align=stack_alignment(config.global.get("anchor")
-        .map(String::as_str).unwrap_or("top-right"));
+    let anchor=surface_key.map(|key|key.2.as_str()).unwrap_or_else(||
+        config.global.get("anchor").map(String::as_str).unwrap_or("top-right"));
+    let align=stack_alignment(anchor);
     if dimensions.is_empty(){return Ok(None);}
     let sizes:Vec<_>=dimensions.iter().map(|(w,h)|(*w as u32,*h as u32)).collect();
     let (_,_,positions)=mako_stack_geometry(&sizes,&margins,align).map_err(error)?;
@@ -266,6 +287,33 @@ mod tests {
     fn click(x:f64,y:f64,button:u32)->PointerClick{
         PointerClick{x,y,button,serial:3}
     }
+    #[test]
+    fn surface_scoped_hit_testing_cannot_retarget_other_surface(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=110\nheight=32\nborder-size=0\nmargin=0\nmax-visible=1\n\
+             [category=left]\nanchor=bottom-left\n"
+        ).unwrap());
+        let now=std::time::Instant::now();
+        let older=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(older,now).unwrap();
+        let left=runtime.store.lock().unwrap().push(Request{
+            category:"left".into(),..Request::default()
+        });
+        runtime.schedule_without_hook(left,now).unwrap();
+        let newest=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(newest,now).unwrap();
+        let views=crate::desktop::surface_visibility(&runtime).unwrap();
+        let root=&views.iter().find(|v|v.surface_key.2=="top-right").unwrap().surface_key;
+        let side=&views.iter().find(|v|v.surface_key.2=="bottom-left").unwrap().surface_key;
+        let local=click(10.0,10.0,273);
+        assert_eq!(hit_test_on_surface(&runtime,local,*root).unwrap().unwrap().0,newest);
+        assert_eq!(hit_test_on_surface(&runtime,local,*side).unwrap().unwrap().0,left);
+        assert_ne!(newest,left);
+        assert!(!views.iter().any(|v|v.notification_ids.contains(&older)));
+        let unknown=("none".into(),"top".into(),"center".into());
+        assert!(hit_test_on_surface(&runtime,local,&unknown).unwrap().is_none());
+    }
+
     #[test]
     fn invoking_action_finishes_old_lifetime_before_any_signal_await() {
         let runtime=SharedRuntime::new(Config::parse("").unwrap());

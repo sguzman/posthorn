@@ -1116,6 +1116,42 @@ async fn surface_visibility_counts_each_surface_over_private_dbus()
 }
 
 #[tokio::test]
+async fn surface_hit_test_keeps_distinct_targets_on_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=open_private_service(Config::parse(
+        "width=110\nheight=32\nborder-size=0\nmargin=0\nmax-visible=1\n\
+         [category=left]\nanchor=bottom-left\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let a:u32=desktop.call("Notify",&(
+        "surface-hits",0u32,"","Root","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let category:HashMap<String,OwnedValue>=[(
+        "category".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("left"))?
+    )].into();
+    let b:u32=desktop.call("Notify",&(
+        "surface-hits",0u32,"","Left","",Vec::<String>::new(),
+        category,-1i32
+    )).await?;
+    let views=posthorn::desktop::surface_visibility(&runtime)?;
+    let root=&views.iter().find(|v|v.surface_key.2=="top-right")
+        .ok_or("missing root")?.surface_key;
+    let left=&views.iter().find(|v|v.surface_key.2=="bottom-left")
+        .ok_or("missing left")?.surface_key;
+    let click=posthorn::wayland::PointerClick{
+        x:10.0,y:10.0,button:273,serial:3,
+    };
+    assert_eq!(posthorn::input::hit_test_on_surface(&runtime,click,root)?
+        .ok_or("missing root hit")?.0,a);
+    assert_eq!(posthorn::input::hit_test_on_surface(&runtime,click,left)?
+        .ok_or("missing left hit")?.0,b);
+    Ok(())
+}
+
+#[tokio::test]
 async fn surface_snapshot_keeps_per_surface_overflow_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
