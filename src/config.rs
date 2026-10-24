@@ -1059,10 +1059,9 @@ mod tests {
         let mut traits=note("normal",&["default"]);
         for pattern in [r"^[[:alpha:]]+$", r"^\w+$", r"^[[:alnum:]]+$"] {
             let selector=Selector::new("summary~",pattern).unwrap();
-            traits.summary="ASCII_123";
-            if pattern.contains("alpha") {
-                traits.summary="Ascii";
-            }
+            traits.summary=if pattern.contains("alpha") {"Ascii"}
+                else if pattern.contains("alnum") {"Ascii123"}
+                else {"ASCII_123"};
             assert!(selector.matches(&traits),"{pattern} must match ASCII");
             traits.summary="café";
             assert!(!selector.matches(&traits),
