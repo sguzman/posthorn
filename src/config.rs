@@ -131,9 +131,10 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
 }
 
 /// glibc regcomp(REG_EXTENDED) does not recognize the additional
-/// Rust-regex ASCII classes [[:ascii:]] and [[:word:]]. Those are valid
-/// Rust classes, but an upstream Mako configuration containing either
-/// fails to load. Scan only real POSIX class elements inside brackets;
+/// Rust-regex ASCII classes [[:ascii:]] and [[:word:]], or Rust's
+/// [[:^alpha:]]-style per-class negation extension. A Mako configuration
+/// containing any of those fails to load.
+/// Scan only real POSIX class elements inside brackets;
 /// escaped opening brackets and quoted literals are not class openers.
 fn has_rust_only_posix_class(pattern: &str) -> bool {
     let mut chars=pattern.chars().peekable();
@@ -154,7 +155,8 @@ fn has_rust_only_posix_class(pattern: &str) -> bool {
                     }
                     name.push(next);
                 }
-                if terminated && matches!(name.as_str(),"ascii"|"word") {
+                if terminated && (matches!(name.as_str(),"ascii"|"word")
+                    || name.starts_with('^')) {
                     return true;
                 }
             }
@@ -224,7 +226,7 @@ impl Selector {
                 return Err("POSIX ERE does not support (? group extensions".into());
             }
             if has_rust_only_posix_class(value) {
-                return Err("glibc POSIX ERE does not recognize ASCII/word bracket classes".into());
+                return Err("glibc POSIX ERE does not recognize this bracket class".into());
             }
             let pattern = mako_posix_ere_escapes(value);
             Some(Regex::new(&format!("(?s-u:{pattern})"))
@@ -1161,6 +1163,7 @@ mod tests {
         for unsupported in [
             "[[:ascii:]]", "[[:word:]]", "[^[:ascii:]]",
             "[[:alpha:][:word:]]",
+            "[[:^alpha:]]", "[[:^digit:]]", "[[:^word:]]",
         ] {
             assert!(has_rust_only_posix_class(unsupported));
             assert!(Selector::new("summary~",unsupported).is_err(),
@@ -1183,6 +1186,7 @@ mod tests {
         // guard must not reject it merely by scanning raw substrings.
         assert!(!has_rust_only_posix_class(r"\[[:word:]]"));
         assert!(!has_rust_only_posix_class(r"\[[:ascii:]]"));
+        assert!(!has_rust_only_posix_class(r"\[[:^alpha:]]"));
     }
 
     #[test]
