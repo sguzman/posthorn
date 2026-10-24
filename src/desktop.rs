@@ -12,12 +12,26 @@ use crate::render::{compose_mako_stack,compose_mako_stack_with_visible_count,mak
 use crate::runtime::SharedRuntime;
 use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins};
 
-/// Mako applies outer-margin to the layer-shell window; margin belongs to
-/// the per-notification layout and must never shift the entire surface.
+/// Pinned Mako v1.11.0 applies `config.superstyle.outer_margin` to
+/// every layer-shell window. config.c:apply_superset_style takes the signed,
+/// per-edge maximum across the root and ALL criteria, regardless of which
+/// criteria match the current notification. Its target starts with zeroes.
+/// Notification `margin` remains a separate, per-notification inset.
 pub fn outer_margins(config:&crate::config::Config)->PopupMargins {
-    config.global.get("outer-margin")
-        .and_then(|s|PopupMargins::parse_mako(s))
-        .unwrap_or(PopupMargins::uniform(0))
+    let mut result=PopupMargins::uniform(0);
+    let mut include=|raw:Option<&String>|{
+        if let Some(other)=raw.and_then(|s|PopupMargins::parse_mako(s)){
+            result.top=result.top.max(other.top);
+            result.right=result.right.max(other.right);
+            result.bottom=result.bottom.max(other.bottom);
+            result.left=result.left.max(other.left);
+        }
+    };
+    include(config.global.get("outer-margin"));
+    for rule in &config.rules {
+        include(rule.options.get("outer-margin"));
+    }
+    result
 }
 
 pub fn stack_alignment(anchor:&str)->StackAlignment {
@@ -841,6 +855,33 @@ mod tests {
         assert_eq!(outer_margins(&explicit),PopupMargins{
             top:3,right:5,bottom:7,left:9,
         });
+    }
+
+    #[test]
+    fn superset_outer_margin_includes_all_criteria_not_just_global_style(){
+        // config.c:apply_superset_style collects the largest value for each
+        // directional field across every configured style. wayland.c then
+        // uses this superstyle, not the notification's matching style.
+        let config=Config::parse(
+            "outer-margin=2,3,4,5\n\
+             [category=urgent]\nouter-margin=18,-2,1,7\n\
+             [app-name=other]\nouter-margin=-9,14,12,1\n"
+        ).unwrap();
+        assert_eq!(outer_margins(&config),PopupMargins{
+            top:18,right:14,bottom:12,left:7,
+        });
+        // The second section need not match the currently displayed note:
+        // upstream uses this single superset for EVERY layer surface.
+        let config=Config::parse(
+            "outer-margin=-5\n[category=unused]\nouter-margin=-3,-1,-8,-2\n"
+        ).unwrap();
+        assert_eq!(outer_margins(&config),PopupMargins::uniform(0),
+            "the fresh superstyle starts at signed zero on each edge");
+        let config=Config::parse(
+            "margin=70\n[category=urgent]\nmargin=99\n"
+        ).unwrap();
+        assert_eq!(outer_margins(&config),PopupMargins::uniform(0),
+            "inner notification margins never change layer-shell outer margins");
     }
 
     #[test]
