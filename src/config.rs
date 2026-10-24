@@ -93,6 +93,13 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
                 Some(letter) if letter.is_ascii_alphabetic() &&
                     (in_class || !matches!(letter, 'b'|'B'|'w'|'W'|'s'|'S')) =>
                         normalized.push(letter),
+                // GNU glibc ERE uses \< and \> for the start and
+                // end of a word. In bracket expressions these are
+                // literal '<' and '>', not assertions.
+                Some('<') if !in_class => normalized.push_str(r"\b{start}"),
+                Some('>') if !in_class => normalized.push_str(r"\b{end}"),
+                Some('<') => normalized.push('<'),
+                Some('>') => normalized.push('>'),
                 Some(other) => {
                     normalized.push('\\');
                     normalized.push(other);
@@ -1381,6 +1388,54 @@ mod tests {
             "two POSIX dots consume two UTF-8 bytes in the C locale");
         traits.summary="A";
         assert!(Selector::new("summary~",r"^.$").unwrap().matches(&traits));
+    }
+
+    #[test]
+    fn glibc_gnu_word_start_and_end_anchors_match_c_locale(){
+        // Independently checked with glibc regcomp(REG_EXTENDED|REG_NOSUB)
+        // in the initial C locale, not with REG_NEWLINE.
+        assert_eq!(mako_posix_ere_escapes(r"\<cat\>"),
+            r"\b{start}cat\b{end}");
+        assert_eq!(mako_posix_ere_escapes(r"[\<\>]"),"[<>]");
+        assert_eq!(mako_posix_ere_escapes(r"\\<"),r"\\<",
+            "escaped backslash must remain an actual backslash");
+        let mut fields=note("normal",&["default"]);
+        for (pattern,matching,rejected) in [
+            (r"\<cat\>","a cat!","bobcat"),
+            (r"\<cat","catnip","bobcat"),
+            (r"cat\>","bobcat!","catnip"),
+            (r"\<a\>","a-b","ab"),
+            (r"^[\<]$","<","a"),
+            (r"^[\>]$",">","a"),
+            (r"^[\<\>]$",">","a"),
+            (r"a\<b","a<b","ab"),
+        ]{
+            let selector=Selector::new("summary~",pattern).unwrap();
+            fields.summary=matching;
+            // a\<b is valid but can never match in ordinary ASCII:
+            // the literal 'a' is itself a word char, so no word-start
+            // boundary can immediately follow it.
+            if pattern!=r"a\<b"{
+                assert!(selector.matches(&fields),
+                    "glibc GNU word boundary {pattern:?} must match {matching:?}");
+            }else{
+                assert!(!selector.matches(&fields));
+            }
+            fields.summary=rejected;
+            assert!(!selector.matches(&fields),
+                "glibc GNU word boundary {pattern:?} matched {rejected:?}");
+        }
+        for (pattern,yes,no) in [
+            (r"^\<cat\>$","cat","catnip"),
+            (r"\<", "a","!!!"),
+            (r"\>", "a","!!!"),
+        ]{
+            let sel=Selector::new("summary~",pattern).unwrap();
+            fields.summary=yes;
+            assert!(sel.matches(&fields));
+            fields.summary=no;
+            assert!(!sel.matches(&fields));
+        }
     }
 
     #[test]
