@@ -1115,14 +1115,22 @@ async fn separate_notification_output_matches_do_not_bleed_over_private_dbus()
 {
     let (conn,runtime)=open_private_service(Config::parse(
         "default-timeout=0\n[output=DP-1]\nbackground-color=#42617B\n\
-         [output=DP-2]\nbackground-color=#8C642D\ndefault-timeout=200\n"
+         [output=DP-2]\nbackground-color=#8C642D\ndefault-timeout=200\n\
+         [category=independent]\nanchor=bottom-left\n"
     )?).await?;
     let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
     let notify=|summary:&str|( "output-identity".to_owned(),0u32,"",
         summary.to_owned(),"",Vec::<String>::new(),
         HashMap::<String,OwnedValue>::new(),-1i32);
     let a:u32=desktop.call("Notify",&notify("First")).await?;
-    let b:u32=desktop.call("Notify",&notify("Second")).await?;
+    let hint:HashMap<String,OwnedValue>=[(
+        "category".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("independent"))?
+    )].into();
+    let b:u32=desktop.call("Notify",&(
+        "output-identity",0u32,"","Second","",Vec::<String>::new(),
+        hint.clone(),-1i32
+    )).await?;
     runtime.set_notification_surface_output(a,Some("DP-1"))?;
     runtime.set_notification_surface_output(b,Some("DP-2"))?;
     let modes=vec!["default".into()];
@@ -1136,7 +1144,7 @@ async fn separate_notification_output_matches_do_not_bleed_over_private_dbus()
     assert_eq!(style(b)?,"#8C642D");
     let replaced:u32=desktop.call("Notify",&(
         "output-identity",b,"","Replaced","",Vec::<String>::new(),
-        HashMap::<String,OwnedValue>::new(),-1i32
+        hint,-1i32
     )).await?;
     assert_eq!(replaced,b);
     assert!(runtime.next_deadline()?.is_some(),

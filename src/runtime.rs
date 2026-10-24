@@ -185,12 +185,18 @@ impl SharedRuntime {
             .map_err(|_|"surface identity lock poisoned")?;
         let has_match=known.contains(&key);
         let has_old=store.active().iter().find(|n|n.id==id)
-            .ok_or("notification is not active")?.surface_anchor.is_some();
+            .ok_or("notification is not active")?.surface_spec.is_some();
         if has_match{
-            store.reassign_surface_anchor(id,&key.2);
+            // Notifications matching one Mako surface must use ONE output
+            // observation. A direct replacement may transfer to that surface.
+            let observation=store.active().iter()
+                .find(|n|n.surface_spec.as_ref()==Some(&key))
+                .map(|n|n.surface_output_override.clone())
+                .unwrap_or(Some(None));
+            store.bind_surface(id,key,observation);
         }else if !has_old{
             known.push(key.clone());
-            store.associate_surface(id,&key.2);
+            store.bind_surface(id,key,None);
         }
         Ok(())
     }
@@ -1150,11 +1156,14 @@ mod tests {
     fn independent_notification_outputs_do_not_borrow_single_presenter_monitor() {
         let runtime=SharedRuntime::new(Config::parse(
             "default-timeout=0\n[output=DP-1]\nbackground-color=#42617B\n\
-             [output=DP-2]\nbackground-color=#8C642D\ndefault-timeout=200\n"
+             [output=DP-2]\nbackground-color=#8C642D\ndefault-timeout=200\n\
+             [category=independent]\nanchor=bottom-left\n"
         ).unwrap());
         runtime.set_surface_output(Some("DP-1")).unwrap();
         let first=runtime.store.lock().unwrap().push(Request::default());
-        let second=runtime.store.lock().unwrap().push(Request::default());
+        let second=runtime.store.lock().unwrap().push(Request {
+            category:"independent".into(),..Request::default()
+        });
         let now=Instant::now();
         runtime.schedule_without_hook(first,now).unwrap();
         runtime.schedule_without_hook(second,now).unwrap();
@@ -1176,7 +1185,8 @@ mod tests {
         assert_eq!(colors_after[0].as_deref(),Some("#8C642D"));
         assert_ne!(colors_after[1].as_deref(),Some("#42617B"));
         assert_eq!(runtime.store.lock().unwrap().push(Request {
-            replaces_id:second,..Request::default()
+            replaces_id:second,category:"independent".into(),
+            ..Request::default()
         }),second);
         runtime.schedule_without_hook(second,now+std::time::Duration::from_millis(10)).unwrap();
         assert_eq!(runtime.next_deadline().unwrap(),
@@ -1185,6 +1195,36 @@ mod tests {
         runtime.set_notification_surface_output(second,None).unwrap();
         assert_ne!(colors()[0].as_deref(),Some("#8C642D"),
             "explicitly unmapped surface cannot borrow DP-3");
+    }
+
+    #[test]
+    fn notifications_sharing_one_surface_share_compositor_output_and_replacement() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "[output=DP-1]\nbackground-color=#42617B\n\
+             [output=DP-2]\nbackground-color=#8C642D\n"
+        ).unwrap());
+        let now=Instant::now();
+        let first=runtime.store.lock().unwrap().push(Request::default());
+        let second=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(first,now).unwrap();
+        runtime.schedule_without_hook(second,now).unwrap();
+        let ids=runtime.store.lock().unwrap().active().iter()
+            .map(|n|n.surface_spec.clone()).collect::<Vec<_>>();
+        assert_eq!(ids[0],ids[1],"same tuple is one Mako surface");
+        assert!(runtime.set_notification_surface_output(first,Some("DP-1")).unwrap());
+        assert!(!runtime.set_notification_surface_output(second,Some("DP-1")).unwrap());
+        assert!(runtime.store.lock().unwrap().active().iter()
+            .all(|n|n.surface_output_override==Some(Some("DP-1".into()))));
+        assert!(runtime.set_notification_surface_output(second,Some("DP-2")).unwrap());
+        assert!(runtime.store.lock().unwrap().active().iter()
+            .all(|n|n.surface_output_override==Some(Some("DP-2".into()))));
+        assert_eq!(runtime.store.lock().unwrap().push(Request{
+            replaces_id:first,..Request::default()
+        }),first);
+        runtime.schedule_without_hook(first,now).unwrap();
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .find(|n|n.id==first).unwrap().surface_output_override,
+            Some(Some("DP-2".into())));
     }
 
     #[test]
