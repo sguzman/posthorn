@@ -8,7 +8,9 @@ sway_pid=""
 posthorn_pid=""
 monitor_pid=""
 dual_pid=""
+multi_pid=""
 cleanup() {
+  if [[ -n "$multi_pid" ]]; then kill "$multi_pid" 2>/dev/null || true; wait "$multi_pid" 2>/dev/null || true; fi
   if [[ -n "$dual_pid" ]]; then kill "$dual_pid" 2>/dev/null || true; wait "$dual_pid" 2>/dev/null || true; fi
   if [[ -n "$monitor_pid" ]]; then kill "$monitor_pid" 2>/dev/null || true; wait "$monitor_pid" 2>/dev/null || true; fi
   if [[ -n "$posthorn_pid" ]]; then kill "$posthorn_pid" 2>/dev/null || true; wait "$posthorn_pid" 2>/dev/null || true; fi
@@ -114,6 +116,80 @@ if [[ "$test_scale" == 1 ]]; then
   wait "$dual_pid"
   dual_pid=""
   echo 'Simultaneous independent top-left and bottom-right layer-shell surfaces: OK'
+fi
+
+# The opt-in multi-surface private renderer must display two
+# notifications on separate layer-shell surfaces simultaneously.
+if [[ "$test_scale" == 1 ]]; then
+  cat > "$root/multi.conf" <<'EOF_MULTI'
+width=160
+height=56
+margin=3
+border-size=0
+default-timeout=30000
+max-visible=1
+background-color=#E5923C
+[category=left]
+anchor=bottom-left
+background-color=#2DB3C1
+EOF_MULTI
+  ./target/debug/posthorn --experimental-private-multi-desktop "$root/multi.conf" \
+    >"$root/multi-posthorn.log" 2>&1 &
+  multi_pid=$!
+  multi_ready=0
+  for _ in {1..60}; do
+    if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=2s introspect \
+      org.posthorn.Development /org/freedesktop/Notifications >/dev/null 2>&1; then
+      multi_ready=1
+      break
+    fi
+    if ! kill -0 "$multi_pid" 2>/dev/null; then
+      echo 'Multi-surface private daemon exited before service registration'
+      cat "$root/multi-posthorn.log"
+      exit 1
+    fi
+    sleep 0.15
+  done
+  [[ "$multi_ready" == 1 ]] || {
+    echo 'Multi-surface private D-Bus service did not register'
+    cat "$root/multi-posthorn.log"
+    exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn multi QA' 0 '' 'Right notification' '' 0 0 30000 >/dev/null
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn multi QA' 0 '' 'Left notification' '' 0 1 \
+    'category' 's' 'left' 30000 >/dev/null
+  both_painted=0
+  for _ in {1..60}; do
+    if grim "$root/multi.png" 2>/dev/null \
+      && ./target/debug/examples/qa_png_probe \
+        "$root/multi.png" '#E5923C' 300 present >/dev/null 2>&1 \
+      && ./target/debug/examples/qa_png_probe \
+        "$root/multi.png" '#2DB3C1' 300 present >/dev/null 2>&1; then
+      both_painted=1
+      break
+    fi
+    if ! kill -0 "$multi_pid" 2>/dev/null; then
+      echo 'Multi-surface daemon exited during compositor rendering'
+      cat "$root/multi-posthorn.log"
+      exit 1
+    fi
+    sleep 0.15
+  done
+  if [[ "$both_painted" != 1 ]]; then
+    echo 'Two independently anchored notification surfaces were not both painted'
+    cat "$root/multi-posthorn.log"
+    exit 1
+  fi
+  kill "$multi_pid"
+  wait "$multi_pid" 2>/dev/null || true
+  multi_pid=""
+  echo 'Private multi-surface D-Bus routing and simultaneous corners: OK'
 fi
 
 cat > "$root/mako.conf" <<'EOF'
