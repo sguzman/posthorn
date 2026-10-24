@@ -166,7 +166,17 @@ pub fn measure_notification_height(
 pub fn measure_notification_height_group(
     note:&Notification,style:&Options,group_count:usize,
 ) -> Result<u32,String> {
-    let icon=load_note_icon(note,style);
+    measure_notification_height_group_with_icon_scale(note,style,group_count,1)
+}
+
+/// Match the asset chosen by the frame renderer: Mako resolves a themed
+/// icon against the largest attached output scale, even when painting a
+/// popup on a smaller-scale monitor. Different theme assets may have
+/// different aspect ratios, changing Pango shrink-wrapped popup height.
+pub fn measure_notification_height_group_with_icon_scale(
+    note:&Notification,style:&Options,group_count:usize,icon_scale:u32,
+)->Result<u32,String>{
+    let icon=load_note_icon_scaled(note,style,icon_scale.max(1));
     measure_height_with_icon(note,style,icon.as_ref(),group_count)
 }
 
