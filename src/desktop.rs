@@ -445,7 +445,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
             let output=config.global.get("output").map(String::as_str).unwrap_or("");
             if frame.is_none()||!viewer.buffer_backpressure(){
                 let input_rects=if frame.is_some(){
-                    crate::input::input_rectangles(&runtime,None)?
+                    crate::input::input_rectangles_with_icon_scale(&runtime,None,icon_scale)?
                 }else{Vec::new()};
                 viewer.update_native_frame_with_input_rectangles(
                     frame.as_ref(),corner,margins,layer,output,&input_rects
@@ -472,7 +472,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
                         (note.id,instance))
                 ).collect::<Vec<_>>()
             };
-            let Some((id,binding))=crate::input::hit_test(&runtime,click)
+            let Some((id,binding))=crate::input::hit_test_with_icon_scale(&runtime,click,icon_scale)
                 .map_err(other)? else{continue};
             let Some((_,instance))=instances.into_iter()
                 .find(|(candidate,_)|*candidate==id) else{continue};
@@ -568,7 +568,9 @@ fn render_loop_multi(
                     .ok_or_else(||other("invalid surface layer"))?;
                 if frame.is_none()||!viewer.buffer_backpressure(){
                     let input_rects=if frame.is_some(){
-                        crate::input::input_rectangles(&runtime,Some(&key))?
+                        crate::input::input_rectangles_with_icon_scale(
+                            &runtime,Some(&key),icon_scale
+                        )?
                     }else{Vec::new()};
                     viewer.update_native_frame_with_input_rectangles(
                         frame.as_ref(),corner,outer_margins(&config),layer,&key.0,
@@ -581,8 +583,8 @@ fn render_loop_multi(
                 }
             }
             for click in viewer.take_clicks(){
-                let Some((id,binding))=crate::input::hit_test_on_surface(
-                    &runtime,click,&key
+                let Some((id,binding))=crate::input::hit_test_on_surface_with_icon_scale(
+                    &runtime,click,&key,icon_scale
                 ).map_err(other)? else{continue};
                 let (target,instance)={
                     let store=runtime.store.lock().map_err(|_|poisoned())?;
