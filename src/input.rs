@@ -363,21 +363,23 @@ mod tests {
     #[test]
     fn themed_hidpi_icon_aspect_changes_hotspot_and_hit_test_height(){
         let dir=tempfile::tempdir().unwrap();
-        for (folder,height,color) in [
-            ("16x16/apps",12,0xFF0000FFu32),
-            ("16x16@2/apps",57,0x00FF00FFu32),
+        // The theme directory's nominal size must equal max-icon-size to
+        // select the @2 exact match under pinned Mako's icon resolver.
+        for (folder,width,height,color) in [
+            ("16x16/apps",3,3,0xFF0000FFu32),
+            ("16x16@2/apps",12,57,0x00FF00FFu32),
         ]{
             let path=dir.path().join(folder).join("posthorn.png");
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             let pixbuf=gdk_pixbuf::Pixbuf::new(
-                gdk_pixbuf::Colorspace::Rgb,true,8,12,height
+                gdk_pixbuf::Colorspace::Rgb,true,8,width,height
             ).unwrap();
             pixbuf.fill(color);
             pixbuf.savev(&path,"png",&[]).unwrap();
         }
         let cfg=Config::parse(&format!(
             "width=130\nheight=115\nmargin=4\npadding=4\nborder-size=0\n\
-             icon-location=top\nmax-icon-size=64\nicon-path={}\nformat=%s\n",
+             icon-location=top\nmax-icon-size=16\nicon-path={}\nformat=%s\n",
             dir.path().display()
         )).unwrap();
         let runtime=SharedRuntime::new(cfg);
