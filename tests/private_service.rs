@@ -1888,7 +1888,7 @@ async fn private_cli_process_uses_cli_timeout_and_reloads_without_public_bus_own
     let joined_config=format!("-c{}",path.display());
     let mut process=ProcessGuard(Command::new(binary)
         .args(["--experimental-private-service",joined_config.as_str(),
-            "--default-timeout","75","--max-history","0"])
+            "--default-t","75","--max-h","0"])
         .stdout(Stdio::null()).stderr(Stdio::null()).spawn()?);
     let conn=zbus::Connection::session().await?;
     let dbus=Proxy::new(&conn,"org.freedesktop.DBus",
