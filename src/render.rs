@@ -1244,6 +1244,37 @@ mod tests {
     }
 
     #[test]
+    fn mako_hidden_synthetic_frame_cannot_expand_real_canvas(){
+        let solid=|width:u32,byte:u8|PixelFrame{
+            width,height:2,stride:(width*4) as i32,
+            pixels:(0..width*2).flat_map(|_|[byte,byte,byte,255]).collect(),
+        };
+        let visible=solid(6,40);
+        let placeholder=solid(16,90);
+        let margin=crate::wayland::PopupMargins::uniform(1);
+        let frames=[visible.clone(),placeholder];
+        let limits=[margin,margin];
+        let ordinary=compose_mako_stack(&frames,&limits,StackAlignment::Right)
+            .unwrap().unwrap();
+        assert_eq!(ordinary.width,18);
+        let clipped=compose_mako_stack_with_visible_count(
+            &frames,&limits,StackAlignment::Right,1
+        ).unwrap().unwrap();
+        assert_eq!((clipped.width,clipped.height),(8,7));
+        let pixel=|x:usize,y:usize|{
+            let off=y*clipped.stride as usize+x*4;
+            &clipped.pixels[off..off+4]
+        };
+        assert_eq!(pixel(0,1),&[0,0,0,0]);
+        assert_eq!(pixel(1,1),&[40,40,40,255]);
+        assert_eq!(pixel(6,1),&[40,40,40,255]);
+        assert_eq!(pixel(7,1),&[0,0,0,0]);
+        assert!(compose_mako_stack_with_visible_count(
+            &frames,&limits,StackAlignment::Right,3
+        ).is_err());
+    }
+
+    #[test]
     fn stack_preserves_order_and_transparent_spacers() {
         let first=PixelFrame{width:2,height:1,stride:8,pixels:vec![1;8]};
         let second=PixelFrame{width:1,height:2,stride:4,pixels:vec![2;8]};
