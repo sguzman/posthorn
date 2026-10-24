@@ -24,6 +24,27 @@ change how they call the Freedesktop Notification protocol. Until parity:
 - Keep Mako active in `config-store` until side-by-side tests prove parity.
 - Never try to run both notification servers on the same session bus name.
 
+## Scale-aware notification hitboxes and themed icons
+
+Pinned Mako v1.11.0 `icon.c` selects themed assets using the **maximum
+integer scale among all attached outputs**, rather than only the target
+popup monitor. Distinct exact-match 1× and 2× theme assets can have
+different aspect ratios. Before this correction Posthorn rendered such
+an icon at the correct scale but measured the pointer hitbox and
+`wl_surface` input region using the 1× asset, potentially routing clicks
+through a visible notification or intercepting clicks in an empty gap.
+
+The input geometry, single/multi-surface click resolver and atomic
+input-region commits now reuse the **same icon scale** as the renderer.
+A fixture provides differently shaped actual 1× and 2× PNG assets and
+asserts that logical notification rectangles equal the measured raster
+height, including a 2× physical SHM buffer. Both `cargo test --all-targets`
+and private D-Bus/headless Sway acceptance passed at
+[94c7534](https://github.com/sguzman/posthorn/actions/runs/40054229374).
+This is implementation and private-compositor evidence, not physical
+mixed-DPI Hyprland monitor acceptance. The original installed Mako
+service and production notification name remain unchanged.
+
 ## Pinned v1.11.0 final notification margin
 
 Upstream `render.c` adds the first top margin and the greater of adjacent
