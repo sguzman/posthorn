@@ -1480,3 +1480,35 @@ Both Rust/private D-Bus tests and isolated headless Sway acceptance
 [commit 1aab5af](https://github.com/sguzman/posthorn/actions/runs/40121480856).
 This does not prove physical Hyprland acceptance, full T205 parity, or
 readiness to switch the production notification daemon.
+
+## Private Sway acceptance of three category sound hooks and quiet mode
+
+Pinned Mako **v1.11.0** `config.c:apply_style_option` accepts trusted
+per-category `on-notify=exec` bindings; `dbus/xdg.c:handle_notify`
+executes the effective notification binding after applying criteria.
+Later `[mode=quiet]` criteria can override the configured category
+binding to `none`.
+
+[Commit b51e345](https://github.com/sguzman/posthorn/commit/b51e345817415281c3189cdcc73d9ad920f30ff4)
+extends the existing **isolated headless Sway 1×** acceptance harness
+with three separate outcome categories: `success`, `failure`, and
+`warning`. Each private D-Bus `Notify` must invoke only its own
+trusted shell-log hook, exactly once and with its returned Freedesktop
+notification ID, in the correct delivery order. A config reload must
+not replay any hook. After `SetMode quiet`, newly delivered
+notifications in **all three categories** must leave the original log
+unchanged; restoring the default mode must likewise not replay hooks.
+Every fixture is explicitly closed over the private service.
+
+[GitHub Actions run 40124663468](https://github.com/sguzman/posthorn/actions/runs/40124663468)
+passed both jobs, and its headless Wayland log explicitly printed
+`Private success/failure/warning hook routing and quiet suppression: OK`.
+The other 1.25×, 2×, multi-output, input-region, mixed-DPI, superstyle
+and signed-padding regressions remained green.
+
+**T502: 76% → 77%** and category/sound feature inventory **76% → 77%**;
+P5 stays **56%** and strict M0 stays **88%**. This is automated
+**configured command-dispatch acceptance**, not physical playback,
+PipeWire volume, real Hyprland acceptance, or production cutover.
+No real Mako process, notification bus owner, or user configuration
+was accessed.
