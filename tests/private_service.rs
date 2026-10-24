@@ -1868,6 +1868,51 @@ async fn reload_dbus_updates_active_history_without_rearming_expiry()
 }
 
 #[tokio::test]
+async fn private_dbus_reload_replays_cli_precedence_without_restarting_service()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::open_private_service_from_path_with_cli_overrides;
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("mako.conf");
+    std::fs::write(&path,
+        "width=210\nmax-history=5\n[category=warning]\nwidth=330\n"
+    )?;
+    let overrides=vec![
+        ("width".into(),"450".into()),
+        ("max-history".into(),"2".into()),
+    ];
+    let (conn,runtime)=open_private_service_from_path_with_cli_overrides(
+        &path,&overrides
+    ).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    assert_eq!(runtime.config().global["width"],"450");
+    assert_eq!(runtime.config().max_history,2);
+    std::fs::write(&path,
+        "width=300\nmax-history=8\n[category=warning]\nwidth=390\n"
+    )?;
+    let _:()=control.call("Reload",&()).await?;
+    assert_eq!(runtime.config().global["width"],"450");
+    assert_eq!(runtime.config().max_history,2);
+    assert_eq!(runtime.config().rules[0].options["width"],"390");
+    assert_eq!(runtime.revision(),1);
+
+    std::fs::write(&path,"width=invalid\n")?;
+    let invalid:zbus::Result<()>=control.call("Reload",&()).await;
+    assert!(invalid.is_err(),"invalid disk config must reject reload");
+    assert_eq!(runtime.config().global["width"],"450");
+    assert_eq!(runtime.revision(),1,
+        "rejected config must preserve accepted revision");
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let id:u32=desktop.call("Notify",&(
+        "reload-cli",0u32,"","Still running","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().front().map(|n|n.id),Some(id),
+        "failed reload unexpectedly interrupted the live private D-Bus service");
+    Ok(())
+}
+
+#[tokio::test]
 async fn control_reload_swaps_styles_and_preserves_last_good_file()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
