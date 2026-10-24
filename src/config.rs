@@ -77,6 +77,31 @@ fn err(location: impl Into<String>, message: impl Into<String>) -> ConfigError {
     ConfigError { location: location.into(), message: message.into() }
 }
 
+/// Pinned Mako config.c:load_config_file() reads bytes with getline()
+/// and skips lines beginning with '#' (after ASCII space/tab indentation)
+/// before any option parsing. A comment is not required to be UTF-8.
+/// Keep its physical newline, so diagnostics and section precedence retain
+/// the original line numbering. Active settings must remain representable
+/// as Rust UTF-8 strings; reject malformed active lines rather than replacing
+/// their bytes with an unrelated selector or path.
+fn decode_mako_file_bytes(bytes:&[u8],source:&str)->Result<String,ConfigError>{
+    let mut text=String::new();
+    for (index,line) in bytes.split(|byte|*byte==b'\n').enumerate(){
+        if index>0{text.push('\n');}
+        let uncommented=line.iter().copied()
+            .skip_while(|byte|*byte==b' '||*byte==b'\t');
+        if uncommented.into_iter().next()==Some(b'#'){
+            continue;
+        }
+        let decoded=std::str::from_utf8(line).map_err(|_|err(
+            format!("{source}:{}",index+1),
+            "non-UTF-8 bytes in active config line",
+        ))?;
+        text.push_str(decoded);
+    }
+    Ok(text)
+}
+
 /// In glibc's POSIX REG_EXTENDED, escaped ASCII letters are literals
 /// except the GNU word/whitespace operators \b, \B, \w, \W, \s, \S.
 /// Within bracket expressions *all* escaped ASCII letters are literals.
@@ -635,8 +660,9 @@ impl Config {
             return Err(err(path.display().to_string(), "recursive include"));
         }
         let result = (|| {
-            let text = fs::read_to_string(&canonical)
+            let bytes = fs::read(&canonical)
                 .map_err(|e| err(path.display().to_string(), e.to_string()))?;
+            let text=decode_mako_file_bytes(&bytes,&canonical.display().to_string())?;
             self.append(&text, &canonical.display().to_string(), Some(&canonical), seen)
         })();
         seen.remove(&canonical);
@@ -1224,6 +1250,42 @@ mod tests {
         std::fs::write(file(21),format!("include={}\n",file(0).display())).unwrap();
         let result=Config::from_path(&file(0)).unwrap_err();
         assert!(result.message.contains("recursive include"));
+    }
+
+    #[test]
+    fn upstream_byte_comments_do_not_block_valid_utf8_configuration(){
+        let dir=tempfile::tempdir().unwrap();
+        let root=dir.path().join("root.conf");
+        let child=dir.path().join("child.conf");
+        let mut nested=b"  # legacy Latin-1 comment: ".to_vec();
+        nested.extend_from_slice(&[0xE9,0xFF,b'\n']);
+        nested.extend_from_slice(b"width=420\n[category=success]\ntext-color=#AA3344\n");
+        std::fs::write(&child,&nested).unwrap();
+        let mut parent=b"# binary comment ".to_vec();
+        parent.extend_from_slice(&[0x80,b'\n']);
+        parent.extend_from_slice(format!(
+            "include={}\nheight=111\n",child.display()).as_bytes());
+        std::fs::write(&root,&parent).unwrap();
+
+        let config=Config::from_path(&root).unwrap();
+        assert_eq!(config.global["width"],"420");
+        assert_eq!(config.global["height"],"111");
+        assert_eq!(config.rules.len(),1);
+        assert_eq!(config.rules[0].source,format!("{}:3",child.display()));
+        assert_eq!(config.rules[0].options["text-color"],"#AA3344");
+    }
+
+    #[test]
+    fn invalid_utf8_in_active_file_line_fails_without_lossy_replacement(){
+        let dir=tempfile::tempdir().unwrap();
+        let path=dir.path().join("config");
+        std::fs::write(&path,b"# allowed \xFF\nwidth=330\nfont=bad\xFFname\n").unwrap();
+        let err=Config::from_path(&path).unwrap_err();
+        assert_eq!(err.location,format!("{}:3",path.display()));
+        assert!(err.message.contains("non-UTF-8"));
+        // In-memory already-UTF-8 configs still parse directly.
+        assert_eq!(Config::parse("# caf\u{e9}\nwidth=331\n")
+            .unwrap().global["width"],"331");
     }
 
     #[test]
