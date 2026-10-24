@@ -1868,6 +1868,72 @@ async fn reload_dbus_updates_active_history_without_rearming_expiry()
 }
 
 #[tokio::test]
+async fn private_cli_process_uses_cli_timeout_and_reloads_without_public_bus_ownership()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use std::process::{Command,Child,Stdio};
+    // CI runs this test ONLY inside dbus-run-session; the executable may
+    // own org.posthorn.Development, never the real notification name.
+    struct ProcessGuard(Child);
+    impl Drop for ProcessGuard{
+        fn drop(&mut self){
+            let _=self.0.kill();
+            let _=self.0.wait();
+        }
+    }
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("mako.conf");
+    std::fs::write(&path,"default-timeout=0\nmax-history=5\n")?;
+    let binary=env!("CARGO_BIN_EXE_posthorn");
+    let mut process=ProcessGuard(Command::new(binary)
+        .args(["--experimental-private-service",path.to_str().unwrap(),
+            "--default-timeout","75","--max-history","0"])
+        .stdout(Stdio::null()).stderr(Stdio::null()).spawn()?);
+    let conn=zbus::Connection::session().await?;
+    let dbus=Proxy::new(&conn,"org.freedesktop.DBus",
+        "/org/freedesktop/DBus","org.freedesktop.DBus").await?;
+    let mut ready=false;
+    for _ in 0..100 {
+        if dbus.call::<_,_,bool>("NameHasOwner",&(PRIVATE_BUS_NAME,)).await?{
+            ready=true;
+            break;
+        }
+        if let Some(status)=process.0.try_wait()?{
+            panic!("private-service CLI exited before taking its safe name: {status}");
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(ready,"private service failed to claim isolated development bus");
+    assert!(!dbus.call::<_,_,bool>("NameHasOwner",&(BUS_NAME,)).await?,
+        "CLI test service must NEVER own org.freedesktop.Notifications");
+
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    for title in ["before reload","after reload"]{
+        let id:u32=desktop.call("Notify",&(
+            "source-cli-runtime",0u32,"",title,"",
+            Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+        )).await?;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let active:Vec<HashMap<String,OwnedValue>>=
+            control.call("ListNotifications",&()).await?;
+        let history:Vec<HashMap<String,OwnedValue>>=
+            control.call("ListHistory",&()).await?;
+        assert!(active.is_empty(),
+            "CLI default-timeout=75 must expire notification {id} {title}");
+        assert!(history.is_empty(),
+            "CLI max-history=0 must suppress archives for {title}");
+        if title=="before reload"{
+            // Rewritten config conflicts with BOTH CLI options. Reload
+            // must continue to honor them with no new process.
+            std::fs::write(&path,"default-timeout=0\nmax-history=9\n")?;
+            let _:()=control.call("Reload",&()).await?;
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn private_dbus_reload_replays_cli_precedence_without_restarting_service()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
