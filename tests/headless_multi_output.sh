@@ -110,6 +110,16 @@ if [[ "$correct" != 1 ]]; then
   cat "$root/posthorn.log"
   exit 1
 fi
+# A compositor pointer event in unused space on HEADLESS-2 must not
+# activate either independently mapped notification.
+POSTHORN_HEADLESS_POINTER_TEST=1 \
+  ./target/debug/examples/qa_virtual_pointer 1500 350 2560 720 273
+grim -o HEADLESS-1 "$root/one-after-gap-click.png"
+grim -o HEADLESS-2 "$root/two-after-gap-click.png"
+./target/debug/examples/qa_png_probe \
+  "$root/one-after-gap-click.png" '#E5923C' 300 present >/dev/null
+./target/debug/examples/qa_png_probe \
+  "$root/two-after-gap-click.png" '#2DB3C1' 300 present >/dev/null
 # Right-click the second monitor's actual popup with the compositor's
 # virtual-pointer protocol. The notification on monitor one must stay mapped.
 # This exercises surface-local hit-testing and actual pointer event routing,
@@ -140,6 +150,64 @@ if [[ "$independent_click" != 1 ]]; then
   cat "$root/posthorn.log"
   exit 1
 fi
+# Repeat in the other direction. A click on HEADLESS-1 must not
+# dismiss a newly mapped HEADLESS-2 popup. Restore HEADLESS-1 afterward
+# so that the output-unplug check still has a surviving mapped surface.
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /org/freedesktop/Notifications \
+  org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+  'Posthorn multi-output QA' 0 '' 'Second popup restored' '' 0 1 \
+  'category' 's' 'second' 30000 >/dev/null
+second_restored=0
+for _ in {1..50}; do
+  if grim -o HEADLESS-2 "$root/two-restored.png" 2>/dev/null &&
+     ./target/debug/examples/qa_png_probe \
+       "$root/two-restored.png" '#2DB3C1' 300 present >/dev/null 2>&1
+  then
+    second_restored=1
+    break
+  fi
+  sleep 0.15
+done
+[[ "$second_restored" == 1 ]] || { echo 'Second output did not remap after pointer dismissal'; cat "$root/posthorn.log"; exit 1; }
+POSTHORN_HEADLESS_POINTER_TEST=1 \
+  ./target/debug/examples/qa_virtual_pointer 1200 20 2560 720 273
+reverse_click=0
+for _ in {1..50}; do
+  if grim -o HEADLESS-1 "$root/one-after-reverse.png" 2>/dev/null &&
+     grim -o HEADLESS-2 "$root/two-after-reverse.png" 2>/dev/null &&
+     ./target/debug/examples/qa_png_probe \
+       "$root/one-after-reverse.png" '#E5923C' 100 absent >/dev/null 2>&1 &&
+     ./target/debug/examples/qa_png_probe \
+       "$root/two-after-reverse.png" '#2DB3C1' 300 present >/dev/null 2>&1
+  then
+    reverse_click=1
+    break
+  fi
+  if ! kill -0 "$posthorn_pid" 2>/dev/null; then
+    echo 'Multi-output renderer exited during reverse pointer delivery'
+    cat "$root/posthorn.log"
+    exit 1
+  fi
+  sleep 0.15
+done
+[[ "$reverse_click" == 1 ]] || { echo 'First-output pointer did not dismiss only its own popup'; cat "$root/posthorn.log"; exit 1; }
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /org/freedesktop/Notifications \
+  org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+  'Posthorn multi-output QA' 0 '' 'First popup restored' '' 0 0 30000 >/dev/null
+first_restored=0
+for _ in {1..50}; do
+  if grim -o HEADLESS-1 "$root/one-restored.png" 2>/dev/null &&
+     ./target/debug/examples/qa_png_probe \
+       "$root/one-restored.png" '#E5923C' 300 present >/dev/null 2>&1
+  then
+    first_restored=1
+    break
+  fi
+  sleep 0.15
+done
+[[ "$first_restored" == 1 ]] || { echo 'First output did not remap after pointer dismissal'; cat "$root/posthorn.log"; exit 1; }
 # Output loss is not a daemon shutdown. The surviving monitor must retain
 # its notification and the private control D-Bus name.
 swaymsg -s "$ipc" 'output HEADLESS-2 unplug' >/dev/null
@@ -150,4 +218,4 @@ busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s introspect \
 grim -o HEADLESS-1 "$root/after-unplug.png"
 ./target/debug/examples/qa_png_probe \
   "$root/after-unplug.png" '#E5923C' 300 present >/dev/null
-echo 'Independent HEADLESS-1/HEADLESS-2 routing, isolated pointer dismissal, surviving popup and output unplug: OK'
+echo 'Independent two-output routing, gap and bidirectional pointer isolation, popup remapping, and output unplug: OK'
