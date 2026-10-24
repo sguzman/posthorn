@@ -676,6 +676,30 @@ mod tests {
     }
 
     #[test]
+    fn pinned_mako_signed_vertical_padding_reduces_shrinkwrapped_height(){
+        // v1.11.0 render.c adds padding.top+padding.bottom directly
+        // to the measured Pango text height, even when those are negative.
+        // The previous unsigned clamp wrongly made both frames identical.
+        let note=fixture();
+        let common="width=180\nheight=150\nborder-size=0\nformat=%s\n";
+        let plain=crate::config::Config::parse(
+            &(common.to_owned()+"padding=0\n")
+        ).unwrap().global;
+        let negative=crate::config::Config::parse(
+            &(common.to_owned()+"padding=-3,0,-2,0\n")
+        ).unwrap().global;
+        let pad=Padding::parse(&negative);
+        assert_eq!((pad.top,pad.right,pad.bottom,pad.left),(-3,0,-2,0));
+        let original=measure_notification_height(&note,&plain).unwrap();
+        let shifted=measure_notification_height(&note,&negative).unwrap();
+        assert_eq!(original,shifted+5,
+            "Mako's signed -3 top and -2 bottom reduce content height by 5");
+        let rendered=render_notification(&note,&negative).unwrap();
+        assert_eq!(rendered.height,shifted,
+            "the Cairo frame must preserve the signed Pango measurement");
+    }
+
+    #[test]
     fn large_corner_radius_can_extend_beyond_mako_text_height_cap() {
         let note=fixture();
         let mut style=Options::new();
