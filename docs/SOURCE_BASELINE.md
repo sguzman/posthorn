@@ -1861,3 +1861,45 @@ P1 remains 90% (delta 0pp), strict M0 remains 89%
 equivalence. Physical Hyprland test gate remains T503 51%,
 and T504 production switch remains 0%. No live Mako,
 personal configuration, session bus or compositor was modified.
+
+## Uncapped compositor integer output scale parity
+
+Pinned Mako v1.11.0 `wayland.c:output_handle_scale` stores the
+compositor-supplied `wl_output.scale` integer directly. It does not
+clamp the reported output scale to 8. The previous Posthorn
+`src/wayland.rs` handler silently clamped to 8, while the frame
+scaler, `src/render.rs` and `src/desktop.rs` rejected a valid 9x
+scale even for an otherwise small notification.
+
+[Implementation e3028ce](https://github.com/sguzman/posthorn/commit/e3028ce9810165aa71930f89a9be015ef9e0d638)
+now preserves all positive compositor scales. `scale_frame`,
+native Pango/Cairo painting, and desktop snapshots accept values
+above 8 while retaining checked multiplication and the existing
+physical-pixel/SHM allocation limits. Reported nonpositive scales
+are defensively treated as 1 by the output listener; public frame
+helpers reject zero. The fix does not grow safe frame allocations
+or relax input-region limits.
+
+Unit regressions cover physical scale 9 with exact pixel replication
+and native text raster dimensions; zero and oversized/overflow
+scales remain errors. An existing Pango test still asserted that
+scale 9 must fail, producing a RED first test job
+[40140732219](https://github.com/sguzman/posthorn/actions/runs/40140732219).
+[Follow-up test correction c2bc339](https://github.com/sguzman/posthorn/commit/c2bc3391111d616655e88055b40a1bdb7b7afc8b)
+replaced that obsolete assertion with the new expected dimensions.
+
+[GitHub Actions acceptance 40140846830](https://github.com/sguzman/posthorn/actions/runs/40140846830)
+passed **both** the Rust/private D-Bus and private headless Sway
+jobs at `c2bc339`. The Rust job includes 294 library tests
+and 73 private D-Bus tests. Headless compositor checks include
+1x, 1.25x, 2x, multi-output, mixed-DPI, pointer routing, input
+regions and redraw acceptance. **No compositor scale-9 screenshot
+has been accepted**; only the explicit scale-9 Rust pixel and
+Pango regressions have run. Physical Hyprland and production Mako
+cutover remain untested/unauthorized.
+
+**T401 remains 99% (delta 0pp); P4 remains 99% (delta 0pp);
+strict M0 remains 89% (delta 0pp).** This is real, source-backed
+correctness progress without inflating acceptance percentages.
+T503 stays at 51% and T504 at 0%. No production daemon, bus
+name or workstation configuration was touched.
