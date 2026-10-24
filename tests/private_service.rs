@@ -2790,6 +2790,43 @@ async fn quiet_mode_silences_category_sound_hooks_over_dbus()
 }
 
 #[tokio::test]
+async fn default_root_style_survives_private_notify_and_pango_rendering()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Mako's init_default_style explicitly fills every style field.
+    // Verify they survive the real private Notify -> style -> renderer
+    // path, not merely Config::default's literal initialization.
+    let (conn,runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let caps:Vec<String>=desktop.call("GetCapabilities",&()).await?;
+    assert!(caps.contains(&"body-markup".into()));
+    assert!(caps.contains(&"icon-static".into()));
+    assert!(caps.contains(&"actions".into()));
+    let id:u32=desktop.call("Notify",&(
+        "root-defaults",0u32,"","Upstream style","Test body",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let note=runtime.store.lock().unwrap().active().iter()
+        .find(|note|note.id==id)
+        .cloned().ok_or("missing private Notify result")?;
+    let style=posthorn::desktop::style_for_note(
+        &runtime,&note,&["default".into()]);
+    for (key,value) in [
+        ("progress-color","#5588AAFF"),("icon-location","left"),
+        ("max-icon-size","64"),("icons","1"),
+        ("text-alignment","left"),("group-by","none"),
+        ("outer-margin","0"),("invisible","0"),
+        ("max-visible","5"),("on-notify","none"),
+    ]{
+        assert_eq!(style.get(key).map(String::as_str),Some(value),
+            "missing pinned Mako default after private Notify: {key}");
+    }
+    let frame=posthorn::render::render_notification(&note,&style)?;
+    assert_eq!((frame.width,frame.height),(300,100));
+    Ok(())
+}
+
+#[tokio::test]
 async fn capabilities_union_root_and_scoped_styles_over_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
