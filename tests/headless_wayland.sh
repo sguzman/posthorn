@@ -94,9 +94,9 @@ done
 # uses a tiny popup to stay within the output and SHM safety bounds.
 if [[ "$test_scale" == 9 ]]; then
   output_info="$(swaymsg -s "$startup_ipc" -t get_outputs)"
-  if ! grep -Eq '"scale":[[:space:]]*9(\\.0+)?[,}]' <<< "$output_info"; then
+  if ! grep -Eq '"scale":[[:space:]]*9(\.0+)?[,}]' <<< "$output_info"; then
     echo 'Headless compositor did not advertise a real 9x output'
-    printf '%s\\n' "$output_info"
+    printf '%s\n' "$output_info"
     exit 1
   fi
   cat > "$root/nine.conf" <<'EOF_NINE'
@@ -112,12 +112,12 @@ background-color=#305747
 text-color=#FFFFFFFF
 EOF_NINE
   grim "$root/nine-baseline.png"
-  ./target/debug/posthorn --experimental-private-desktop "$root/nine.conf" \\
+  ./target/debug/posthorn --experimental-private-desktop "$root/nine.conf" \
     >"$root/nine-posthorn.log" 2>&1 &
   posthorn_pid=$!
   ready=0
   for _ in {1..60}; do
-    if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=2s introspect \\
+    if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=2s introspect \
         org.posthorn.Development /org/freedesktop/Notifications >/dev/null 2>&1; then
       ready=1
       break
@@ -131,17 +131,17 @@ EOF_NINE
   done
   [[ "$ready" == 1 ]] || { echo '9x private D-Bus registration timed out'; exit 1; }
 
-  reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \\
-    org.posthorn.Development /org/freedesktop/Notifications \\
-    org.freedesktop.Notifications Notify 'susssasa{sv}i' \\
+  reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
     'Posthorn 9x QA' 0 '' 'Nine' '' 0 0 30000)"
-  [[ "$reply" == u\\ * ]] || { echo "9x Notify failed: $reply"; exit 1; }
+  [[ "$reply" == u\ * ]] || { echo "9x Notify failed: $reply"; exit 1; }
   id="${reply#u }"
   painted=0
   for _ in {1..45}; do
     if grim "$root/nine-visible.png" 2>/dev/null &&
-      ./target/debug/examples/qa_png_probe \\
-        "$root/nine-visible.png" '#305747' 350 increase "$root/nine-baseline.png" \\
+      ./target/debug/examples/qa_png_probe \
+        "$root/nine-visible.png" '#305747' 350 increase "$root/nine-baseline.png" \
         >/dev/null 2>&1; then
       painted=1
       break
@@ -159,14 +159,14 @@ EOF_NINE
     exit 1
   }
 
-  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \\
-    org.posthorn.Development /org/freedesktop/Notifications \\
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
     org.freedesktop.Notifications CloseNotification u "$id" >/dev/null
   cleared=0
   for _ in {1..45}; do
     if grim "$root/nine-cleared.png" 2>/dev/null &&
-      ./target/debug/examples/qa_png_probe \\
-        "$root/nine-cleared.png" '#305747' 45 restored "$root/nine-baseline.png" \\
+      ./target/debug/examples/qa_png_probe \
+        "$root/nine-cleared.png" '#305747' 45 restored "$root/nine-baseline.png" \
         >/dev/null 2>&1; then
       cleared=1
       break
