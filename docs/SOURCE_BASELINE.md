@@ -1512,3 +1512,42 @@ P5 stays **56%** and strict M0 stays **88%**. This is automated
 PipeWire volume, real Hyprland acceptance, or production cutover.
 No real Mako process, notification bus owner, or user configuration
 was accessed.
+
+## C-locale POSIX ERE byte matching in notification criteria
+
+Pinned **Mako v1.11.0** `criteria.c` compiles summary and body
+selectors with `regcomp(REG_EXTENDED | REG_NOSUB)` and matches using
+`regexec`. The process does not call `setlocale`, so the initial
+C locale's character classes and regex dot operate on bytes, not
+Unicode code points. A source-aligned glibc probe confirmed that
+`^[[:alpha:]]+$`, `^[[:alnum:]]+$`, and GNU `^\\w+$`
+reject non-ASCII accented/CJK text in this locale; one POSIX dot
+also does not cover a two-byte UTF-8 `é`.
+
+Posthorn previously compiled these expressions as Unicode-aware
+`regex::Regex`. [Commit e078cc7](https://github.com/sguzman/posthorn/commit/e078cc704938871d6eae83c62e07b1c0a5c8e654)
+switches to the **pure-Rust** `regex::bytes::Regex` engine with
+Unicode mode disabled and dot-all enabled. This preserves the
+existing C-locale POSIX escape normalization and corrects ASCII
+classes and UTF-8 byte-width comparisons. Focused unit tests
+check both positive ASCII and negative accented/CJK examples,
+plus one- versus two-dot matching of `é`.
+
+The private D-Bus regression uses the actual Mako criteria tokenizer,
+which removes one layer of backslash escaping, then delivers
+ASCII and non-ASCII summaries/bodies via `Notify` to confirm
+which `on-notify=dismiss` rule executes. Initial fixture
+failures involved an underscore in a POSIX `alnum` sample
+and an incorrectly single-escaped config `\\w` expression;
+those fixture errors were corrected rather than counted as
+implementation parity.
+
+[CI 40126481126](https://github.com/sguzman/posthorn/actions/runs/40126481126)
+passed both the Rust/private D-Bus test job and disposable headless
+Sway acceptance, including scaling and output regressions, on
+[commit a19b13c](https://github.com/sguzman/posthorn/commit/a19b13ce1d4ecd2bf6022fb5fe71871e39373f6e).
+
+**T102: 95% → 96%**. P1 stays **89%** and M0 stays **88%**.
+No claim of complete POSIX regex equivalence or physical Hyprland
+parity is made; T503 remains 51%, T504 remains 0%, and installed
+Mako and the user's real session remain untouched.
