@@ -7,7 +7,9 @@ root="$(mktemp -d)"
 sway_pid=""
 posthorn_pid=""
 monitor_pid=""
+dual_pid=""
 cleanup() {
+  if [[ -n "$dual_pid" ]]; then kill "$dual_pid" 2>/dev/null || true; wait "$dual_pid" 2>/dev/null || true; fi
   if [[ -n "$monitor_pid" ]]; then kill "$monitor_pid" 2>/dev/null || true; wait "$monitor_pid" 2>/dev/null || true; fi
   if [[ -n "$posthorn_pid" ]]; then kill "$posthorn_pid" 2>/dev/null || true; wait "$posthorn_pid" 2>/dev/null || true; fi
   if [[ -n "$sway_pid" ]]; then kill "$sway_pid" 2>/dev/null || true; wait "$sway_pid" 2>/dev/null || true; fi
@@ -83,6 +85,36 @@ done
   cat "$root/sway.log"
   exit 1
 }
+
+# Test two genuine compositor layer surfaces simultaneously. This is a
+# development-only Wayland acceptance probe, not the production renderer.
+if [[ "$test_scale" == 1 ]]; then
+  ./target/debug/examples/qa_dual_surface "$root/dual-ready" \
+    >"$root/dual.log" 2>&1 &
+  dual_pid=$!
+  for _ in {1..70}; do
+    [[ -f "$root/dual-ready" ]] && break
+    if ! kill -0 "$dual_pid" 2>/dev/null; then
+      echo 'Two-surface Wayland probe exited before both surfaces mapped'
+      cat "$root/dual.log"
+      exit 1
+    fi
+    sleep 0.05
+  done
+  if [[ ! -f "$root/dual-ready" ]]; then
+    echo 'Two-surface Wayland probe did not receive both wl_surface.enter events'
+    cat "$root/dual.log"
+    exit 1
+  fi
+  grim "$root/dual.png"
+  ./target/debug/examples/qa_png_probe \
+    "$root/dual.png" '#E5923C' 500 present
+  ./target/debug/examples/qa_png_probe \
+    "$root/dual.png" '#2DB3C1' 500 present
+  wait "$dual_pid"
+  dual_pid=""
+  echo 'Simultaneous independent top-left and bottom-right layer-shell surfaces: OK'
+fi
 
 cat > "$root/mako.conf" <<'EOF'
 width=300
