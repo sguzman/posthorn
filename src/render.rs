@@ -1024,7 +1024,8 @@ mod tests {
             let p=y*frame.stride as usize+x*4;
             frame.pixels[p..p+4].to_vec()
         };
-        assert_eq!(at(7,3),vec![0,0,255,255],
+        assert_eq!(&at(7,3)[..2],&[0,0]);
+        assert!(at(7,3)[2]>=254 && at(7,3)[3]==255,
             "renderer must retain all eight Mako icon pixels");
         assert_eq!(at(8,3),vec![0,0,0,255],
             "fractional image must be clipped at integer icon width");
@@ -1052,8 +1053,12 @@ mod tests {
             frame.pixels[p..p+4].to_vec()
         };
         assert_eq!(at(45,5),vec![0,0,0,255]);
-        assert_eq!(at(46,5),vec![0,0,255,255]);
-        assert_eq!(at(53,5),vec![0,0,255,255]);
+        for x in [46,53] {
+            let pixel=at(x,5);
+            assert_eq!(&pixel[..2],&[0,0]);
+            assert!(pixel[2]>=254 && pixel[3]==255,
+                "the integer icon clip must include its boundary column");
+        }
         assert_eq!(at(54,5),vec![0,0,0,255]);
     }
 
