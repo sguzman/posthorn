@@ -17,6 +17,7 @@ async fn main() -> ExitCode {
                      \tposthorn --check-config [PATH]\n\
                      \tposthorn --experimental-private-service PATH\n\
                      \tposthorn --experimental-private-desktop PATH\n\
+                     \tposthorn --experimental-private-multi-desktop PATH\n\
                      \tposthorn --experimental-popup-preview PATH\n\
                      \tposthorn --version\n\
                      \tposthorn --help\n\
@@ -85,6 +86,17 @@ async fn main() -> ExitCode {
             match posthorn::desktop::run_private_desktop_from_path(Path::new(&path)).await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(err) => { eprintln!("Posthorn private desktop failed: {err}"); ExitCode::FAILURE }
+            }
+        }
+        (Some("--experimental-private-multi-desktop"), Some(path)) => {
+            match posthorn::desktop::run_private_multi_desktop_from_path(
+                Path::new(&path)
+            ).await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(err) => {
+                    eprintln!("Posthorn private multi-surface desktop failed: {err}");
+                    ExitCode::FAILURE
+                }
             }
         }
         (Some("--experimental-private-service"), Some(path)) => {

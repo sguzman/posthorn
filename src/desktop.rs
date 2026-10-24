@@ -468,6 +468,111 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
     }
 }
 
+/// Experimental multi-surface implementation. Every Mako surface identity
+/// owns a separate Wayland connection, compositor output observation, buffer
+/// lifecycle and click coordinate space. This avoids incorrectly merging
+/// independently anchored/output-targeted notifications into one popup.
+/// It is private-bus-only and deliberately separate from the established
+/// one-surface presenter until live Hyprland acceptance is available.
+fn render_loop_multi(
+    runtime:SharedRuntime,
+    sender:tokio::sync::mpsc::UnboundedSender<DesktopClick>,
+)->io::Result<()>{
+    type Key=(String,String,String);
+    type FrameStamp=(Vec<Notification>,Vec<String>,u64,u32,u32,bool);
+    let mut viewers=std::collections::HashMap::<Key,LivePresenter>::new();
+    let mut rendered=std::collections::HashMap::<Key,FrameStamp>::new();
+    loop{
+        let surfaces=surface_visibility(&runtime)?;
+        let keys=surfaces.iter().map(|s|s.surface_key.clone())
+            .collect::<std::collections::HashSet<_>>();
+        // Dropping a presenter destroys only that surface's layer-shell
+        // objects; Mako's notification store/history is unaffected.
+        viewers.retain(|key,_|keys.contains(key));
+        rendered.retain(|key,_|keys.contains(key));
+        let all_notes=runtime.store.lock().map_err(|_|poisoned())?
+            .active().iter().cloned().collect::<Vec<_>>();
+        let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
+        let config=runtime.config();
+        for view in surfaces{
+            let key=view.surface_key;
+            if !viewers.contains_key(&key){
+                viewers.insert(key.clone(),LivePresenter::connect().map_err(other)?);
+            }
+            let viewer=viewers.get_mut(&key).ok_or_else(poisoned)?;
+            viewer.poll_events().map_err(other)?;
+            let observed=viewer.current_output_name().map(str::to_owned);
+            if observed.is_some()||!viewer.has_active_surface(){
+                if let Some(id)=all_notes.iter()
+                    .find(|note|note.surface_spec.as_ref()==Some(&key))
+                    .map(|note|note.id){
+                    runtime.set_notification_surface_output(id,observed.as_deref())
+                        .map_err(other)?;
+                }
+            }
+            // Output= is the layer-shell placement request, not an
+            // [output] criterion. Only wl_surface.enter supplies the latter.
+            if !viewer.has_output(&key.0){
+                viewer.clear();
+                rendered.remove(&key);
+                continue;
+            }
+            let scale=viewer.output_scale(&key.0);
+            let icon_scale=viewer.maximum_output_scale();
+            let revision=runtime.revision();
+            let current_notes=all_notes.iter()
+                .filter(|note|note.surface_spec.as_ref()==Some(&key))
+                .cloned().collect::<Vec<_>>();
+            let changed=rendered.get(&key).is_none_or(|stamp|{
+                stamp.0!=current_notes||stamp.1!=modes||stamp.2!=revision||
+                stamp.3!=scale||stamp.4!=icon_scale||
+                (stamp.5&&!viewer.has_active_surface())
+            });
+            if changed{
+                let frame=snapshot_frame_for_surface(
+                    &runtime,scale,icon_scale,Some(&key)
+                )?;
+                let corner=ScreenCorner::from_mako(&key.2)
+                    .ok_or_else(||other("invalid surface anchor"))?;
+                let layer=PopupLayer::from_mako(&key.1)
+                    .ok_or_else(||other("invalid surface layer"))?;
+                if frame.is_none()||!viewer.buffer_backpressure(){
+                    viewer.update_native_frame_on_output(
+                        frame.as_ref(),corner,outer_margins(&config),layer,&key.0,
+                    ).map_err(other)?;
+                    rendered.insert(key.clone(),(
+                        current_notes,modes.clone(),revision,scale,icon_scale,
+                        frame.is_some(),
+                    ));
+                }
+            }
+            for click in viewer.take_clicks(){
+                let Some((id,binding))=crate::input::hit_test_on_surface(
+                    &runtime,click,&key
+                ).map_err(other)? else{continue};
+                let (target,instance)={
+                    let store=runtime.store.lock().map_err(|_|poisoned())?;
+                    let instance=store.active_instance(id);
+                    let note=store.active().iter().find(|n|n.id==id).cloned();
+                    (note,instance)
+                };
+                let (Some(target),Some(instance))=(target,instance) else{continue};
+                if !click_target_is_current(&runtime,&target,instance)?{continue;}
+                let needs_token=crate::input::should_request_activation_token(
+                    &runtime,id,&binding
+                ).map_err(other)?;
+                let activation_token=if needs_token{
+                    viewer.request_activation_token(click.serial).map_err(other)?
+                }else{None};
+                if sender.send(DesktopClick{
+                    target,instance,binding,activation_token,
+                }).is_err(){return Ok(());}
+            }
+        }
+        std::thread::sleep(Duration::from_millis(45));
+    }
+}
+
 /// Drive the D-Bus service and the live Wayland preview in one process, each
 /// with its own event-loop thread. Both components share notification state.
 pub async fn run_private_desktop(config: crate::config::Config)
@@ -484,12 +589,33 @@ pub async fn run_private_desktop_from_path(path:&std::path::Path)
     run_private_desktop_instance(conn,runtime).await
 }
 
+/// Private-bus-only multi-surface acceptance path. Does not register
+/// org.freedesktop.Notifications or replace the installed Mako daemon.
+pub async fn run_private_multi_desktop_from_path(path:&std::path::Path)
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let (conn,runtime)=crate::service::open_private_service_from_path(path).await?;
+    run_private_desktop_instance_with_mode(conn,runtime,true).await
+}
+
 async fn run_private_desktop_instance(conn:zbus::Connection,runtime:SharedRuntime)
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
+    run_private_desktop_instance_with_mode(conn,runtime,false).await
+}
+
+async fn run_private_desktop_instance_with_mode(
+    conn:zbus::Connection,runtime:SharedRuntime,multiple_surfaces:bool,
+)->Result<(),Box<dyn std::error::Error+Send+Sync>>{
     let visual_runtime=runtime.clone();
     let (sender,mut clicks)=tokio::sync::mpsc::unbounded_channel();
-    let mut visual=tokio::task::spawn_blocking(move || render_loop(visual_runtime,sender));
+    let mut visual=tokio::task::spawn_blocking(move || {
+        if multiple_surfaces{
+            render_loop_multi(visual_runtime,sender)
+        }else{
+            render_loop(visual_runtime,sender)
+        }
+    });
     let mut timer=tokio::time::interval(Duration::from_millis(25));
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     eprintln!(
