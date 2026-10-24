@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sway grim python3-pil libpango1.0-dev libcairo2-dev libgdk-pixbuf-2.0-dev
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --bin posthorn --example qa_virtual_pointer --example qa_png_probe --example qa_dual_surface --example qa_input_region
+      - run: cargo build --bin posthorn --example qa_virtual_pointer --example qa_png_probe --example qa_dual_surface --example qa_input_region --example qa_icon_theme
       - name: Verify 1x private popup and close/repaint
         run: dbus-run-session -- bash tests/headless_wayland.sh
       - name: Verify 1.25x fractional compositor popup and close/repaint
@@ -68,3 +68,5 @@ jobs:
         run: dbus-run-session -- bash tests/headless_multi_output.sh
       - name: Verify compositor click-through input regions
         run: dbus-run-session -- bash tests/headless_input_region.sh
+      - name: Verify mixed-output DPI icon selection and bottom-edge pointer routing
+        run: dbus-run-session -- bash tests/headless_mixed_scale.sh
