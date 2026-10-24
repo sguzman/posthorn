@@ -444,12 +444,12 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
                 .unwrap_or(PopupLayer::Top);
             let output=config.global.get("output").map(String::as_str).unwrap_or("");
             if frame.is_none()||!viewer.buffer_backpressure(){
-                viewer.update_native_frame_on_output(frame.as_ref(),corner,margins,layer,output)
-                    .map_err(other)?;
-                if frame.is_some(){
-                    let regions=crate::input::input_rectangles(&runtime,None)?;
-                    viewer.set_notification_input_rectangles(&regions).map_err(other)?;
-                }
+                let input_rects=if frame.is_some(){
+                    crate::input::input_rectangles(&runtime,None)?
+                }else{Vec::new()};
+                viewer.update_native_frame_with_input_rectangles(
+                    frame.as_ref(),corner,margins,layer,output,&input_rects
+                ).map_err(other)?;
                 previous=notes;
                 previous_modes=modes;
                 previous_revision=revision;
@@ -567,13 +567,13 @@ fn render_loop_multi(
                 let layer=PopupLayer::from_mako(&key.1)
                     .ok_or_else(||other("invalid surface layer"))?;
                 if frame.is_none()||!viewer.buffer_backpressure(){
-                    viewer.update_native_frame_on_output(
+                    let input_rects=if frame.is_some(){
+                        crate::input::input_rectangles(&runtime,Some(&key))?
+                    }else{Vec::new()};
+                    viewer.update_native_frame_with_input_rectangles(
                         frame.as_ref(),corner,outer_margins(&config),layer,&key.0,
+                        &input_rects,
                     ).map_err(other)?;
-                    if frame.is_some(){
-                        let regions=crate::input::input_rectangles(&runtime,Some(&key))?;
-                        viewer.set_notification_input_rectangles(&regions).map_err(other)?;
-                    }
                     rendered.insert(key.clone(),(
                         current_notes,modes.clone(),revision,scale,icon_scale,
                         frame.is_some(),
