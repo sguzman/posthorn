@@ -3,10 +3,11 @@ use std::env;
 use std::path::Path;
 use std::process::ExitCode;
 
-/// In pinned Mako, getopt parses --config on the first pass, loads the
-/// source, then replays every style argument in original argv order.
-/// This validates those semantics without owning a notification bus name.
-fn check_config_with_mako_cli(arguments:&[String])->Result<(Config,String,usize),String>{
+/// Parse Mako options before touching a bus. Also used by the explicitly
+/// selected private-service CLI, never by the normal production startup.
+fn parse_mako_cli_args(arguments:&[String])
+    ->Result<(Option<String>,Vec<(String,String)>),String>
+{
     let mut positional_path:Option<String>=None;
     let mut selected_config:Option<String>=None;
     let mut overrides:Vec<(String,String)>=Vec::new();
@@ -42,6 +43,13 @@ fn check_config_with_mako_cli(arguments:&[String])->Result<(Config,String,usize)
         i+=1;
     }
     let path=selected_config.or(positional_path);
+    Ok((path,overrides))
+}
+
+/// Upstream Mako loads the chosen config, then replays style options in
+/// original argv order. This validation mode claims no D-Bus name.
+fn check_config_with_mako_cli(arguments:&[String])->Result<(Config,String,usize),String>{
+    let (path,overrides)=parse_mako_cli_args(arguments)?;
     let (mut config,source)=if let Some(path)=path {
         let config=Config::from_path(Path::new(&path)).map_err(|e|e.to_string())?;
         (config,path)
@@ -74,6 +82,38 @@ async fn main() -> ExitCode {
             }
         };
     }
+    if arguments.first().is_some_and(|first|first=="--experimental-private-service"){
+        return match parse_mako_cli_args(&arguments[1..]){
+            Ok((Some(path),overrides))=>{
+                // This entrypoint owns *only* org.posthorn.Development.
+                // Validation completes before its private D-Bus name is
+                // requested; the standard name remains unavailable here.
+                match posthorn::service::run_private_service_from_path_with_cli_overrides(
+                    Path::new(&path),&overrides
+                ).await {
+                    Ok(())=>ExitCode::SUCCESS,
+                    Err(error)=>{
+                        eprintln!("Posthorn test D-Bus service failed: {error}");
+                        ExitCode::FAILURE
+                    }
+                }
+            }
+            Ok((None,_))=>{
+                eprintln!("posthorn --experimental-private-service requires a config path");
+                ExitCode::FAILURE
+            }
+            Err(error)=>{
+                eprintln!("posthorn private CLI: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    // Every other experimental mode expects exactly its documented path.
+    // Do not silently swallow Mako CLI arguments on a different mode.
+    if arguments.len()>2{
+        eprintln!("unexpected extra Posthorn arguments");
+        return ExitCode::FAILURE;
+    }
     let mut args=arguments.into_iter();
     match (args.next().as_deref(), args.next()) {
         (Some("--version"), None) => {
@@ -83,8 +123,8 @@ async fn main() -> ExitCode {
         (Some("--help") | Some("-h"), None) => {
             println!("Posthorn (development stage; NOT a desktop notification daemon)\n\
                      Usage:\n\
-                     \tposthorn --check-config [PATH]\n\
-                     \tposthorn --experimental-private-service PATH\n\
+                     \tposthorn --check-config [PATH] [--MAKO-OPTION VALUE...]\n\
+                     \tposthorn --experimental-private-service PATH [--MAKO-OPTION VALUE...]\n\
                      \tposthorn --experimental-private-desktop PATH\n\
                      \tposthorn --experimental-private-multi-desktop PATH\n\
                      \tposthorn --experimental-popup-preview PATH\n\
