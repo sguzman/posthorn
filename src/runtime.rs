@@ -1003,6 +1003,10 @@ mod tests {
             Some(now+std::time::Duration::from_millis(900)));
         assert!(runtime.store.lock().unwrap().active()
             .iter().find(|n|n.id==after_enter).unwrap().surface_associated);
+        // A reused Mako surface tuple may be temporarily unmapped after
+        // its previous popup was closed. The replacement can match output
+        // only after THIS surface receives a new compositor enter event.
+        runtime.set_notification_surface_output(after_enter,Some("DP-2")).unwrap();
         // Explicit ID replacement retains the earlier surface association,
         // allowing output selectors to influence its initial timeout.
         assert_eq!(runtime.store.lock().unwrap().push(Request{
