@@ -1416,3 +1416,34 @@ was accessed. **T502 advances 75% → 76%** and the separate Mako
 category/sound feature inventory to **76%**. The P5 average becomes
 **56%**, while the overall M0 milestone remains **88%**, T503 remains
 51% and T504 remains 0%.
+
+## Replacement expiration cancels the original deadline on live compositor
+
+Pinned Mako **v1.11.0** `dbus/xdg.c:handle_notify` calls
+`reset_notification` when `replaces_id` refers to a live
+notification. This destroys its old event-loop timer; after resolving
+the replacement's effective style it schedules a **new** timer from
+that payload's `expire_timeout`. The old deadline must not close the
+replacement, and the new timer must expire the retained ID and
+move only the replacement payload into history when eligible.
+
+[Commit e22102d](https://github.com/sguzman/posthorn/commit/e22102d66f974db337ffed2dc67d52bb3cd090ac)
+adds a **private D-Bus + isolated headless Sway** acceptance sequence
+at scale 1×. It submits a warning notification with a 1200ms sender
+timeout; replaces it after 200ms using the same Freedesktop ID and a
+3000ms timeout; observes that the new summary and real popup survive
+beyond the first deadline; then waits for expiration of the second
+deadline, checks the notification vanished from the active list, and
+confirms that history contains only the replacement summary.
+
+[CI 40120085647](https://github.com/sguzman/posthorn/actions/runs/40120085647)
+passed both Rust/private-D-Bus and disposable headless Wayland test
+jobs, including this new live expiration sequence. The deterministic
+unit scheduler had already covered cancellation on ID replacement;
+the new acceptance verifies the actual runtime, D-Bus and compositor
+integration as an independent gate.
+
+**T203 advances 97% → 98%**. P2 remains **96%**, M0 remains
+**88%**, T503 remains 51% and T504 remains 0%. This was run only on
+the development D-Bus name and disposable Sway output, never on
+the live Mako daemon or workstation session.
