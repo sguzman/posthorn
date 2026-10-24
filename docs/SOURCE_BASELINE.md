@@ -1305,3 +1305,47 @@ T105 advances to **83%**; P1 remains **89%** and M0 stays
 **88%** because the remaining acceptance gates are independent.
 T503 remains 51% and T504 remains 0%. Neither installed Mako
 nor production Wayland/D-Bus state was modified.
+
+## Config superstyle outer margins include even unmatched criteria
+
+Pinned **Mako v1.11.0** `config.c:apply_superset_style` starts from an
+empty style with signed zero values and calculates the **componentwise
+maximum** `outer_margin.top/right/bottom/left` across the root and
+every configured criteria style. `wayland.c:send_frame` sends that
+`config.superstyle.outer_margin` to `zwlr_layer_surface_v1_set_margin`.
+It does **not** use only the root `outer-margin`, and the matching
+notification's ordinary `margin` does not change that layer-shell
+property.
+
+Posthorn had instead read `config.global["outer-margin"]` only.
+This lost surface placement in configurations specifying
+`outer-margin` under category, output or mode sections, even when
+those criteria did not match the current notification.
+
+[7119590](https://github.com/sguzman/posthorn/commit/7119590d5eab31ec34e98a01e641a7da10c19664)
+corrected `desktop::outer_margins` to take the signed per-edge max
+across the root and **all** user criteria (anchored at zero, as in
+Mako). A Rust regression verifies two different unmatched criteria
+can independently determine the final top, right, bottom and left
+values; negative-only settings cannot decrease the zero-initialized
+superstyle, and notification `margin` cannot replace `outer-margin`.
+The compositor's existing single- and multi-surface presenters use
+this resolved value.
+
+[4196ccb](https://github.com/sguzman/posthorn/commit/4196ccb89cd742cc68b887be64fdef1b6724f7ea)
+added an **actual isolated Sway screenshot** acceptance gate.
+A private D-Bus notification does not match either configured
+category, but the popup must still land **85 logical pixels from the
+right edge** and **32 pixels from the top** because the two
+unmatched criteria each contribute an `outer-margin` component.
+The compositor screenshot's color bounds matched those exact
+positions.
+
+[GitHub Actions 40113437561](https://github.com/sguzman/posthorn/actions/runs/40113437561)
+passed both the Rust/unit/private-D-Bus test job and the disposable
+headless Wayland job, including this new screenshot assertion,
+the independent two-output, mixed-DPI, pointer, and signed-padding
+gates. The previously established live Mako and physical Hyprland
+acceptance restrictions remain unchanged. **T105 83% → 84%**,
+**P1 stays 89%**, **M0 stays 88%**; no post-MVP work was started
+and no installed compositor, Mako service or real D-Bus owner changed.
