@@ -885,7 +885,7 @@ without retroactively rescheduling expiration timers. Posthorn now
 refreshes its active history-policy map on single-surface
 `wl_surface.enter`/leave observations as well as independently
 observed notification output changes. The last acceptance suite passed
-**267 Rust unit tests, 59 private D-Bus tests**, and isolated
+**267 Rust unit tests, 61 private D-Bus tests**, and isolated
 1×/1.25×/2× Sway compositor tests at
 [01334a3](https://github.com/sguzman/posthorn/actions/runs/40042641411).
 
