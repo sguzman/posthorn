@@ -7,7 +7,7 @@
 use wayland_client::{
     delegate_noop,
     globals::{registry_queue_init, GlobalListContents},
-    protocol::{wl_buffer, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface, wl_touch},
+    protocol::{wl_buffer, wl_compositor, wl_output, wl_pointer, wl_registry, wl_region, wl_seat, wl_shm, wl_shm_pool, wl_surface, wl_touch},
     WEnum,
     Connection, Dispatch, QueueHandle,
 };
@@ -308,6 +308,7 @@ impl Dispatch<xdg_activation_token_v1::XdgActivationTokenV1, ()> for ConfigureSt
 }
 
 delegate_noop!(ConfigureState: ignore wl_compositor::WlCompositor);
+delegate_noop!(ConfigureState: ignore wl_region::WlRegion);
 impl Dispatch<wl_surface::WlSurface, ()> for ConfigureState {
     fn event(
         state:&mut Self,surface:&wl_surface::WlSurface,event:wl_surface::Event,
@@ -987,6 +988,27 @@ impl LivePresenter {
         token.destroy();
         result?;
         Ok(issued)
+    }
+
+    /// Mako sends an input region composed only of notification hotspots,
+    /// not the full layer-shell canvas. Transparent margins and stack gaps
+    /// must pass events to the windows underneath. Use the same rectangles
+    /// as input::hit_test rather than independently estimating dimensions.
+    pub fn set_notification_input_rectangles(
+        &mut self,rects:&[crate::input::InputRect],
+    )->Result<(),Box<dyn std::error::Error>>{
+        let Some(live)=self.active.as_ref() else{return Ok(())};
+        let region=self.compositor.create_region(&self.qh,());
+        for rect in rects {
+            if rect.width>0 && rect.height>0 {
+                region.add(rect.x,rect.y,rect.width,rect.height);
+            }
+        }
+        live.surface.set_input_region(Some(&region));
+        region.destroy();
+        live.surface.commit();
+        self.conn.flush()?;
+        Ok(())
     }
 
     pub fn clear(&mut self) {
