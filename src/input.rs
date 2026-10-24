@@ -392,6 +392,21 @@ mod tests {
         assert_eq!(low.len(),1);
         assert_eq!(high.len(),1);
         assert_eq!(low[0].width,high[0].width);
+        let note=runtime.store.lock().unwrap().active()[0].clone();
+        let modes=runtime.modes().lock().unwrap().clone();
+        let style=crate::desktop::style_for_note_index(&runtime,&note,&modes,-1);
+        let rendered_1x_with_2x_icon=
+            crate::render::render_notification_group_with_icon_scale(
+                &note,&style,0,1,2,
+            ).unwrap();
+        let rendered_2x_with_2x_icon=
+            crate::render::render_notification_group_with_icon_scale(
+                &note,&style,0,2,2,
+            ).unwrap();
+        assert_eq!(high[0].height,rendered_1x_with_2x_icon.height,
+            "Wayland logical hotspot must equal the selected themed frame height");
+        assert_eq!(high[0].height*2,rendered_2x_with_2x_icon.height,
+            "physical 2x buffer size must not distort logical hit testing");
         assert!(high[0].height>low[0].height,
             "the selected 2x icon is much taller than the 1x theme asset");
         let bottom_click=click((high[0].x+2) as f64,
