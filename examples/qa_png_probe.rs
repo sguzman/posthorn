@@ -31,6 +31,41 @@ fn count_color(image:&Pixbuf,rgb:[u8;3])->Result<usize,Box<dyn Error>>{
     Ok(matched)
 }
 
+/// Inclusive bounding box of a screenshot color. Used to aim compositor
+/// clicks at the *painted* lower edge, rather than a guessed font-dependent
+/// notification height. The probe reads only private CI screenshot files.
+fn color_bounds(
+    image:&Pixbuf,rgb:[u8;3],
+)->Result<Option<(usize,usize,usize,usize)>,Box<dyn Error>>{
+    let channels=usize::try_from(image.n_channels())?;
+    let stride=usize::try_from(image.rowstride())?;
+    let width=usize::try_from(image.width())?;
+    let height=usize::try_from(image.height())?;
+    if channels<3||width==0||height==0{return Err("unsupported PNG pixel layout".into());}
+    let data=image.read_pixel_bytes();
+    let bytes=data.as_ref();
+    let mut rect:Option<(usize,usize,usize,usize)>=None;
+    for y in 0..height{
+        for x in 0..width{
+            let base=y.checked_mul(stride)
+                .and_then(|r|x.checked_mul(channels).and_then(|c|r.checked_add(c)))
+                .ok_or("pixel offset overflow")?;
+            if base.checked_add(2).is_none_or(|end|end>=bytes.len()){
+                return Err("truncated PNG pixel buffer".into());
+            }
+            if (0..3).all(|c|bytes[base+c].abs_diff(rgb[c])<=3){
+                rect=Some(match rect{
+                    Some((min_x,max_x,min_y,max_y))=>(
+                        min_x.min(x),max_x.max(x),min_y.min(y),max_y.max(y)
+                    ),
+                    None=>(x,x,y,y),
+                });
+            }
+        }
+    }
+    Ok(rect)
+}
+
 fn acceptance(mode:&str,current:usize,reference:Option<usize>,threshold:usize)->bool{
     match (mode,reference){
         ("present",None)=>current>=threshold,
@@ -53,10 +88,10 @@ fn main()->Result<(),Box<dyn Error>>{
     let reference_path=args.next();
     if args.next().is_some() || !matches!(
         (mode.as_str(),reference_path.is_some()),
-        ("present"|"absent",false)|("increase"|"restored",true)
+        ("present"|"absent"|"bounds",false)|("increase"|"restored",true)
     ){
         return Err(
-            "usage: qa_png_probe FILE #RRGGBB MIN_PIXELS present|absent|increase|restored [BASELINE]"
+            "usage: qa_png_probe FILE #RRGGBB MIN_PIXELS present|absent|bounds|increase|restored [BASELINE]"
                 .into()
         );
     }
@@ -71,6 +106,15 @@ fn main()->Result<(),Box<dyn Error>>{
     ];
     let image=Pixbuf::from_file(&path)?;
     let matched=count_color(&image,rgb)?;
+    if mode=="bounds"{
+        if matched<minimum {
+            return Err("not enough matching pixels for a bounding box".into());
+        }
+        let (x0,x1,y0,y1)=color_bounds(&image,rgb)?
+            .ok_or("no matching pixels for a bounding box")?;
+        println!("{x0} {x1} {y0} {y1}");
+        return Ok(());
+    }
     let reference=match reference_path{
         Some(path)=>{
             let baseline=Pixbuf::from_file(path)?;
@@ -102,6 +146,14 @@ mod tests{
         assert_eq!(count_color(&image,[0x1B,0x3F,0xA7]).unwrap(),48,
             "small screenshot color differences are tolerated");
         assert_eq!(count_color(&image,[0x55,0x55,0x55]).unwrap(),0);
+    }
+
+    #[test]
+    fn screenshot_bounds_report_inclusive_min_max_coordinates(){
+        let image=Pixbuf::new(gdk_pixbuf::Colorspace::Rgb,true,8,8,6).unwrap();
+        image.fill(0x193FA7FF);
+        assert_eq!(color_bounds(&image,[0x19,0x3F,0xA7]).unwrap(),Some((0,7,0,5)));
+        assert_eq!(color_bounds(&image,[0x55,0x55,0x55]).unwrap(),None);
     }
 
     #[test]
