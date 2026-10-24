@@ -361,6 +361,49 @@ mod tests {
     }
 
     #[test]
+    fn themed_hidpi_icon_aspect_changes_hotspot_and_hit_test_height(){
+        let dir=tempfile::tempdir().unwrap();
+        for (folder,height,color) in [
+            ("16x16/apps",12,0xFF0000FFu32),
+            ("16x16@2/apps",57,0x00FF00FFu32),
+        ]{
+            let path=dir.path().join(folder).join("posthorn.png");
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let pixbuf=gdk_pixbuf::Pixbuf::new(
+                gdk_pixbuf::Colorspace::Rgb,true,8,12,height
+            ).unwrap();
+            pixbuf.fill(color);
+            pixbuf.savev(&path,"png",&[]).unwrap();
+        }
+        let cfg=Config::parse(&format!(
+            "width=130\nheight=115\nmargin=4\npadding=4\nborder-size=0\n\
+             icon-location=top\nmax-icon-size=64\nicon-path={}\nformat=%s\n",
+            dir.path().display()
+        )).unwrap();
+        let runtime=SharedRuntime::new(cfg);
+        let now=std::time::Instant::now();
+        let id=runtime.store.lock().unwrap().push(Request{
+            app_icon:"posthorn".into(),summary:"Scale-sensitive icon".into(),
+            ..Request::default()
+        });
+        runtime.schedule_without_hook(id,now).unwrap();
+        let low=input_rectangles_with_icon_scale(&runtime,None,1).unwrap();
+        let high=input_rectangles_with_icon_scale(&runtime,None,2).unwrap();
+        assert_eq!(low.len(),1);
+        assert_eq!(high.len(),1);
+        assert_eq!(low[0].width,high[0].width);
+        assert!(high[0].height>low[0].height,
+            "the selected 2x icon is much taller than the 1x theme asset");
+        let bottom_click=click((high[0].x+2) as f64,
+            (high[0].y+high[0].height-1) as f64,273);
+        assert!(hit_test_with_icon_scale(&runtime,bottom_click,1)
+            .unwrap().is_none(),"1x height must exclude the 2x-only bottom");
+        assert_eq!(hit_test_with_icon_scale(&runtime,bottom_click,2)
+            .unwrap().unwrap().0,id,
+            "2x hit test must use the same height as the 2x frame renderer");
+    }
+
+    #[test]
     fn stacked_hotspots_exclude_real_gap_and_match_both_notifications(){
         let runtime=SharedRuntime::new(Config::parse(
             "width=110\nheight=40\nmargin=4,12,8,12\nborder-size=0\nmax-visible=2\n"
