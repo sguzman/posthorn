@@ -636,9 +636,9 @@ impl LivePresenter {
         let conn = Connection::connect_to_env()?;
         let (globals, mut queue) = registry_queue_init::<ConfigureState>(&conn)?;
         let qh = queue.handle();
-        let compositor = globals.bind(&qh, 4..=6, ())?;
+        let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=6, ())?;
         let shell = globals.bind(&qh, 1..=4, ())?;
-        let shm = globals.bind(&qh, 1..=1, ())?;
+        let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ())?;
         // Headless preview still works without a pointer-capable seat.
         let seat = globals.bind(&qh, 1..=9, ()).ok();
         let xdg_activation = globals.bind(&qh, 1..=1, ()).ok();
