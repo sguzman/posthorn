@@ -83,14 +83,16 @@ bounds(){
   cat "$root/posthorn.log" >&2
   return 1
 }
-read -r x0 x1 y0 y1 <<<"$(bounds plain)"
+plain_bounds="$(bounds plain)" || exit 1
+read -r x0 x1 y0 y1 <<<"$plain_bounds"
 plain_height=$((y1-y0+1))
 busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako SetMode \
   's' compact >/dev/null
 compact_height=0
 for _ in {1..45}; do
-  read -r cx0 cx1 cy0 cy1 <<<"$(bounds compact)"
+  compact_bounds="$(bounds compact)" || exit 1
+  read -r cx0 cx1 cy0 cy1 <<<"$compact_bounds"
   compact_height=$((cy1-cy0+1))
   if [[ "$compact_height" -eq $((plain_height-5)) ]]; then break; fi
   sleep 0.1
@@ -105,7 +107,8 @@ busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   's' default >/dev/null
 restored_height=0
 for _ in {1..45}; do
-  read -r rx0 rx1 ry0 ry1 <<<"$(bounds restored)"
+  restored_bounds="$(bounds restored)" || exit 1
+  read -r rx0 rx1 ry0 ry1 <<<"$restored_bounds"
   restored_height=$((ry1-ry0+1))
   if [[ "$restored_height" -eq "$plain_height" ]]; then break; fi
   sleep 0.1
