@@ -33,7 +33,7 @@ done
 [[ -n "$socket" ]] || { echo 'Private Sway socket unavailable'; cat "$root/sway.log"; exit 1; }
 export WAYLAND_DISPLAY="${socket##*/}"
 POSTHORN_HEADLESS_INPUT_TEST=1 ./target/debug/examples/qa_input_region \
-  "$root/ready" "$root/received" >"$root/probe.log" 2>&1 &
+  "$root/ready" "$root/received" "$root/flip-request" "$root/flip-ack" >"$root/probe.log" 2>&1 &
 probe_pid=$!
 mapped=0
 for _ in {1..100}; do
@@ -80,4 +80,45 @@ done
 [[ "$(wc -l <"$root/received")" == 2 ]] &&
   [[ "$(sed -n '2p' "$root/received")" == upper ]] ||
   { echo 'In-region click did not target only the top overlay'; cat "$root/received"; exit 1; }
-echo 'Compositor input-region pass-through to lower layer and upper hit: OK'
+# Reconfigure the SAME overlay surface to make its left half interactive
+# instead. The in-place compositor redraw must atomically update the region.
+touch "$root/flip-request"
+flipped=0
+for _ in {1..40}; do
+  if [[ -e "$root/flip-ack" ]]; then flipped=1; break; fi
+  if ! kill -0 "$probe_pid" 2>/dev/null; then cat "$root/probe.log"; exit 1; fi
+  sleep 0.1
+done
+[[ "$flipped" == 1 ]] || { echo 'Overlay region update was not acknowledged'; cat "$root/probe.log"; exit 1; }
+# The fixture flushed the atomic frame+region commit before acknowledging.
+# Leave one compositor dispatch interval before sending another client event.
+sleep 0.25
+POSTHORN_HEADLESS_POINTER_TEST=1 \
+  ./target/debug/examples/qa_virtual_pointer 120 40 1280 720 273
+reverse_below=0
+for _ in {1..30}; do
+  if [[ -e "$root/received" ]] && [[ "$(wc -l <"$root/received")" -ge 3 ]]; then
+    reverse_below=1
+    break
+  fi
+  if ! kill -0 "$probe_pid" 2>/dev/null; then cat "$root/probe.log"; exit 1; fi
+  sleep 0.1
+done
+[[ "$reverse_below" == 1 ]] && [[ "$(sed -n '3p' "$root/received")" == lower ]] ||
+  { echo 'Updated overlay failed to pass right-half click through'; cat "$root/received"; exit 1; }
+POSTHORN_HEADLESS_POINTER_TEST=1 \
+  ./target/debug/examples/qa_virtual_pointer 40 40 1280 720 273
+reverse_above=0
+for _ in {1..30}; do
+  if [[ -e "$root/received" ]] && [[ "$(wc -l <"$root/received")" -ge 4 ]]; then
+    reverse_above=1
+    break
+  fi
+  if ! kill -0 "$probe_pid" 2>/dev/null; then cat "$root/probe.log"; exit 1; fi
+  sleep 0.1
+done
+[[ "$reverse_above" == 1 ]] &&
+  [[ "$(wc -l <"$root/received")" == 4 ]] &&
+  [[ "$(sed -n '4p' "$root/received")" == upper ]] ||
+  { echo 'Updated overlay failed to receive left-half click'; cat "$root/received"; exit 1; }
+echo 'Atomic initial and in-place redraw input regions: pass-through and upper hits OK'
