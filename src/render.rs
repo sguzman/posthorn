@@ -406,17 +406,17 @@ pub fn render_notification_group_with_icon_scale(
             paint_icon(&context,&icon,x,y,scale,icon_radius)?;
             match location {
                 "right"=>available_w=(available_w-iw-2.0*right).max(1.0),
-                "top"=>{text_y+=ih+2.0*top;available_h=(available_h-ih-2.0*top).max(1.0)},
+                "top"=>{text_y+=ih+top;available_h=(available_h-ih-2.0*top).max(1.0)},
                 "bottom"=>available_h=(available_h-ih-2.0*bottom).max(1.0),
-                _=>{text_x+=iw+2.0*left;available_w=(available_w-iw-2.0*left).max(1.0)},
+                _=>{text_x+=iw+left;available_w=(available_w-iw-2.0*left).max(1.0)},
             }
         }
     }
 
-    context.rectangle(text_x, text_y, available_w, available_h);
-    context.clip();
-    context.move_to(text_x, text_y);
-    set_color(&context, foreground);
+    // Pinned Mako v1.11.0 render.c centers text vertically for left/right
+    // icon locations (including no icon), and horizontally for top/bottom.
+    // Measure the Pango ink box before positioning: the popup's height may
+    // be determined by a tall icon rather than by its one-line text.
     let layout = pangocairo::functions::create_layout(&context);
     let font = style.get("font").map(String::as_str).unwrap_or("monospace 10");
     layout.set_font_description(Some(&pango::FontDescription::from_string(font)));
@@ -430,6 +430,20 @@ pub fn render_notification_group_with_icon_scale(
         _=>layout.set_alignment(pango::Alignment::Left),
     }
     set_mako_formatted_text(&layout,&rendered);
+    let (text_width,text_height)=if layout.character_count()>0{
+        layout.pixel_size()
+    }else{(0,0)};
+    let vertical_icon=matches!(style.get("icon-location").map(String::as_str),
+        Some("top"|"bottom"));
+    if vertical_icon {
+        text_x=(f64::from(width)-f64::from(text_width))/2.0;
+    }else{
+        text_y=(f64::from(height)-f64::from(text_height))/2.0;
+    }
+    context.rectangle(text_x,text_y,available_w,available_h);
+    context.clip();
+    context.move_to(text_x,text_y);
+    set_color(&context,foreground);
     pangocairo::functions::show_layout(&context, &layout);
     drop(layout);
     drop(context);
@@ -930,6 +944,60 @@ mod tests {
         // The text moves into the freed icon slot; this point may contain a
         // text glyph rather than background after icons are disabled.
         assert_ne!(&without.pixels[at..at+4],&[0x00,0x00,0xFF,0xFF]);
+    }
+
+    #[test]
+    fn pinned_mako_icon_text_offsets_and_axis_centering(){
+        // Pinned render.c: left text_x=icon.width+2*padding.left;
+        // top text_y=icon.height+2*padding.top. For horizontal icons it
+        // centers a short Pango line alongside a tall image; for vertical
+        // icons it centers the line across the notification width.
+        let mut note=fixture();
+        note.summary="I".into();
+        note.body.clear();
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","160"),("height","140"),("padding","4"),
+            ("border-size","0"),("font","monospace 14"),
+            ("format","%s"),("text-color","#FFFFFFFF"),
+            ("background-color","#000000FF"),("icon-location","left"),
+            ("max-icon-size","48"),
+        ]{style.insert(key.into(),value.into());}
+        let bounds=|frame:&PixelFrame|{
+            let (mut x,mut y)=(frame.width,frame.height);
+            for yy in 0..frame.height as usize{
+                for xx in 0..frame.width as usize{
+                    let i=yy*frame.stride as usize+xx*4;
+                    let pixel=&frame.pixels[i..i+4];
+                    if pixel[0]>180 && pixel[1]>180 && pixel[2]>180 && pixel[3]>220 {
+                        x=x.min(xx as u32);
+                        y=y.min(yy as u32);
+                    }
+                }
+            }
+            assert!(x<frame.width && y<frame.height,"expected actual white Pango glyph pixels");
+            (x,y)
+        };
+        let bare=bounds(&render_notification(&note,&style).unwrap());
+        note.image_data=crate::icons::decode_raw_image(
+            12,28,48,true,8,4,&[255,0,0,255].repeat(12*28));
+        let left=bounds(&render_notification(&note,&style).unwrap());
+        assert_eq!(left.0,bare.0+16,
+            "left-icon offset must equal icon width + one additional left padding");
+        assert!(left.1>bare.1,
+            "Mako centers short text vertically beside a taller icon");
+
+        note.image_data=crate::icons::decode_raw_image(
+            12,12,48,true,8,4,&[255,0,0,255].repeat(12*12));
+        style.insert("icon-location".into(),"top".into());
+        let top=bounds(&render_notification(&note,&style).unwrap());
+        let mut no_icon=note.clone();
+        no_icon.image_data=None;
+        let vertical_bare=bounds(&render_notification(&no_icon,&style).unwrap());
+        assert_eq!(top.1,vertical_bare.1+16,
+            "top-icon offset must equal icon height + one additional top padding");
+        assert!(top.0>bare.0+30,
+            "Mako centers text horizontally below a top icon");
     }
 
     #[test]
