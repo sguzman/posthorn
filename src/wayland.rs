@@ -12,6 +12,7 @@ use wayland_client::{
     Connection, Dispatch, QueueHandle,
 };
 use std::collections::HashMap;
+use wayland_cursor::CursorTheme;
 use std::io::Write;
 use nix::poll::{poll, PollFd, PollFlags};
 use std::os::fd::AsFd;
@@ -169,6 +170,12 @@ struct ConfigureState {
     // is a separate parity item.
     cursor_shape_manager: Option<wp_cursor_shape_manager_v1::WpCursorShapeManagerV1>,
     cursor_shape_device: Option<wp_cursor_shape_device_v1::WpCursorShapeDeviceV1>,
+    cursor_compositor: Option<wl_compositor::WlCompositor>,
+    cursor_shm: Option<wl_shm::WlShm>,
+    cursor_surface: Option<wl_surface::WlSurface>,
+    cursor_theme: Option<CursorTheme>,
+    cursor_scale: u32,
+    cursor_size: u32,
     touch: Option<wl_touch::WlTouch>,
     touch_contacts: HashMap<i32,(f64,f64)>,
     active_surface: Option<wl_surface::WlSurface>,
@@ -193,6 +200,38 @@ const MAKO_MAX_TOUCHPOINTS:i32=10;
 // unit tests below therefore establish only protocol-event bookkeeping,
 // not real compositor touch delivery or Hyprland acceptance.
 impl ConfigureState {
+    /// Match Mako's legacy cursor branch on compositors which have no
+    /// wp_cursor_shape_manager_v1. The theme owns its shared-memory buffers,
+    /// so it lives as long as the attached cursor surface.
+    fn set_themed_cursor(
+        &mut self,pointer:&wl_pointer::WlPointer,serial:u32,
+        conn:&Connection,qh:&QueueHandle<Self>,
+    ){
+        let scale=self.output_scales.iter().map(|(_,scale)|*scale)
+            .max().unwrap_or(1).clamp(1,8);
+        if self.cursor_theme.is_none()||self.cursor_scale!=scale {
+            let Some(shm)=self.cursor_shm.as_ref() else{return};
+            let name=std::env::var("XCURSOR_THEME").ok()
+                .filter(|name|!name.is_empty())
+                .unwrap_or_else(||"default".into());
+            self.cursor_theme=CursorTheme::load_from_name(
+                conn,shm.clone(),&name,self.cursor_size.max(1).saturating_mul(scale)
+            ).ok();
+            self.cursor_scale=scale;
+        }
+        let Some(theme)=self.cursor_theme.as_mut() else{return};
+        let Some(cursor)=theme.get_cursor("left_ptr") else{return};
+        if cursor.image_count()==0{return;}
+        let frame=&cursor[0];
+        let (xhot,yhot)=frame.hotspot();
+        let Some(compositor)=self.cursor_compositor.as_ref() else{return};
+        let surface=self.cursor_surface.get_or_insert_with(||compositor.create_surface(qh,()));
+        surface.attach(Some(&**frame),0,0);
+        surface.set_buffer_scale(scale as i32);
+        surface.commit();
+        pointer.set_cursor(serial,Some(surface),(xhot/scale) as i32,(yhot/scale) as i32);
+    }
+
     fn touch_down(&mut self,id:i32,x:f64,y:f64){
         if (0..MAKO_MAX_TOUCHPOINTS).contains(&id) {
             self.touch_contacts.insert(id,(mako_fixed_coordinate(x),mako_fixed_coordinate(y)));
@@ -362,8 +401,8 @@ impl Dispatch<wl_seat::WlSeat, ()> for ConfigureState {
 
 impl Dispatch<wl_pointer::WlPointer, ()> for ConfigureState {
     fn event(
-        state: &mut Self, _: &wl_pointer::WlPointer, event: wl_pointer::Event,
-        _: &(), _: &Connection, _: &QueueHandle<Self>,
+        state: &mut Self, pointer: &wl_pointer::WlPointer, event: wl_pointer::Event,
+        _: &(), conn: &Connection, qh: &QueueHandle<Self>,
     ) {
         match event {
             wl_pointer::Event::Enter { serial, surface, surface_x, surface_y } => {
@@ -372,9 +411,10 @@ impl Dispatch<wl_pointer::WlPointer, ()> for ConfigureState {
                 state.pointer_y = mako_fixed_coordinate(surface_y);
                 if state.pointer_inside {
                     if let Some(device)=state.cursor_shape_device.as_ref() {
-                        // The serial must be the compositor's wl_pointer.enter serial.
-                        // A button serial is not valid for this request.
+                        // Only the compositor's wl_pointer.enter serial is valid.
                         device.set_shape(serial,wp_cursor_shape_device_v1::Shape::Default);
+                    } else {
+                        state.set_themed_cursor(pointer,serial,conn,qh);
                     }
                 }
             }
@@ -614,6 +654,14 @@ impl LivePresenter {
             .collect();
         let mut state=ConfigureState::default();
         state.cursor_shape_manager=cursor_shape_manager;
+        state.cursor_compositor=Some(compositor.clone());
+        state.cursor_shm=Some(shm.clone());
+        // Mako defaults to 24 logical pixels; it accepts a valid positive
+        // XCURSOR_SIZE and scales the loaded image by the maximum output scale.
+        state.cursor_size=std::env::var("XCURSOR_SIZE").ok()
+            .and_then(|size|crate::config::parse_signed_mako(&size))
+            .and_then(|size|u32::try_from(size).ok())
+            .filter(|size|*size>0).unwrap_or(24);
         state.output_globals=named_outputs;
         if !state.output_globals.is_empty() {
             queue.roundtrip(&mut state)?;
