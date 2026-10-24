@@ -99,6 +99,38 @@ fn check_config_accepts_mako_cli_overrides_without_starting_a_daemon(){
         .contains("8 history slots; 1 CLI overrides"),
         "joined -c must select the later config while retaining style args");
 
+    // GNU getopt_long accepts abbreviated long-option names. Every
+    // Mako style option shares flag=NULL, val=0 and required_argument,
+    // so colliding prefixes resolve to the FIRST declaration, rather
+    // than uniformly producing an ambiguous-option error.
+    let prefix=Command::new(binary).args([
+        "--check-config","--conf",alternate.to_str().unwrap(),
+        "--wid=480","--heig","140","--hist=0",
+        "--ico=0","--mar=5",
+    ]).output().unwrap();
+    assert!(prefix.status.success(),
+        "source-style getopt abbreviations rejected: {prefix:?}");
+    assert!(String::from_utf8_lossy(&prefix.stdout)
+        .contains("8 history slots; 5 CLI overrides"));
+
+    // "--ico" resolves to "icons" before icon-location/path; a numeric
+    // Boolean succeeds. "--max" resolves first to max-icon-size, which
+    // rejects zero even though max-history and max-visible permit zero.
+    // "--he" is truly ambiguous because help and height have different
+    // val/has_arg descriptors.
+    for options in [
+        vec!["--max=0"],
+        vec!["--he=100"],
+        vec!["--h=1"],
+        vec!["--does-not-exist=1"],
+    ] {
+        let invalid=Command::new(binary).args(["--check-config",
+            file.to_str().unwrap()]).args(&options).output().unwrap();
+        assert!(!invalid.status.success(),
+            "GNU getopt prefix discrepancy for {options:?}");
+        assert!(invalid.stdout.is_empty());
+    }
+
     for options in [
         vec!["--width","0"],
         vec!["--width","440\nmax-history=0"],
