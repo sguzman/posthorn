@@ -130,6 +130,74 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
     normalized
 }
 
+/// A C-locale POSIX ERE recognizes single-byte collation [.[char].]
+/// and equivalence [=[char]=] elements ONLY inside character classes.
+/// Rust regex instead treats those brackets as nested classes and can
+/// unintentionally match the delimiter '.' or '='. Rewrite only valid
+/// one-byte C-locale elements, keeping other POSIX named classes intact.
+/// The C locale rejects multi-character elements with REG_ECOLLATE.
+fn mako_posix_c_collating_elements(pattern:&str)->Result<String,String>{
+    let mut out=String::with_capacity(pattern.len());
+    let mut chars=pattern.chars().peekable();
+    let mut in_class=false;
+    while let Some(ch)=chars.next(){
+        match ch{
+            '\\'=>{
+                out.push('\\');
+                if let Some(next)=chars.next(){out.push(next);}
+            }
+            '[' if !in_class=>{
+                in_class=true;
+                out.push('[');
+            }
+            '[' if in_class=>{
+                if let Some(delimiter @ (':'|'.'|'='))=chars.peek().copied(){
+                    chars.next();
+                    let mut content=String::new();
+                    let mut terminated=false;
+                    while let Some(next)=chars.next(){
+                        if next==delimiter && chars.peek()==Some(&']'){
+                            chars.next();
+                            terminated=true;
+                            break;
+                        }
+                        content.push(next);
+                    }
+                    if !terminated{
+                        return Err("unterminated POSIX bracket element".into());
+                    }
+                    if delimiter==':'{
+                        out.push_str("[:");
+                        out.push_str(&content);
+                        out.push_str(":]");
+                    }else{
+                        let mut units=content.chars();
+                        let one=units.next().filter(|c|c.is_ascii() && *c!='\0');
+                        if one.is_none()||units.next().is_some(){
+                            return Err("invalid C-locale POSIX collating element".into());
+                        }
+                        let value=one.unwrap();
+                        // Within Rust character classes, escape literals
+                        // with class syntax (and its set-algebra operators).
+                        if matches!(value,'\\'|']'|'['|'^'|'-'|'&'|'~'){
+                            out.push('\\');
+                        }
+                        out.push(value);
+                    }
+                }else{
+                    out.push('[');
+                }
+            }
+            ']' if in_class=>{
+                in_class=false;
+                out.push(']');
+            }
+            _=>out.push(ch),
+        }
+    }
+    Ok(out)
+}
+
 /// glibc's GNU POSIX ERE accepts omitted lower repetition bounds:
 /// a{,2} is a{0,2}, and a{,} is a{0,}. Rust regex's default parser
 /// rejects those spellings. Rewrite only real unescaped repeat tokens,
@@ -282,8 +350,9 @@ impl Selector {
             if has_rust_only_posix_class(value) {
                 return Err("glibc POSIX ERE does not recognize this bracket class".into());
             }
+            let collated=mako_posix_c_collating_elements(value)?;
             let pattern = mako_posix_ere_empty_min_repetitions(
-                &mako_posix_ere_escapes(value));
+                &mako_posix_ere_escapes(&collated));
             Some(Regex::new(&format!("(?s-u:{pattern})"))
                 .map_err(|e| format!("invalid regex: {e}"))?)
         } else { None };
@@ -1349,6 +1418,51 @@ mod tests {
             fields.summary=no;
             assert!(!rule.matches(&fields), "{pattern} incorrectly matched {no:?}");
         }
+    }
+
+    #[test]
+    fn posix_c_locale_collating_and_equivalence_elements_are_single_bytes(){
+        // Checked using C-locale glibc regcomp(REG_EXTENDED|REG_NOSUB):
+        // nested [.[char].] and [=[char]=] are ONE collating character,
+        // not Rust-style nested sets admitting '.' or '='.
+        for (source,normalized) in [
+            ("^[[.a.]]$","^[a]$"),
+            ("^[[=a=]]$","^[a]$"),
+            ("^[a[.b.]c]$","^[abc]$"),
+            ("^[a[=b=]c]$","^[abc]$"),
+            ("^[[.a.]-[.z.]]$","^[a-z]$"),
+            ("^[[.].]]$",r"^[\]]$"),
+            (r"^[[.\.]]$",r"^[\\]$"),
+            ("^[[.&.]]$",r"^[\&]$"),
+            ("^[[.-.]]$",r"^[\-]$"),
+            ("^[[.^.]]$",r"^[\^]$"),
+            ("^[[:alpha:][.0.]]$","^[[:alpha:]0]$"),
+            ("^[.a.]$","^[.a.]$"),
+        ] {
+            assert_eq!(mako_posix_c_collating_elements(source).unwrap(),normalized,
+                "incorrect C-locale POSIX bracket lowering for {source:?}");
+        }
+        let mut fields=note("normal",&["default"]);
+        for pattern in ["^[[.a.]]$","^[[=a=]]$"]{
+            let selector=Selector::new("summary~",pattern).unwrap();
+            fields.summary="a";
+            assert!(selector.matches(&fields));
+            for wrong in [".","=","b"]{
+                fields.summary=wrong;
+                assert!(!selector.matches(&fields),
+                    "POSIX collation {pattern:?} also matched {wrong:?}");
+            }
+        }
+        for pattern in ["^[[.ab.]]$","^[[=ab=]]$","^[[.newline.]]$"] {
+            assert!(Selector::new("summary~",pattern).is_err(),
+                "glibc rejects multi-byte/named collating element {pattern:?}");
+            assert!(Config::parse(&format!(
+                "[summary~={pattern}]\nwidth=400\n"
+            )).is_err());
+        }
+        // Source literal UTF-8 letters occupy multiple bytes in the C
+        // locale, so equivalence elements cannot span their encoding.
+        assert!(Selector::new("summary~","^[[=é=]]$").is_err());
     }
 
     #[test]
