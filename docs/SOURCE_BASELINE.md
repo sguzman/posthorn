@@ -963,3 +963,58 @@ layer-shell popup. Actual independent surface geometry, per-surface
 hidden placeholders and simultaneous multi-output painting remain
 unverified and are not claimed complete. Production Mako, Hyprland
 configuration and the real notification bus were not changed.
+
+## Per-surface projection, rasterization, hit-testing, and two live popups
+
+Pinned Mako v1.11.0 `render.c` renders each `mako_surface`
+independently, counting total notifications, visible groups, and
+overflow notifications **within that surface**. `wayland.c` creates
+one layer-shell surface for every active output/layer/anchor surface
+identity and receives separate `wl_surface.enter` output callbacks.
+
+Posthorn now provides `surface_visibility` with ordered
+notification IDs, total counts and hidden counts per matching surface
+identity, verified at
+[de6ad42](https://github.com/sguzman/posthorn/actions/runs/40044220460).
+The new `snapshot_surface_frame_scaled` rasterizer draws only one
+surface's notification stack and its own `%h` overflow placeholder.
+A Rust unit and private D-Bus regression use two differently anchored
+surfaces and confirm that foreground and overflow colors do not bleed
+between them; CI passed **271 Rust unit and 64 private D-Bus tests**
+at [1678886](https://github.com/sguzman/posthorn/actions/runs/40044473233).
+`hit_test_on_surface` likewise uses the correct isolated surface
+coordinates, notification subset and anchor-specific stack alignment.
+Its regression uses measurable non-empty popup content; CI passed at
+[04f063d](https://github.com/sguzman/posthorn/actions/runs/40044745049).
+
+Two acceptance levels are distinguished:
+1. A standalone Wayland probe maps independent top-left and
+   bottom-right layer-shell popups on separate client connections in
+   isolated headless Sway. The compositor screenshot contains both
+   probe colors simultaneously.
+2. An explicitly opt-in Posthorn
+   `--experimental-private-multi-desktop PATH` mode maps each
+   notification surface identity using a separate `LivePresenter`,
+   compositor-output observation, SHM buffer lifetime and hit-test
+   coordinate system. The test sends two actual Freedesktop
+   `Notify` calls over **org.posthorn.Development**, targeting
+   separate anchors, and confirms both notification colors in
+   the **same headless Sway screenshot**.
+
+Both jobs passed on
+[cf1dac6](https://github.com/sguzman/posthorn/actions/runs/40044998721):
+**272 Rust unit tests, 65 private D-Bus tests**, and existing
+single-surface 1×/1.25×/2× headless Sway acceptance. The new
+simultaneous multi-surface screenshot check was executed at 1×,
+not at fractional or HiDPI scales.
+
+The original `--experimental-private-desktop` single-surface
+rendering path remains intact for regression coverage. This evidence
+supersedes the earlier limitation that Posthorn had only a single
+live presenter: the separate **experimental** renderer now maps
+multiple real layer-shell surfaces in isolated Sway. It does **not**
+verify multiple physical outputs, output migration/hot-unplug under
+the multi-renderer, simultaneous multi-surface pointer input on
+physical Hyprland, or the reversible live Mako replacement gate.
+The user's installed Mako, Hyprland/autostart and real notification
+D-Bus ownership remain untouched.
