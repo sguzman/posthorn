@@ -1456,6 +1456,94 @@ EOF
     org.freedesktop.Notifications CloseNotification 'u' "$replace_id" >/dev/null
   echo 'Private on-notify direct replacement/quiet reactivation lifecycle: OK'
   echo 'on-notify ID delivery and quiet-mode sound-hook suppression: OK'
+  # Verify all three real outcome categories, rather than only the
+  # synthetic qa-audio-hook case. Commands are entirely private log writes.
+  cat >> "$root/mako.conf" <<EOF
+[category=success]
+on-notify=exec printf 'success:%s\n' "\$id" >> '$root/qa-category-hooks.log'
+[category=failure]
+on-notify=exec printf 'failure:%s\n' "\$id" >> '$root/qa-category-hooks.log'
+[category=warning]
+on-notify=exec printf 'warning:%s\n' "\$id" >> '$root/qa-category-hooks.log'
+[mode=quiet]
+on-notify=none
+EOF
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  category_ids=""
+  category_count=0
+  for category in success failure warning; do
+    reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+      org.posthorn.Development /org/freedesktop/Notifications \
+      org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+      'Posthorn category-hook QA' 0 '' "Category $category" '' \
+      0 1 'category' 's' "$category" 30000)"
+    [[ "$reply" == u\ * ]] || { echo "Invalid $category hook ID"; exit 1; }
+    note_id="$(printf '%s\n' "$reply" | cut -d ' ' -f 2)"
+    category_ids="$category_ids $note_id"
+    category_count=$((category_count+1))
+    printf '%s:%s\n' "$category" "$note_id" >> "$root/expected-category-hooks.log"
+    observed=0
+    for _ in {1..40}; do
+      if [[ -f "$root/qa-category-hooks.log" ]] &&
+         [[ "$(tail -n 1 "$root/qa-category-hooks.log")" == "$category:$note_id" ]]; then
+        observed=1
+        break
+      fi
+      sleep 0.1
+    done
+    [[ "$observed" == 1 ]] || {
+      echo "Category $category failed to execute its own hook for ID $note_id"
+      exit 1
+    }
+    [[ "$(wc -l < "$root/qa-category-hooks.log")" -eq "$category_count" ]] || {
+      echo "Category $category emitted duplicate hooks"
+      exit 1
+    }
+  done
+  cmp -s "$root/expected-category-hooks.log" "$root/qa-category-hooks.log" || {
+    echo 'Category hooks did not preserve category names and notification IDs'
+    exit 1
+  }
+  # Reload and mode changes do not represent new sender Notify events.
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  sleep 0.25
+  [[ "$(wc -l < "$root/qa-category-hooks.log")" -eq 3 ]] || {
+    echo 'Reload replayed category sound hooks'
+    exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako SetMode \
+    's' quiet >/dev/null
+  for category in success failure warning; do
+    reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+      org.posthorn.Development /org/freedesktop/Notifications \
+      org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+      'Posthorn quiet-category QA' 0 '' "Quiet $category" '' \
+      0 1 'category' 's' "$category" 30000)"
+    [[ "$reply" == u\ * ]] || { echo "Invalid quiet $category hook ID"; exit 1; }
+    category_ids="$category_ids $(printf '%s\n' "$reply" | cut -d ' ' -f 2)"
+  done
+  sleep 0.4
+  cmp -s "$root/expected-category-hooks.log" "$root/qa-category-hooks.log" || {
+    echo 'Quiet mode failed to suppress all three outcome sound hooks'
+    exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako SetMode \
+    's' default >/dev/null
+  sleep 0.2
+  cmp -s "$root/expected-category-hooks.log" "$root/qa-category-hooks.log" || {
+    echo 'Leaving quiet mode replayed category sound hooks'
+    exit 1
+  }
+  for note_id in $category_ids; do
+    busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+      org.posthorn.Development /org/freedesktop/Notifications \
+      org.freedesktop.Notifications CloseNotification 'u' "$note_id" >/dev/null
+  done
+  echo 'Private success/failure/warning hook routing and quiet suppression: OK'
 fi
 
 echo "Headless Sway ${test_scale}x + D-Bus popups, compositor pointer at 1x, timer, reload and live modes: OK"
