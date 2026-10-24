@@ -48,11 +48,68 @@ pub fn hit_test_on_surface(
     hit_test_impl(runtime,click,Some(surface_key))
 }
 
+/// Surface-local rectangles in unscaled Wayland logical coordinates. The
+/// compositor's input region and Posthorn's click binding resolver must share
+/// these hotspots so that transparent margins pass pointer events through.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InputRect {
+    pub x:i32, pub y:i32, pub width:i32, pub height:i32,
+}
+
+fn positioned_targets(
+    runtime:&SharedRuntime,
+    surface_key:Option<&(String,String,String)>,
+)->io::Result<Vec<(u32,crate::config::Options,InputRect)>>{
+    let config=runtime.config();
+    let (all_notes,modes)=ordered_visible(runtime)?;
+    let notes=all_notes.into_iter().filter(|entry|{
+        surface_key.is_none_or(|key|entry.notification.surface_spec.as_ref()==Some(key))
+    }).collect::<Vec<_>>();
+    let mut margins=Vec::with_capacity(notes.len());
+    let mut dimensions=Vec::with_capacity(notes.len());
+    let mut styles=Vec::with_capacity(notes.len());
+    for entry in &notes {
+        let n=&entry.notification;
+        let style=style_for_note_index(runtime,n,&modes,entry.group_index);
+        margins.push(style.get("margin")
+            .and_then(|s|PopupMargins::parse_mako(s))
+            .unwrap_or(PopupMargins::uniform(10)));
+        let width=style.get("width")
+            .and_then(|v|crate::config::parse_nonnegative_mako(v))
+            .unwrap_or(300) as u32;
+        let height=crate::render::measure_notification_height_group(
+            n,&style,if entry.group_count>=2{entry.group_count}else{0}
+        ).map_err(error)? as u32;
+        dimensions.push((width,height));
+        styles.push(style);
+    }
+    if dimensions.is_empty(){return Ok(Vec::new());}
+    let anchor=surface_key.map(|key|key.2.as_str()).unwrap_or_else(||
+        config.global.get("anchor").map(String::as_str).unwrap_or("top-right"));
+    let (_,_,positions)=mako_stack_geometry(&dimensions,&margins,stack_alignment(anchor))
+        .map_err(error)?;
+    Ok(notes.into_iter().zip(styles).zip(dimensions).zip(positions)
+        .map(|(((entry,style),(width,height)),(x,y))|{
+            (entry.notification.id,style,InputRect{
+                x,y,width:width as i32,height:height as i32
+            })
+        }).collect())
+}
+
+/// These are Mako's per-notification wl_region hotspots, not the bounding
+/// rectangle of a layer-shell buffer. Excluded gaps remain click-through.
+pub fn input_rectangles(
+    runtime:&SharedRuntime,
+    surface_key:Option<&(String,String,String)>,
+)->io::Result<Vec<InputRect>>{
+    Ok(positioned_targets(runtime,surface_key)?.into_iter()
+        .map(|(_,_,rect)|rect).collect())
+}
+
 fn hit_test_impl(
     runtime:&SharedRuntime,click:PointerClick,
     surface_key:Option<&(String,String,String)>,
 )->io::Result<Option<(u32,NotifyBinding)>>{
-    let config=runtime.config();
     if !click.x.is_finite()||!click.y.is_finite()||click.x<0.0||click.y<0.0 {
         return Ok(None);
     }
@@ -63,55 +120,21 @@ fn hit_test_impl(
         274=>"on-button-middle",
         _=>return Ok(None),
     };
-    let (all_notes,modes)=ordered_visible(runtime)?;
-    let notes=all_notes.into_iter().filter(|entry|{
-        surface_key.is_none_or(|key|entry.notification.surface_spec.as_ref()==Some(key))
-    }).collect::<Vec<_>>();
-    // Layer-shell's surface width is the largest notification width.
-    // Narrow notifications may be left, centered, or right aligned.
-    let mut margins=Vec::with_capacity(notes.len());
-    let dimensions:Vec<_>=notes.iter().map(|entry|{
-        let n=&entry.notification;
-        let style=style_for_note_index(runtime,n,&modes,entry.group_index);
-        margins.push(style.get("margin")
-            .and_then(|s|PopupMargins::parse_mako(s))
-            .unwrap_or(PopupMargins::uniform(10)));
-        let w=style.get("width")
-            .and_then(|v|crate::config::parse_nonnegative_mako(v))
-            .unwrap_or(300) as f64;
-        // Hit-testing must use the same Pango shrink-wrapped height as
-        // the renderer, not the configured maximum.
-        let h=crate::render::measure_notification_height_group(
-            n,&style,if entry.group_count>=2{entry.group_count}else{0}
-        ).map_err(error)? as f64;
-        Ok::<(f64,f64),io::Error>((w,h))
-    }).collect::<io::Result<Vec<_>>>()?;
-    let anchor=surface_key.map(|key|key.2.as_str()).unwrap_or_else(||
-        config.global.get("anchor").map(String::as_str).unwrap_or("top-right"));
-    let align=stack_alignment(anchor);
-    if dimensions.is_empty(){return Ok(None);}
-    let sizes:Vec<_>=dimensions.iter().map(|(w,h)|(*w as u32,*h as u32)).collect();
-    let (_,_,positions)=mako_stack_geometry(&sizes,&margins,align).map_err(error)?;
-    for ((entry,(w,h)),(x,y)) in notes.iter()
-        .zip(dimensions.iter().copied()).zip(positions) {
-        let (x,y)=(f64::from(x),f64::from(y));
-        let n=&entry.notification;
-        let style=style_for_note_index(runtime,n,&modes,entry.group_index);
-        if click.y >= y && click.y < y+h {
-            // Mako checks the entire rectangle for each notification
-            // before moving to the next. In overlapping stacks, a narrow
-            // top notification can miss the X coordinate while a wider
-            // notification underneath still contains the click.
-            if click.x<x || click.x>=x+w {continue;}
-            let fallback=match click.button {
-                272=>"invoke-default-action",
-                273|0=>"dismiss",
-                _=>"none",
-            };
-            let raw=style.get(name).map(String::as_str).unwrap_or(fallback);
-            return NotifyBinding::parse(raw).map(|binding|Some((n.id,binding)))
-                .map_err(error);
+    for (id,style,rect) in positioned_targets(runtime,surface_key)? {
+        if click.y<f64::from(rect.y) ||
+           click.y>=f64::from(rect.y)+f64::from(rect.height) ||
+           click.x<f64::from(rect.x) ||
+           click.x>=f64::from(rect.x)+f64::from(rect.width) {
+            continue;
         }
+        let fallback=match click.button {
+            272=>"invoke-default-action",
+            273|0=>"dismiss",
+            _=>"none",
+        };
+        let raw=style.get(name).map(String::as_str).unwrap_or(fallback);
+        return NotifyBinding::parse(raw).map(|binding|Some((id,binding)))
+            .map_err(error);
     }
     Ok(None)
 }
