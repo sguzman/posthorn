@@ -1257,3 +1257,51 @@ Hyprland test. Accordingly T105 advances from 81% to **82%**,
 while the M0 milestone remains **88%**, T503 remains 51% and
 the unauthorized production cutover T504 remains 0%.
 The real notification session and installed Mako were not touched.
+
+## Truncated fractional icon dimensions and source-matched icon positioning
+
+Pinned Mako **v1.11.0** `icon.c:create_icon` calculates
+`fit_to_square` and assigns scaled `icon->width` and
+`icon->height` into `int` fields, **truncating** fractional
+dimensions. `render.c:render_notification` uses those truncated
+sizes to reserve Pango text space and draw the icon clipping
+rectangle. It does not shrink the image again to fit the remaining
+notification height or text area. A top/bottom icon is centered at
+`(notif_width - icon->width) / 2`, independently of asymmetric
+text padding.
+
+Posthorn previously **rounded** both scaled dimensions, then
+independently reduced the scale in the painter to fit the
+shrink-wrapped content area. The result could paint an icon narrower
+than Mako's selected size, mismeasure popup height by one pixel
+and shift a centered vertical icon when horizontal text insets were
+asymmetric.
+
+[Commit 000140c](https://github.com/sguzman/posthorn/commit/000140c47cbf9972e5cbe671a362001c5ae04aca)
+corrected integer dimension truncation, applied the same icon scale
+to measurement and painting, clips to Mako's truncated dimensions,
+and centers top/bottom icons without text padding. The new unit
+regressions use a **12×7** red bitmap constrained by
+`max-icon-size=8`, requiring an **8×4** logical clipping
+rectangle. They also verify the leftmost and rightmost icon pixels
+and top-centered placement under nonuniform insets.
+
+The initial test commit used exact 255-channel Cairo pixel asserts;
+the rasterizer emitted 254 on fractionally sampled red edges,
+without changing the geometric boundary. The test-only correction
+[0e2ca7b](https://github.com/sguzman/posthorn/commit/0e2ca7bf075e0852845706902f35c5eca2df1365)
+accepts that **one-level** premultiplied color rounding while still
+checking exact transparent/black bounds and solid alpha.
+
+[CI 40057301556](https://github.com/sguzman/posthorn/actions/runs/40057301556)
+passed **both jobs**: Rust unit and private D-Bus suites,
+plus the 1×, 1.25×, 2×, dual-output, input-region, mixed-output
+DPI, and signed-padding disposable Sway gates. The new bitmap
+truncation and position checks were rendered-pixel unit tests;
+there has not been a side-by-side photographic oracle against
+upstream Mako on physical Hyprland.
+
+T105 advances to **83%**; P1 remains **89%** and M0 stays
+**88%** because the remaining acceptance gates are independent.
+T503 remains 51% and T504 remains 0%. Neither installed Mako
+nor production Wayland/D-Bus state was modified.
