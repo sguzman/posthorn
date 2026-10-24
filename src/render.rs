@@ -9,7 +9,7 @@ use crate::config::Options;
 use crate::format::{decode_format, render_notification_format, FormatNotification};
 use crate::notification::Notification;
 use crate::raster::{Color,ProgressBlend,parse_progress_color_mako};
-use crate::icons::{IconPixels,load_note_icon,load_note_icon_scaled};
+use crate::icons::{IconPixels,load_note_icon_scaled};
 
 #[derive(Clone, Debug)]
 pub struct PixelFrame {
