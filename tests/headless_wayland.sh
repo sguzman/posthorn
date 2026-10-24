@@ -108,6 +108,7 @@ border-size=0
 icons=0
 max-visible=1
 default-timeout=0
+on-button-right=dismiss
 background-color=#305747
 text-color=#FFFFFFFF
 EOF_NINE
@@ -159,9 +160,21 @@ EOF_NINE
     exit 1
   }
 
-  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
-    org.posthorn.Development /org/freedesktop/Notifications \
-    org.freedesktop.Notifications CloseNotification u "$id" >/dev/null
+  # Read the actual painted bounds instead of guessing Mako's Pango
+  # height. PNG coordinates are physical; the virtual pointer expects
+  # logical Wayland coordinates, so divide the midpoint by scale 9.
+  read -r x0 x1 y0 y1 <<< "$(./target/debug/examples/qa_png_probe \
+    "$root/nine-visible.png" '#305747' 350 bounds)"
+  click_x=$(( (x0 + x1) / 18 ))
+  click_y=$(( (y0 + y1) / 18 ))
+  if (( click_x < 0 || click_x >= 213 || click_y < 0 || click_y >= 120 )); then
+    echo "9x computed logical click outside output: $click_x,$click_y"
+    exit 1
+  fi
+  POSTHORN_HEADLESS_POINTER_TEST=1 ./target/debug/examples/qa_virtual_pointer \
+    "$click_x" "$click_y" 213 120 273
+  # An explicitly sent D-Bus CloseNotification would hide an input-region
+  # defect, so require *compositor-originated right click* to dismiss it.
   cleared=0
   for _ in {1..45}; do
     if grim "$root/nine-cleared.png" 2>/dev/null &&
@@ -175,10 +188,16 @@ EOF_NINE
   done
   [[ "$cleared" == 1 ]] || {
     cat "$root/nine-posthorn.log"
-    echo '9x private notification did not disappear after CloseNotification'
+    echo '9x private notification did not disappear after compositor right click'
     exit 1
   }
-  echo 'Actual Sway output scale 9x: private notification painted and dismissed'
+  listed="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListNotifications)"
+  if [[ "$listed" == *'Nine'* ]]; then
+    echo '9x clicked notification remains active in the private control API'
+    exit 1
+  fi
+  echo 'Actual Sway output scale 9x: private popup rendered, pointer-dismissed and cleared'
   exit 0
 fi
 
