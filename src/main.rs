@@ -191,12 +191,6 @@ async fn main() -> ExitCode {
                 }
             }
         }
-        (Some("--experimental-private-service"), Some(path)) => {
-            match posthorn::service::run_private_service_from_path(Path::new(&path)).await {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(error) => { eprintln!("Posthorn test D-Bus service failed: {error}"); ExitCode::FAILURE }
-            }
-        }
         _ => {
             eprintln!("Posthorn is not ready to replace Mako. Use --help or --check-config PATH.");
             ExitCode::FAILURE
