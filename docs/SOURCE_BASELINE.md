@@ -377,6 +377,18 @@ scaling, multi-output and pointer acceptance passed at
 This does not prove live mixed-DPI Hyprland monitor acceptance, and
 the 99% T402 parity gate remains incomplete.
 
+A second isolated acceptance test, `tests/private_theme_scale.rs`, sends
+a Freedesktop `Notify` carrying the themed app-icon name through a private
+D-Bus service, then rasterizes the **received notification** against two
+synthetic PNGs in `16x16/apps` and `16x16/apps@2`. It verifies an actual
+red pixel at 1× and green pixel at 2× without changing the logical
+popup geometry. This exercises D-Bus ingestion, configured icon-path,
+GdkPixbuf decoding, theme search, and Cairo painting together.
+Both CI jobs passed at
+[commit 8be2bfd](https://github.com/sguzman/posthorn/actions/runs/40123319975).
+Physical Hyprland and production Mako cutover remain untested and
+unauthorized.
+
 ## Relative and non-UTF-8 file icon URLs
 
 Mako v1.11 `icon.c:resolve_icon` strips the `file://` prefix and
