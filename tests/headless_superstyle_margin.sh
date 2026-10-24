@@ -92,3 +92,64 @@ done
   exit 1
 }
 echo "Mako v1.11.0 unmatched-criteria superset outer margin: right 85, top 32 OK"
+# Mako dbus/mako.c:handle_reload rebuilds the styles and surfaces of
+# existing notifications on successful Reload. A rejected reload must
+# preserve the old configuration AND its already-visible popup position.
+# All screenshots and bus calls remain within this disposable Sway session.
+wait_position(){
+  local label="$1" expected_right="$2" expected_top="$3"
+  local expected_x=$((1280-expected_right-1))
+  local observed=""
+  for _ in {1..65}; do
+    if grim -o HEADLESS-1 "$root/$label.png" 2>/dev/null; then
+      if observed="$(./target/debug/examples/qa_png_probe \
+          "$root/$label.png" '#E5923C' 200 bounds 2>/dev/null)"; then
+        read -r left_x right_x top_y bottom_y <<<"$observed"
+        if ((right_x >= expected_x-1 && right_x <= expected_x+1 &&
+             top_y >= expected_top-1 && top_y <= expected_top+1)); then
+          return 0
+        fi
+      fi
+    fi
+    if ! kill -0 "$posthorn_pid" 2>/dev/null; then
+      echo "Private service died during $label" >&2
+      cat "$root/posthorn.log" >&2
+      return 1
+    fi
+    sleep 0.12
+  done
+  echo "$label: expected right $expected_right top $expected_top; observed ${observed:-nothing}" >&2
+  cat "$root/posthorn.log" >&2
+  return 1
+}
+# This is a genuine change to the two unmatched criteria, not a global
+# margin, and must reposition the notification without re-sending Notify.
+sed -i -e 's/0,85,0,0/0,40,0,0/' -e 's/32,0,0,0/12,0,0,0/' "$root/mako.conf"
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+wait_position valid-reload 40 12
+
+# Deliberately invalid option within the final criterion: Mako rejects the
+# entire new file, not just the option. The prior 40/12 layout must survive.
+printf '\nnot-a-mako-option=ignored\n' >>"$root/mako.conf"
+if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload \
+    >"$root/rejected-reload.log" 2>&1; then
+  echo 'Invalid config reload succeeded unexpectedly'
+  exit 1
+fi
+grep -Fq 'Unable to parse configuration file' "$root/rejected-reload.log" || {
+  echo 'Invalid reload returned the wrong error'
+  cat "$root/rejected-reload.log"
+  exit 1
+}
+wait_position rejected-reload 40 12
+
+# Revert the file to the original margins; the third reload demonstrates
+# the notification survives both successful and failed configuration changes.
+sed -i -e '/^not-a-mako-option=ignored$/d' \
+  -e 's/0,40,0,0/0,85,0,0/' -e 's/12,0,0,0/32,0,0,0/' "$root/mako.conf"
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+wait_position restored-reload 85 32
+echo 'Private Mako superstyle reload: 85/32 -> 40/12 -> rejected/40/12 -> 85/32 OK'
