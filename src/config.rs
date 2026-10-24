@@ -3,7 +3,7 @@
 //! Preserves Mako's INI-like `key=value` format and ordered criteria rules.
 //! This is deliberately not TOML (TOML is scheduled *after* Mako parity).
 
-use regex::Regex;
+use regex::bytes::Regex;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::fs;
@@ -182,13 +182,14 @@ impl Selector {
         }
         let regex = if key == "summary~" || key == "body~" {
             // Mako uses POSIX REG_EXTENDED|REG_NOSUB without REG_NEWLINE.
-            // Unlike Rust regex's default, POSIX '.' matches a newline in
-            // that mode. Dot-all must NOT also enable multiline anchors.
+            // Unlike Unicode-aware Rust regex, C-locale POSIX matching is
+            // byte-oriented. Dot-all must also match newlines without
+            // enabling multiline anchors; -u keeps ASCII class semantics.
             if has_rust_only_group_extension(value) {
                 return Err("POSIX ERE does not support (? group extensions".into());
             }
             let pattern = mako_posix_ere_escapes(value);
-            Some(Regex::new(&format!("(?s:{pattern})"))
+            Some(Regex::new(&format!("(?s-u:{pattern})"))
                 .map_err(|e| format!("invalid regex: {e}"))?)
         } else { None };
         if ["actionable", "expiring", "grouped", "hidden"].contains(&key)
@@ -238,7 +239,7 @@ impl Selector {
             _ => return false,
         };
         match &self.regex {
-            Some(re) => re.is_match(observed),
+            Some(re) => re.is_match(observed.as_bytes()),
             None => observed == self.value,
         }
     }
@@ -1047,6 +1048,36 @@ mod tests {
         assert!(digit.matches(&fields));
         // Escaped backslashes represent literal backslashes, not an escape.
         assert_eq!(mako_posix_ere_escapes(r"\\x41"), r"\\x41");
+    }
+
+    #[test]
+    fn posix_c_locale_regex_uses_ascii_classes_and_byte_width() {
+        // Mako v1.11 uses regcomp(REG_EXTENDED|REG_NOSUB) without
+        // setlocale(). glibc's initial C locale matches *bytes*:
+        // [[:alpha:]] and GNU \w do not include non-ASCII letters,
+        // and . consumes one UTF-8 byte rather than one Unicode scalar.
+        let mut traits=note("normal",&["default"]);
+        for pattern in [r"^[[:alpha:]]+$", r"^\w+$", r"^[[:alnum:]]+$"] {
+            let selector=Selector::new("summary~",pattern).unwrap();
+            traits.summary="ASCII_123";
+            if pattern.contains("alpha") {
+                traits.summary="Ascii";
+            }
+            assert!(selector.matches(&traits),"{pattern} must match ASCII");
+            traits.summary="café";
+            assert!(!selector.matches(&traits),
+                "glibc C-locale {pattern} must not match accented Unicode");
+            traits.summary="東京";
+            assert!(!selector.matches(&traits),
+                "glibc C-locale {pattern} must not match CJK Unicode");
+        }
+        traits.summary="é";
+        assert!(!Selector::new("summary~",r"^.$").unwrap().matches(&traits),
+            "one POSIX dot cannot consume a two-byte UTF-8 character");
+        assert!(Selector::new("summary~",r"^..$").unwrap().matches(&traits),
+            "two POSIX dots consume two UTF-8 bytes in the C locale");
+        traits.summary="A";
+        assert!(Selector::new("summary~",r"^.$").unwrap().matches(&traits));
     }
 
     #[test]
