@@ -1893,9 +1893,9 @@ passed **both** the Rust/private D-Bus and private headless Sway
 jobs at `c2bc339`. The Rust job includes 294 library tests
 and 73 private D-Bus tests. Headless compositor checks include
 1x, 1.25x, 2x, multi-output, mixed-DPI, pointer routing, input
-regions and redraw acceptance. **No compositor scale-9 screenshot
-has been accepted**; only the explicit scale-9 Rust pixel and
-Pango regressions have run. Physical Hyprland and production Mako
+regions and redraw acceptance. **At this earlier checkpoint, no compositor scale-9 screenshot
+had yet been accepted**; only the explicit scale-9 Rust pixel and
+Pango regressions had run. Physical Hyprland and production Mako
 cutover remain untested/unauthorized.
 
 **T401 remains 99% (delta 0pp); P4 remains 99% (delta 0pp);
@@ -1903,3 +1903,48 @@ strict M0 remains 89% (delta 0pp).** This is real, source-backed
 correctness progress without inflating acceptance percentages.
 T503 stays at 51% and T504 at 0%. No production daemon, bus
 name or workstation configuration was touched.
+
+## Actual 9x Sway compositor and pointer acceptance
+
+The source-matched scale fix above is now verified against an actual
+isolated Wayland compositor, not only in Rust unit tests. The CI-guarded
+`POSTHORN_TEST_SCALE=9` path uses Sway on a dedicated disposable
+headless backend at 1920×1080 *physical* pixels (about 213×120
+logical). It explicitly confirms the compositor's `get_outputs`
+scale of 9, launches Posthorn's private `org.posthorn.Development`
+D-Bus service, and paints a small 64-pixel logical-width popup. The
+Rust GDK-Pixbuf screenshot probe requires hundreds of new exact-color
+pixels relative to a pre-notification compositor screenshot. It then
+requires the popup's pixels to return to baseline.
+
+[First full compositor-scale acceptance run 40141755728](https://github.com/sguzman/posthorn/actions/runs/40141755728)
+passed both Rust/private D-Bus and Sway CI on
+[commit 6648293](https://github.com/sguzman/posthorn/commit/664829357fe9e76d7bd93dba80b8cc4640e62c7d).
+That verified real scale 9, pixel presentation and explicit private
+D-Bus dismissal. The initial test commit required a Bash escape
+correction; only the corrected green run is accepted.
+
+The acceptance was extended to real high-DPI compositor *input*:
+`qa_png_probe bounds` determines the painted physical color rectangle;
+the midpoint is converted to logical Wayland coordinates (dividing by
+9); the existing strictly headless-guarded Rust virtual pointer sends
+BTN_RIGHT inside that popup. The fixture then requires both the
+screenshot pixels to disappear and the active private Mako-control
+list to exclude the dismissed notification. There is **no direct
+CloseNotification fallback** in the pointer test, so a broken scale-9
+input region would fail the acceptance gate.
+
+[Final acceptance run 40142024109](https://github.com/sguzman/posthorn/actions/runs/40142024109)
+passed **both** full Rust/private D-Bus and headless compositor jobs
+on [commit 5d7a5f2](https://github.com/sguzman/posthorn/commit/5d7a5f23bd0199f16b29fbffba55c924b9e41cec).
+The established 1×, 1.25×, 2×, mixed-output and other compositor
+acceptance steps also remained green.
+
+**T403 advanced 98% -> 99% (+1 percentage point)** for successful
+high-DPI pointer hitbox and dismissal evidence; T401 stays 99%,
+P4 stays 99%, and strict M0 stays 89% (both delta 0pp by the
+documented atomic-mean rounding). Physical Hyprland pointer/touch,
+actual user monitors, and XDG activation remain separate unclosed
+acceptance; T503 is still 51% and T504 is still 0%. The original
+workstation daemon, notification bus, desktop config, and input
+session were never accessed.
