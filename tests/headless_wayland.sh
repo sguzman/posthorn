@@ -118,9 +118,10 @@ if [[ "$test_scale" == 1 ]]; then
   echo 'Simultaneous independent top-left and bottom-right layer-shell surfaces: OK'
 fi
 
-# The opt-in multi-surface private renderer must display two
-# notifications on separate layer-shell surfaces simultaneously.
-if [[ "$test_scale" == 1 ]]; then
+# Exercise simultaneous independent layer-shell notifications on the
+# 1x, fractional 1.25x and 2x isolated compositor configurations.
+# Output scale is compositor-derived and each presenter owns its buffer.
+if [[ "$test_scale" == 1 || "$test_scale" == 1.25 || "$test_scale" == 2 ]]; then
   cat > "$root/multi.conf" <<'EOF_MULTI'
 width=160
 height=56
