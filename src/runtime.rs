@@ -32,6 +32,8 @@ pub struct SharedRuntime {
     /// renderer with independent entered outputs remains future work.
     known_surface_specs: Arc<Mutex<Vec<(String,String,String)>>>,
     source_path: Option<Arc<PathBuf>>,
+    /// Original Mako CLI style args are replayed after each disk reload.
+    cli_overrides: Arc<Vec<(String,String)>>,
     revision: Arc<AtomicU64>,
     modes: Arc<Mutex<Vec<String>>>,
 }
@@ -49,6 +51,7 @@ impl SharedRuntime {
             surface_output: Arc::new(RwLock::new(None)),
             known_surface_specs: Arc::new(Mutex::new(Vec::new())),
             source_path: None,
+            cli_overrides: Arc::new(Vec::new()),
             revision: Arc::new(AtomicU64::new(0)),
             modes: Arc::new(Mutex::new(vec!["default".into()])),
         }
@@ -106,8 +109,22 @@ impl SharedRuntime {
     }
 
     pub fn from_path(path:&Path)->Result<Self,crate::config::ConfigError>{
-        let mut runtime=Self::new(Config::from_path(path)?);
+        Self::from_path_with_cli_overrides(path,&[])
+    }
+
+    /// Mako parses the config file, then applies global CLI overrides in
+    /// the original argv order. Keep the arguments for later Reload calls,
+    /// which upstream also replays without restarting existing timers.
+    pub fn from_path_with_cli_overrides(
+        path:&Path,overrides:&[(String,String)]
+    )->Result<Self,crate::config::ConfigError>{
+        let mut config=Config::from_path(path)?;
+        for (key,value) in overrides{
+            config.apply_cli_override(key,value)?;
+        }
+        let mut runtime=Self::new(config);
         runtime.source_path=Some(Arc::new(path.to_path_buf()));
+        runtime.cli_overrides=Arc::new(overrides.to_vec());
         Ok(runtime)
     }
 
@@ -116,7 +133,13 @@ impl SharedRuntime {
     pub fn reload(&self)->Result<(),String>{
         let path=self.source_path.as_ref()
             .ok_or("reload requires a configuration file path")?;
-        let updated=Config::from_path(path).map_err(|e|e.to_string())?;
+        let mut updated=Config::from_path(path).map_err(|e|e.to_string())?;
+        // Upstream reload_config -> parse_config_arguments repeats the
+        // post-file getopt pass. Validate before the active-config write
+        // lock, so any invalid source remains wholly non-disruptive.
+        for (key,value) in self.cli_overrides.iter(){
+            updated.apply_cli_override(key,value).map_err(|e|e.to_string())?;
+        }
         let sort=SortPolicy::from_config(&updated.sort);
         let max_history=updated.max_history;
         // Store and new configuration are updated under the same gate used
@@ -451,6 +474,47 @@ mod tests {
     use super::*;
     use crate::notification::{Request, Urgency};
     use std::time::Duration;
+
+    #[test]
+    fn reload_replays_cli_options_after_disk_file_in_original_order(){
+        let dir=tempfile::tempdir().unwrap();
+        let file=dir.path().join("mako.conf");
+        std::fs::write(&file,"width=215\nmax-history=7\n\
+            default-timeout=5000\n[category=warning]\nwidth=340\n").unwrap();
+        let overrides=vec![
+            ("width".into(),"450".into()),
+            ("max-history".into(),"2".into()),
+            ("sort".into(),"+priority".into()),
+            ("sort".into(),"-priority".into()),
+        ];
+        let runtime=SharedRuntime::from_path_with_cli_overrides(&file,&overrides).unwrap();
+        assert_eq!(runtime.config().global["width"],"450");
+        assert_eq!(runtime.config().max_history,2);
+        assert_eq!(runtime.config().sort,vec!["-time","-priority"]);
+        let now=Instant::now();
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(id,now).unwrap();
+        let deadline=runtime.next_deadline().unwrap();
+        std::fs::write(&file,"width=310\nmax-history=9\n\
+            default-timeout=100\n[category=warning]\nwidth=500\n").unwrap();
+        runtime.reload().unwrap();
+        let updated=runtime.config();
+        assert_eq!(updated.global["width"],"450",
+            "disk file must not override persistent CLI arguments");
+        assert_eq!(updated.max_history,2);
+        assert_eq!(updated.rules[0].options["width"],"500");
+        assert_eq!(runtime.next_deadline().unwrap(),deadline,
+            "CLI-aware reload may not reset an active notification timer");
+        assert_eq!(runtime.revision(),1);
+        std::fs::write(&file,"width=invalid\n").unwrap();
+        assert!(runtime.reload().is_err());
+        assert_eq!(runtime.config().global["width"],"450");
+        assert_eq!(runtime.revision(),1,
+            "failed reload must preserve accepted config and revision");
+        assert!(SharedRuntime::from_path_with_cli_overrides(
+            &file,&[("width".into(),"0".into())]
+        ).is_err());
+    }
 
     #[test]
     fn default_timeout_with_leading_space_still_arms_expiration(){
