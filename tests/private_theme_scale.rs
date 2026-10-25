@@ -46,14 +46,22 @@ async fn theme_scale_from_later_category_survives_private_notify_and_raster()
         .ok_or("Notify did not create an active notification")?;
     assert_eq!(note.app_icon, "posthorn");
 
-    // Keep popup output scale 1 in both cases; only the maximum attached
-    // monitor's icon-search scale changes. The @2 suffix is on the later
-    // category directory, which Mako's strchr(relative_path, '@') sees.
+    // Mako selects and decodes themed assets ONCE at Notify, using the
+    // maximum attached output scale *at that moment*. A later monitor-scale
+    // change never swaps an existing icon. A new Notify can select @2.
+    runtime.set_icon_creation_scale(2);
+    let later_id: u32 = desktop.call("Notify", &(
+        "mako-theme-scale", 0u32, "posthorn", "Later", "",
+        Vec::<String>::new(), HashMap::<String, OwnedValue>::new(), -1i32
+    )).await?;
+    let later_note=runtime.store.lock().unwrap().active().iter()
+        .find(|note|note.id==later_id).cloned()
+        .ok_or("second Notify did not create an active notification")?;
     let ordinary = render_notification_group_with_icon_scale(
-        &note, &config.global, 0, 1, 1
+        &note, &config.global, 0, 1, 2
     )?;
     let hidpi_icon = render_notification_group_with_icon_scale(
-        &note, &config.global, 0, 1, 2
+        &later_note, &config.global, 0, 1, 1
     )?;
     assert_eq!((ordinary.width, ordinary.height),
         (hidpi_icon.width, hidpi_icon.height),
@@ -63,8 +71,8 @@ async fn theme_scale_from_later_category_survives_private_notify_and_raster()
         frame.pixels[at..at+4].to_vec()
     };
     assert_eq!(pixel(&ordinary), vec![0, 0, 255, 255],
-        "1x selects the unscaled themed PNG through Notify");
+        "old notification must keep its 1x PNG even when drawn with 2x icon lookup");
     assert_eq!(pixel(&hidpi_icon), vec![0, 255, 0, 255],
-        "2x must recognize @2 in the later category through Notify");
+        "new Notify at 2x must recognize the later-category @2 PNG");
     Ok(())
 }
