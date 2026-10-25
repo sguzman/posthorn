@@ -123,12 +123,26 @@ fn mako_posix_ere_dash_only_brackets(pattern:&str)->Result<String,String>{
                 let negated=probe.peek()==Some(&'^');
                 if negated{probe.next();}
                 let mut count=0usize;
+                // The previous pass quotes an initial '--' as '\\--'.
+                // Recognize that one generated escape as the first
+                // hyphen, not as a literal C backslash in source.
+                let mut quoted_first=false;
+                if probe.peek()==Some(&'\\'){
+                    let mut next=probe.clone();
+                    next.next();
+                    if next.peek()==Some(&'-'){
+                        probe.next();
+                        probe.next();
+                        count=1;
+                        quoted_first=true;
+                    }
+                }
                 while probe.peek()==Some(&'-'){count+=1;probe.next();}
                 if count>0 && probe.peek()==Some(&']'){
                     if count>4{
                         return Err("invalid glibc POSIX all-hyphen bracket range".into());
                     }
-                    for _ in 0..(count+usize::from(negated)+1){chars.next();}
+                    for _ in 0..(count+usize::from(negated)+1+usize::from(quoted_first)){chars.next();}
                     result.push_str(if negated{r"[^\-]"}else{r"[\-]"});
                 }else{
                     in_class=true;
@@ -875,9 +889,12 @@ impl Selector {
             if has_rust_only_posix_class(value) {
                 return Err("glibc POSIX ERE does not recognize this bracket class".into());
             }
-            let dash_only=mako_posix_ere_dash_only_brackets(value)?;
-            let backslashes=mako_posix_c_class_backslashes(&dash_only);
-            let leading=mako_posix_ere_literal_leading_closer(&backslashes);
+            let backslashes=mako_posix_c_class_backslashes(value);
+            // This pass recognizes the escaped initial '-' emitted by the
+            // C-class-backslash normalizer. Running it earlier would make
+            // the newly inserted Rust escape look like source C syntax.
+            let dash_only=mako_posix_ere_dash_only_brackets(&backslashes)?;
+            let leading=mako_posix_ere_literal_leading_closer(&dash_only);
             let collated=mako_posix_c_collating_elements(&leading)?;
             // Validate the original POSIX syntax BEFORE GNU word-boundary
             // escapes become Rust \b{start}/\b{end} assertions. Those
@@ -2231,9 +2248,11 @@ mod tests {
         for n in 1..=4{
             let positive=format!("^[{}]$","-".repeat(n));
             let negative=format!("^[^{}]$","-".repeat(n));
-            assert_eq!(mako_posix_ere_dash_only_brackets(&positive).unwrap(),
+            assert_eq!(mako_posix_ere_dash_only_brackets(
+                &mako_posix_c_class_backslashes(&positive)).unwrap(),
                 r"^[\-]$");
-            assert_eq!(mako_posix_ere_dash_only_brackets(&negative).unwrap(),
+            assert_eq!(mako_posix_ere_dash_only_brackets(
+                &mako_posix_c_class_backslashes(&negative)).unwrap(),
                 r"^[^\-]$");
             let yes=Selector::new("summary~",&positive).unwrap();
             let no=Selector::new("summary~",&negative).unwrap();
@@ -2250,7 +2269,8 @@ mod tests {
                 format!("^[{}]$","-".repeat(n)),
                 format!("^[^{}]$","-".repeat(n)),
             ]{
-                assert!(mako_posix_ere_dash_only_brackets(&pattern).is_err());
+                assert!(mako_posix_ere_dash_only_brackets(
+                    &mako_posix_c_class_backslashes(&pattern)).is_err());
                 assert!(Selector::new("summary~",&pattern).is_err());
                 assert!(Selector::new("body~",&pattern).is_err());
             }
@@ -2258,7 +2278,9 @@ mod tests {
         // This pass must not reinterpret an escaped opening bracket or
         // alter a real POSIX character-class element.
         for pattern in [r"^\[---\]$",r"^[[:digit:]]$",r"^[--a]$"]{
-            assert_eq!(mako_posix_ere_dash_only_brackets(pattern).unwrap(),pattern);
+            let normalized=mako_posix_c_class_backslashes(pattern);
+            assert_eq!(mako_posix_ere_dash_only_brackets(&normalized).unwrap(),
+                normalized);
         }
         let cfg=Config::parse("[body~=^[----]$]\nwidth=467\n").unwrap();
         fields.body="-";
