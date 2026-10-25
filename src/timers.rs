@@ -141,7 +141,7 @@ mod tests {
         t.set(2, now, Some(50));
         assert!(t.take_expired(now + Duration::from_millis(49)).is_empty());
         assert_eq!(t.take_expired(now + Duration::from_millis(50)), vec![2]);
-        assert_eq!(t.take_expired(now + Duration::from_millis(100)), vec![3, 1]);
+        assert_eq!(t.take_expired(now + Duration::from_millis(100)), vec![1, 3]);
     }
 
     #[test]
