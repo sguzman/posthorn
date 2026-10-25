@@ -438,8 +438,10 @@ pub fn render_notification_group_with_icon_scale(
     }else{
         text_y=(f64::from(height)-f64::from(text_height))/2.0;
     }
-    context.rectangle(text_x,text_y,available_w,available_h);
-    context.clip();
+    // Mako render.c:318-325 draws the Pango layout directly after setting
+    // its width/height and ellipsizing. It does NOT add another Cairo clip.
+    // The old extra clip could erase glyph ink outside the logical layout
+    // rectangle (e.g. italic overhangs), even though Mako draws that ink.
     context.move_to(text_x,text_y);
     set_color(&context,foreground);
     pangocairo::functions::show_layout(&context, &layout);
