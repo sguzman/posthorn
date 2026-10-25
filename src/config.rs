@@ -421,6 +421,128 @@ fn mako_posix_ere_empty_min_repetitions(pattern:&str)->String{
     out
 }
 
+/// GNU glibc REG_EXTENDED permits stacking postfix repetition operators:
+/// a+? means (a+)?, a{2}+ means (a{2})+, and a{2}{3} means
+/// (a{2}){3}. Rust regex interprets +?/*? as lazy quantifiers and
+/// rejects nested counted repetitions. REG_NOSUB still observes different
+/// *match languages*: ^a+?$ matches the empty string in glibc.
+/// Insert noncapturing parentheses around the complete previously quantified
+/// atom, rather than discarding either operator or interpreting laziness.
+/// POSIX bracket sets, escaped punctuation and ordinary grouping are atoms.
+fn mako_posix_ere_stacked_quantifiers(pattern:&str)->String{
+    let mut out=String::with_capacity(pattern.len());
+    let mut chars=pattern.chars().peekable();
+    let mut groups=Vec::<usize>::new();
+    let mut atom_start:Option<usize>=None;
+    let mut previous_quantifier=false;
+    while let Some(ch)=chars.next(){
+        match ch{
+            '\\'=>{
+                let start=out.len();
+                out.push('\\');
+                if let Some(next)=chars.next(){out.push(next);}
+                atom_start=Some(start);
+                previous_quantifier=false;
+            }
+            '['=>{
+                let start=out.len();
+                out.push('[');
+                let mut first=true;
+                while let Some(next)=chars.next(){
+                    out.push(next);
+                    if next=='\\'{
+                        if let Some(escaped)=chars.next(){out.push(escaped);}
+                        first=false;
+                    }else if next=='[' && matches!(chars.peek(),Some(':'|'.'|'=')){
+                        let delimiter=chars.next().expect("peeked delimiter");
+                        out.push(delimiter);
+                        let mut prev='\0';
+                        for part in chars.by_ref(){
+                            out.push(part);
+                            if prev==delimiter && part==']'{break;}
+                            prev=part;
+                        }
+                        first=false;
+                    }else if next==']' && !first{
+                        break;
+                    }else if next!='^' || !first{
+                        first=false;
+                    }
+                }
+                atom_start=Some(start);
+                previous_quantifier=false;
+            }
+            '('=>{
+                groups.push(out.len());
+                out.push('(');
+                atom_start=None;
+                previous_quantifier=false;
+            }
+            ')'=>{
+                out.push(')');
+                atom_start=groups.pop();
+                previous_quantifier=false;
+            }
+            '|'=>{
+                out.push('|');
+                atom_start=None;
+                previous_quantifier=false;
+            }
+            '*'|'+'|'?'=>{
+                if let Some(start)=atom_start{
+                    if previous_quantifier{
+                        out.insert_str(start,"(?:");
+                        out.push(')');
+                    }
+                    out.push(ch);
+                    previous_quantifier=true;
+                }else{
+                    out.push(ch);
+                    previous_quantifier=false;
+                }
+            }
+            '{'=>{
+                let mut look=chars.clone();
+                let mut contents=String::new();
+                let mut terminated=false;
+                for _ in 0..32{
+                    let Some(next)=look.next() else {break};
+                    if next=='}'{terminated=true;break;}
+                    contents.push(next);
+                }
+                let valid=if let Some((lower,upper))=contents.split_once(','){
+                    !lower.is_empty() && lower.bytes().all(|b|b.is_ascii_digit())
+                        && upper.bytes().all(|b|b.is_ascii_digit())
+                }else{
+                    !contents.is_empty() && contents.bytes().all(|b|b.is_ascii_digit())
+                };
+                if terminated && valid && atom_start.is_some(){
+                    for _ in 0..contents.len()+1{chars.next();}
+                    let start=atom_start.expect("checked atom");
+                    if previous_quantifier{
+                        out.insert_str(start,"(?:");
+                        out.push(')');
+                    }
+                    out.push('{');
+                    out.push_str(&contents);
+                    out.push('}');
+                    previous_quantifier=true;
+                }else{
+                    atom_start=Some(out.len());
+                    out.push('{');
+                    previous_quantifier=false;
+                }
+            }
+            _=>{
+                atom_start=Some(out.len());
+                out.push(ch);
+                previous_quantifier=false;
+            }
+        }
+    }
+    out
+}
+
 /// glibc regcomp(REG_EXTENDED) does not recognize the additional
 /// Rust-regex ASCII classes [[:ascii:]] and [[:word:]], or Rust's
 /// [[:^alpha:]]-style per-class negation extension. A Mako configuration
@@ -522,8 +644,9 @@ impl Selector {
             let backslashes=mako_posix_c_class_backslashes(value);
             let leading=mako_posix_ere_literal_leading_closer(&backslashes);
             let collated=mako_posix_c_collating_elements(&leading)?;
-            let pattern = mako_posix_ere_empty_min_repetitions(
+            let repeat=mako_posix_ere_empty_min_repetitions(
                 &mako_posix_ere_escapes(&collated));
+            let pattern=mako_posix_ere_stacked_quantifiers(&repeat);
             Some(Regex::new(&format!("(?s-u:{pattern})"))
                 .map_err(|e| format!("invalid regex: {e}"))?)
         } else { None };
@@ -1579,6 +1702,61 @@ mod tests {
         fields.body="a";
         assert_eq!(cfg.style_for(&fields)["width"],"472");
         fields.body="z";
+        assert_eq!(cfg.style_for(&fields)["width"],"300");
+    }
+
+    #[test]
+    fn glibc_stacked_posix_ere_quantifiers_are_repeated_not_rust_lazy(){
+        // Positive/negative matches checked with native C-locale glibc
+        // regcomp(REG_EXTENDED|REG_NOSUB) and regexec. In particular,
+        // ^a+?$ accepts empty while Rust regex's lazy a+? does not.
+        for (pattern,yes,no) in [
+            (r"^a+?$",vec!["","a","aa","aaaa"],vec!["b","ab"]),
+            (r"^a?+$",vec!["","a","aa","aaaa"],vec!["b","ab"]),
+            (r"^a{2}?$",vec!["","aa"],vec!["a","aaa","aaaa"]),
+            (r"^a{2}+$",vec!["aa","aaaa","aaaaaa"],vec!["","a","aaa"]),
+            (r"^a+{2}$",vec!["aa","aaa","aaaa"],vec!["","a","b"]),
+            (r"^a+*$",vec!["","a","aa","aaaa"],vec!["b","ab"]),
+            (r"^a?*$",vec!["","a","aa","aaaa"],vec!["b","ab"]),
+            (r"^a{2}*$",vec!["","aa","aaaa","aaaaaa"],vec!["a","aaa"]),
+            (r"^(ab)+?$",vec!["","ab","abab","ababab"],vec!["a","aba","b"]),
+            (r"^[ab]+?$",vec!["","a","b","abab","baa"],vec!["c","abc"]),
+            (r"^a++$",vec!["a","aa","aaaa"],vec!["","b","ab"]),
+            (r"^a*+$",vec!["","a","aa","aaaa"],vec!["b","ab"]),
+            (r"^a{2}{3}$",vec!["aaaaaa"],vec!["","aa","aaaa","aaaaa"]),
+            (r"^a{2}??$",vec!["","aa"],vec!["a","aaa"]),
+            (r"^a{,2}+$",vec!["a","aa","aaa"],vec!["","b","ab"]),
+        ]{
+            let matcher=Selector::new("summary~",pattern)
+                .unwrap_or_else(|e|panic!("glibc accepts {pattern:?}: {e}"));
+            let mut fields=note("normal",&["default"]);
+            for value in yes{
+                fields.summary=value;
+                assert!(matcher.matches(&fields),
+                    "glibc {pattern:?} must match {value:?}");
+            }
+            for value in no{
+                fields.summary=value;
+                assert!(!matcher.matches(&fields),
+                    "glibc {pattern:?} must reject {value:?}");
+            }
+        }
+        assert_eq!(mako_posix_ere_stacked_quantifiers(r"^a+?$"),
+            r"^(?:a+)?$");
+        assert_eq!(mako_posix_ere_stacked_quantifiers(r"^a{2}{3}$"),
+            r"^(?:a{2}){3}$");
+        assert_eq!(mako_posix_ere_stacked_quantifiers(r"^[a+?]{2}$"),
+            r"^[a+?]{2}$","bracket contents must not be altered");
+        assert_eq!(mako_posix_ere_stacked_quantifiers(r"^a\+\?$"),
+            r"^a\+\?$","escaped operators remain literal");
+        // Verify normal criteria-driven configuration after parsing.
+        let cfg=Config::parse("[summary~=\"^a+?$\"]\nwidth=463\n").unwrap();
+        let mut fields=note("normal",&["default"]);
+        fields.summary="";
+        assert_eq!(cfg.style_for(&fields)["width"],"463");
+        fields.summary="aaaa";
+        assert_eq!(cfg.style_for(&fields)["width"],"463");
+        fields.summary="bad";
         assert_eq!(cfg.style_for(&fields)["width"],"300");
     }
 
