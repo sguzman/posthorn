@@ -3637,3 +3637,56 @@ displayed 90%. T503 physical Hyprland stays 51%,
 T504 opt-in production cutover stays 0%. Nothing
 changed the user's installed Mako, production D-Bus
 name, or live Hyprland configuration.
+
+## Mako physical section closer with NUL-terminated selector (2026-10-25)
+
+In Mako v1.11.0 `config.c:801-848`, physical config
+lines are read with `getline()` and stripped of ASCII
+indentation/trailing spaces and tabs. The section
+branch checks the **physical** first `[` and final
+`]` characters. It then passes the bytes between
+them into `strndup()`. Because `strndup` stops at the
+first NUL, the criteria parser cannot see any bytes
+following an embedded NUL even when the physical
+closing bracket occurs later in the same line.
+
+Posthorn previously treated the entire region
+between the physical brackets as Rust selector text,
+rejecting lines such as
+`[category=success\0<non-UTF-8 garbage>]`.
+It now preserves the physical closing-bracket check
+while lowering only a genuinely complete section
+header to its C-visible selector prefix. The byte
+decoder uses this rule before UTF-8 validation, so
+invalid bytes after the NUL in a syntactically
+complete section do not cause a false decoding error.
+Likewise, `Config::parse` now truncates a complete
+section's selector at the C terminator. An opening
+bracket **without** a physical closing bracket remains
+invalid even if the prefix before NUL looks complete.
+
+The regression exercises a disposable nested file
+containing valid root options, a NUL-suffixed section
+with invalid UTF-8 hidden after its terminator,
+a subsequent criteria style, and physical source
+line-number preservation. It additionally tests
+equivalent inline parsing and rejection of missing
+physical closing brackets.
+
+This is a targeted C-string translation. Unrelated
+invalid embedded-NUL line and regex syntax remain
+subject to the established source acceptance gates.
+
+- [Pinned Mako `config.c` section parsing](https://github.com/emersion/mako/blob/v1.11.0/config.c#L801-L848)
+- [Implementation 970301d](https://github.com/sguzman/posthorn/commit/970301d4a5594430b898dce332396f99171dce68)
+- [Fully green isolated CI 40242070137](https://github.com/sguzman/posthorn/actions/runs/40242070137):
+  **338 Rust library tests, 90 private D-Bus tests,
+  complete headless Wayland acceptance passed**.
+
+**Accepted progress:** T104 **92% → 93% (+1 pp)**;
+P1 raw **94.6% → 94.8% (+0.2 pp)**, displayed 95%;
+strict 24-task M0 raw **89.958% → 90.000% (+0.042 pp)**,
+displayed 90%. Real Hyprland T503 remains **51%**;
+explicitly authorized reversible cutover T504 remains
+**0%**. No live Mako, production bus, or personal
+Hyprland configuration was accessed or changed.
