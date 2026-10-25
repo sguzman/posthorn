@@ -100,7 +100,10 @@ fn icon_files(dir:&Path,name:&str)->Vec<PathBuf>{
     let prefix=format!("{name}.");
     entries.flatten().filter_map(|e|{
         let path=e.path();
-        let good=path.is_file()&&path.file_name()
+        // glob(GLOB_NOSORT) does not require regular files. A matching
+        // directory or dangling symlink is still returned by Mako; the
+        // subsequent GdkPixbuf load can then fail without retrying.
+        let good=path.file_name()
             .is_some_and(|n|n.to_string_lossy().starts_with(&prefix));
         good.then_some(path)
     }).collect()
@@ -562,6 +565,29 @@ mod tests {
         assert_eq!(resolve_icon_scaled(name,root.path().to_str().unwrap(),64,1),
             Some(visible.join(format!("{name}.png"))),
             "Mako must skip hidden glob directories and use a visible fallback");
+    }
+
+    #[test]
+    fn theme_glob_keeps_nonregular_matching_paths_for_decoder(){
+        // Pinned icon.c globs paths without GLOB_ONLYDIR or a stat-based
+        // regular-file filter. GdkPixbuf rejects a selected directory or
+        // dangling symlink later; icon lookup itself must not skip them.
+        let directory_root=tempfile::tempdir().unwrap();
+        let directory=directory_root.path().join("64x64/apps/posthorn-nonfile.png");
+        fs::create_dir_all(&directory).unwrap();
+        assert_eq!(resolve_icon_scaled("posthorn-nonfile",
+            directory_root.path().to_str().unwrap(),64,1),
+            Some(directory.clone()));
+        assert!(decode_icon(&directory).is_none());
+
+        let symlink_root=tempfile::tempdir().unwrap();
+        let link=symlink_root.path().join("64x64/apps/posthorn-missing.png");
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink("nonexistent-target.png",&link).unwrap();
+        assert_eq!(resolve_icon_scaled("posthorn-missing",
+            symlink_root.path().to_str().unwrap(),64,1),
+            Some(link.clone()));
+        assert!(decode_icon(&link).is_none());
     }
 
     #[test]
