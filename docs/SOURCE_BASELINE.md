@@ -3539,3 +3539,51 @@ displayed 90%. Physical Hyprland T503 remains **51%**
 and opt-in production cutover T504 remains **0%**.
 The real notification name, installed Mako and personal
 Hyprland config remain untouched.
+
+## NUL-first physical Mako config lines (2026-10-25)
+
+In pinned Mako v1.11.0, `config.c:801-817` reads
+physical config bytes using `getline()`, strips only
+leading ASCII spaces/tabs, and then skips a line if
+its first visible byte is NUL (`'\0'`), a newline,
+or `#`. A NUL-first line is not an active option;
+any undecodable bytes after that leading NUL are
+neither parsed nor rejected by Mako.
+
+Posthorn's file decoder already ignored comments
+with invalid UTF-8, but incorrectly attempted to
+decode a NUL-first line with the same bytes. It
+would reject a valid configuration that Mako ignores.
+Posthorn now recognizes both ASCII-indented and
+unindented NUL-first physical lines before UTF-8
+decoding. The inline `Config::parse` path likewise
+skips first-visible-character NUL lines, while
+**non-UTF-8 in an active setting remains a hard error**
+rather than being silently replaced.
+
+An isolated regression creates a disposable child
+config containing two ignored NUL-first binary
+lines, followed by valid root and criteria options.
+It verifies those settings, the correct physical
+line-number attribution for the criteria section,
+and nested `include=` parsing. It also checks
+inline NUL-first lines and rejection of malformed
+UTF-8 in a genuinely active option.
+
+This is a narrow source-compatible case; it does
+**not** establish universal compatibility for
+embedded NUL bytes inside nonempty option values.
+
+- [Pinned Mako config.c skip logic](https://github.com/emersion/mako/blob/v1.11.0/config.c#L801-L817)
+- [NUL-first config compatibility efec1cf](https://github.com/sguzman/posthorn/commit/efec1cfc93aaa9eaccbcef74124674965347ce0a)
+- [Fully green isolated CI 40240199124](https://github.com/sguzman/posthorn/actions/runs/40240199124):
+  **336 Rust library tests, 90 private D-Bus tests,
+  complete headless Wayland QA passed**.
+
+**Accepted progress:** T104 **90% → 91% (+1 pp)**;
+P1 raw **94.2% → 94.4% (+0.2 pp)**, displayed 94%;
+24-task strict M0 raw **89.875% → 89.917% (+0.042 pp)**,
+displayed 90%. T503 physical Hyprland remains 51%
+and T504 opt-in production cutover remains 0%. The
+real notification daemon, bus name and user's
+Hyprland configuration were not touched.
