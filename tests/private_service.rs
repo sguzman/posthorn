@@ -10,6 +10,79 @@ use posthorn::service::{open_private_service, open_standard_service, tick_expira
 use zbus::{Proxy, zvariant::OwnedValue};
 
 #[tokio::test]
+async fn history_disabled_close_suppresses_only_mako_control_property_invalidation()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use futures_util::StreamExt;
+    // Mako notification.c:close_notification sends NotificationClosed
+    // before testing history/max-history. Its early return skips
+    // emit_notifications_changed only for those disabled policies.
+    let (conn,runtime)=open_private_service(Config::parse(
+        "history=0\nmax-history=5\n[category=kept]\nhistory=1\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let props=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,
+        "org.freedesktop.DBus.Properties").await?;
+    let mut changes=props.receive_signal("PropertiesChanged").await?;
+    let mut closed=desktop.receive_signal("NotificationClosed").await?;
+    let id:u32=desktop.call("Notify",&(
+        "history-signal-test",0u32,"","Discarded","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    tokio::time::timeout(Duration::from_secs(3),changes.next()).await?
+        .ok_or("missing initial Notifications invalidation")?;
+    let _:()=desktop.call("CloseNotification",&(id,)).await?;
+    let signal=tokio::time::timeout(Duration::from_secs(3),closed.next()).await?
+        .ok_or("history=0 must still send NotificationClosed")?;
+    let (closed_id,reason):(u32,u32)=signal.body().deserialize()?;
+    assert_eq!(closed_id,id);
+    assert_eq!(reason,3,"ClosedByCall must retain the standard reason");
+    assert!(tokio::time::timeout(Duration::from_millis(150),changes.next())
+        .await.is_err(),"Mako history=0 skips Notifications invalidation");
+    assert!(runtime.store.lock().unwrap().history().is_empty());
+
+    // Per-category history=1 must reach the normal property path.
+    let hint=OwnedValue::try_from(zbus::zvariant::Value::from("kept"))?;
+    let kept:u32=desktop.call("Notify",&(
+        "history-signal-test",0u32,"","Kept","",Vec::<String>::new(),
+        HashMap::from([("category".to_owned(),hint)]),-1i32
+    )).await?;
+    tokio::time::timeout(Duration::from_secs(3),changes.next()).await?
+        .ok_or("missing kept Notify invalidation")?;
+    let _:()=desktop.call("CloseNotification",&(kept,)).await?;
+    tokio::time::timeout(Duration::from_secs(3),closed.next()).await?
+        .ok_or("missing kept NotificationClosed")?;
+    tokio::time::timeout(Duration::from_secs(3),changes.next()).await?
+        .ok_or("history=1 close must invalidate Notifications")?;
+
+    // No-history dismiss DOES reach Mako's property invalidation when
+    // the effective style still enables history and max-history > 0.
+    let another:u32=desktop.call("Notify",&(
+        "history-signal-test",0u32,"","Explicit no-history","",
+        Vec::<String>::new(),HashMap::from([(
+            "category".to_owned(),
+            OwnedValue::try_from(zbus::zvariant::Value::from("kept"))?
+        )]),-1i32
+    )).await?;
+    tokio::time::timeout(Duration::from_secs(3),changes.next()).await?
+        .ok_or("missing second kept Notify invalidation")?;
+    let options:HashMap<String,OwnedValue>=[
+        ("id".into(),OwnedValue::from(another)),
+        ("history".into(),OwnedValue::from(false))
+    ].into();
+    let _:()=ctl.call("DismissNotifications",&(options,)).await?;
+    tokio::time::timeout(Duration::from_secs(3),closed.next()).await?
+        .ok_or("missing no-history NotificationClosed")?;
+    tokio::time::timeout(Duration::from_secs(3),changes.next()).await?
+        .ok_or("history=1 dismissal without archive still invalidates")?;
+    let history=runtime.store.lock().unwrap().history().iter()
+        .map(|n|n.id).collect::<Vec<_>>();
+    assert_eq!(history,vec![kept],"no-history dismissal must not archive");
+    Ok(())
+}
+
+#[tokio::test]
 async fn notification_bus_name_collision_never_queues_or_displaces_owner()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
