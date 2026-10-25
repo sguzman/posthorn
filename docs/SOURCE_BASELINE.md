@@ -2944,3 +2944,76 @@ T503 remains **51%**, and T504 production cutover
 The real Mako daemon, production notification bus and
 Hyprland configuration remained untouched.
 
+
+## POSIX ERE stacked repetition operators versus Rust lazy quantifiers (2026-10-25)
+
+Mako v1.11.0 `criteria.c:apply_criteria_field` compiles
+`summary~` and `body~` using glibc
+`regcomp(REG_EXTENDED | REG_NOSUB)` and evaluates using
+`regexec`. Native **C-locale glibc** probes exposed a
+meaningful regex-language divergence from Rust `regex`:
+
+- Glibc accepts **stacked postfix repetitions**: `a+?`
+  is an optional *one-or-more* run (accepting the empty
+  string), while Rust interprets `a+?` as a lazy one-or-more
+  run (**not** accepting empty). Thus this discrepancy
+  changes criteria matches even with `REG_NOSUB`.
+- Likewise glibc accepts `a?+`, `a+*`, `a?*`,
+  `a++`, and `a*+` as repeated postfix operators.
+  Rust may interpret an adjacent `?` as a laziness
+  modifier or reject another operator outright.
+- Counted repetitions can themselves be repeated:
+  `a{2}?` matches empty or two `a` bytes,
+  `a{2}+` matches positive even counts,
+  `a+{2}` matches at least two `a` bytes, and
+  `a{2}{3}` matches exactly six. These are nested
+  quantifiers in glibc, **not** malformed tokens.
+
+Posthorn now normalizes those nested operations by
+parenthesizing the **complete prior quantified atom** with
+a noncapturing Rust group before applying the subsequent
+quantifier. For example `a+?` becomes `(?:a+)?`,
+`a{2}+` becomes `(?:a{2})+`, and `a{2}{3}`
+becomes `(?:a{2}){3}`. The normalizer recognizes
+literal/escaped atoms, real POSIX bracket expressions and
+ordinary parenthesized groups, keeping operators inside
+brackets (such as `[a+?]`) literal. It runs after the
+existing POSIX bracket and GNU zero-minimum brace
+normalizations, so `a{,2}+` is treated as repeated
+`a{0,2}`.
+
+The regression performs positive **and negative**
+match assertions checked with native `regcomp`/`regexec`
+for 15 anchored patterns: stacked optional/plus/star,
+nested counted ranges, `(ab)+?`, `[ab]+?`,
+multiple trailing optional operators, and zero-minimum
+`{,2}` followed by `+`. It also verifies a
+real `Config::parse` `summary~` selector against
+empty and nonempty notification summaries and asserts
+the normalized source grammar for escaped and
+bracket-contained metacharacters.
+
+- [Pinned Mako source: `criteria.c:332-349`](https://github.com/emersion/mako/blob/v1.11.0/criteria.c#L332-L349)
+- [Nested POSIX quantifier translator efaae9e](https://github.com/sguzman/posthorn/commit/efaae9ee4bdd5aff345082b211073e9a1825fd43)
+- [Native glibc zero-minimum fixture adjustment 217ce3e](https://github.com/sguzman/posthorn/commit/217ce3e93a8e279d9b4760f18fa0deaa7b3c5cbd)
+- [Character delimiter scanner type correction b9f781b](https://github.com/sguzman/posthorn/commit/b9f781b90f2b5604832f2fb5e78b27c1ca2f3a1d)
+- [Full green CI 40223413158](https://github.com/sguzman/posthorn/actions/runs/40223413158):
+  **324 Rust library tests, 89 private D-Bus tests, and
+  complete isolated headless Wayland acceptance passed**.
+
+The first intermediate CI test used an incorrectly classified
+negative fixture for `^a{,2}+$`: native glibc does match
+the empty string. The fixture was corrected before full
+acceptance. Intermediate unsuccessful runs do **not**
+earn parity credit.
+
+**Accepted progress:** T103 **84% → 86% (+2 pp)**;
+P1 raw average **91.8% → 92.2%**, displayed
+**92% → 92%**; strict M0 average
+**89.375% → 89.458% (+0.083 pp raw)**,
+displayed **89% → 89%**. Physical
+Hyprland acceptance remains **51%** and
+opt-in cutover **0%**. This covers the tested
+glibc quantifier grammar only, not full POSIX
+collation, every malformed repetition edge or
+unsupervised production deployment.
