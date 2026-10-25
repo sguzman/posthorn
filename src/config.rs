@@ -162,6 +162,15 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
                 in_class = false;
                 normalized.push(ch);
             }
+            // glibc REG_EXTENDED treats '&' and '~' as ordinary bracket
+            // characters, even when repeated: [a&&b] matches a, &, b.
+            // Rust regex reserves && and ~~ for set intersection and
+            // symmetric difference. Escape every unescaped occurrence
+            // inside the class to preserve the source POSIX semantics.
+            '&' | '~' if in_class => {
+                normalized.push('\\');
+                normalized.push(ch);
+            }
             _ => normalized.push(ch),
         }
     }
@@ -1410,6 +1419,49 @@ mod tests {
         assert_eq!(quiet["background-color"],"#305747");
         assert_eq!(quiet["on-notify"],"none");
     }
+    #[test]
+    fn glibc_bracket_ampersand_and_tilde_are_literals_not_rust_set_operators(){
+        // Independently probed with glibc regcomp(REG_EXTENDED|REG_NOSUB)
+        // in the default C locale. GNU POSIX ERE has no bracket set
+        // intersection or symmetric difference operators.
+        for (pattern,matches,rejects) in [
+            (r"^[a&&b]+$",vec!["a","b","&","a&b"],vec!["c","1"]),
+            (r"^[a~~b]+$",vec!["a","b","~","a~b"],vec!["c","&"]),
+            (r"^[a&&[:digit:]]+$",vec!["a","&","7","a7&"],vec!["b","~"]),
+            (r"^[a~~[:digit:]]+$",vec!["a","~","7","a7~"],vec!["b","&"]),
+            (r"^[&&]+$",vec!["&","&&"],vec!["~","a"]),
+            (r"^[~~]+$",vec!["~","~~"],vec!["&","a"]),
+            (r"^[a&~b]+$",vec!["&","~","a","b"],vec!["c","1"]),
+        ] {
+            let rule=Selector::new("summary~",pattern).unwrap_or_else(|e|
+                panic!("glibc accepts {pattern:?}: {e}"));
+            let mut fields=note("normal",&["default"]);
+            for candidate in matches{
+                fields.summary=candidate;
+                assert!(rule.matches(&fields),
+                    "{pattern:?} should match {candidate:?} under glibc POSIX ERE");
+            }
+            for candidate in rejects {
+                fields.summary=candidate;
+                assert!(!rule.matches(&fields),
+                    "{pattern:?} should reject {candidate:?} under glibc POSIX ERE");
+            }
+        }
+        // The same translator powers body regexes through the entire config
+        // loader; explicitly preserve escaped punctuation as well.
+        let cfg=Config::parse(
+            "[body~=\"^[a&&b]+$\"]\nwidth=438\n"
+        ).unwrap();
+        let mut fields=note("normal",&["default"]);
+        fields.body="&";
+        assert_eq!(cfg.style_for(&fields)["width"],"438");
+        fields.body="c";
+        assert_eq!(cfg.style_for(&fields)["width"],"300");
+        assert_eq!(mako_posix_ere_escapes(r"[a\\&\\~b]"),r"[a\\&\\~b]");
+        // Outside brackets these punctuation characters stay unchanged.
+        assert_eq!(mako_posix_ere_escapes("a&&b~~c"),"a&&b~~c");
+    }
+
     #[test]
     fn posix_ere_digit_spelling_is_literal_not_rust_digit_class() {
         let mut fields = note("normal", &["default"]);
