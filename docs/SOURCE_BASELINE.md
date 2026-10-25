@@ -2657,8 +2657,12 @@ and a real **private** D-Bus signal subscription proving:
 - [Pinned source: control property invalidation](https://github.com/emersion/mako/blob/v1.11.0/dbus/mako.c#L479-L495)
 - [Runtime implementation acd1d16](https://github.com/sguzman/posthorn/commit/acd1d166b9f0a450bc78e27de12b6ff120a63249)
 - [Private D-Bus regression c82e4cb](https://github.com/sguzman/posthorn/commit/c82e4cb5d55539833f6d2b283c2ff5355cb6c362)
-- [Complete accepted CI 40213713610](https://github.com/sguzman/posthorn/actions/runs/40213713610):
-  **320 Rust library tests**, **85 isolated private D-Bus tests**,
+- [Private max-history=0 expiry regression c181fba](https://github.com/sguzman/posthorn/commit/c181fbaafe0a0d8913adefb9845fa8a27722dda9)
+  confirms the other early-return condition over real isolated D-Bus:
+  reason=1 `NotificationClosed`, no Notifications invalidation,
+  and no archived entry.
+- [Complete accepted CI 40214134406](https://github.com/sguzman/posthorn/actions/runs/40214134406):
+  **320 Rust library tests**, **86 isolated private D-Bus tests**,
   and **full isolated headless Wayland acceptance**, all passing.
 
 Accepted progress: **T302 98% → 99% (+1 pp)**,
