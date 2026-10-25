@@ -3329,3 +3329,58 @@ displayed 90%. Actual Hyprland T503 is still **51%**
 and explicitly authorized reversible cutover T504 is
 **0%**. The production daemon, notification name,
 and real compositor configuration were not touched.
+
+## Glibc invalid dash ranges and three-leading-hyphen members (2026-10-25)
+
+Pinned Mako v1.11.0 uses `regcomp(REG_EXTENDED | REG_NOSUB)`
+to compile `summary~` and `body~` in `criteria.c:332-349`.
+Native **C-locale glibc** regex probes established:
+
+- `[a--z]`, `[a-z--]`, `[-a--]`, `[----a]`,
+  `[^----a]`, `[ab--c]`, `[0--9]`, and `[--a--]`
+  fail to compile with an invalid range end.
+- `[--a]` is a range from literal `-` to `a`: it
+  matches ASCII punctuation, numbers and letters up to `a`.
+- `[---a]` is **not the same range**: it matches only
+  literal `-` or `a`, and rejects `.` and `0`.
+  `[---a-z]` matches literal `-` or a letter from `a` to `z`.
+  Their negated forms invert that membership.
+- `[----]` and `[^----]` denote the singleton literal
+  hyphen and its complement.
+
+Posthorn now pre-validates only *simple* ASCII alphanumeric
+and hyphen bracket classes before converting them to Rust:
+the validator rejects repeated interior `--` and
+four or more leading hyphens followed by an endpoint,
+without rejecting valid two-/three-hyphen initial runs.
+Classes with POSIX elements, escapes, or other punctuation
+remain delegated to their existing source-normalization passes.
+
+After the original C-bracket-backslash normalizer quotes
+a leading double hyphen, the dash-class pass also
+distinguishes exactly **three** original leading hyphens
+from a two-hyphen range. It reduces `[---a]` to Rust's
+`[\\-a]`, keeping any subsequent `a-z` range syntax intact.
+The regression covers error and success paths through both
+`summary~` and complete `Config::parse` `body~` selector
+handling, with native-C positive and negative match fixtures.
+
+The initial Rust test correctly exposed the missing literal
+`-` match for `[---a]` (CI run `40233288584`, red). The
+additional source normalization and expanded regression in
+`38e6d19` resolved that test. Final green CI run
+`40233513070` passed **331 library tests, 90 isolated
+private D-Bus tests and the full headless Wayland suite**.
+
+- [Pinned upstream compilation](https://github.com/emersion/mako/blob/v1.11.0/criteria.c#L332-L349)
+- [Simple source range validator 28d9ffb](https://github.com/sguzman/posthorn/commit/28d9ffbda01f44945efcaec38758fbd692d1e7ac)
+- [Triple-leading-hyphen correction 38e6d19](https://github.com/sguzman/posthorn/commit/38e6d193eac743b8036c4db11a5f9e0bae5962d3)
+- [Accepted both-job CI run 40233513070](https://github.com/sguzman/posthorn/actions/runs/40233513070)
+
+**Accepted progress:** T103 **92% → 93% (+1 pp)**;
+P1 raw **93.4% → 93.6% (+0.2 pp)**, displayed 94%;
+strict 24-task M0 raw **89.708% → 89.750% (+0.042 pp)**,
+displayed 90%. Physical Hyprland T503 still 51%,
+explicitly authorized reversible cutover T504 still 0%.
+The installed Mako, real notification bus and Hyprland
+configuration remain untouched.
