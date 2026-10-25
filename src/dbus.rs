@@ -341,20 +341,22 @@ impl FreedesktopNotifications {
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
         let closed = if let Some(runtime) = &self.runtime {
-            runtime.close(id, CloseReason::ClosedByCall, true)
+            runtime.close_with_change(id, CloseReason::ClosedByCall, true)
                 .map_err(|e| zbus::fdo::Error::Failed(e.into()))?
         } else {
             let mut state = self.store.lock().map_err(|_| {
                 zbus::fdo::Error::Failed("notification state lock poisoned".into())
             })?;
-            state.close(id, CloseReason::ClosedByCall, true, true).is_some()
+            state.close(id, CloseReason::ClosedByCall, true, true).map(|_|true)
         };
-        if closed {
+        if let Some(changed)=closed {
             Self::notification_closed(&emitter, id, CloseReason::ClosedByCall as u32)
                 .await
                 .map_err(|err| zbus::fdo::Error::Failed(err.to_string()))?;
-            crate::signals::invalidate(emitter.connection(), "Notifications")
-                .await.map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+            if changed {
+                crate::signals::invalidate(emitter.connection(), "Notifications")
+                    .await.map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+            }
         }
         Ok(())
     }
