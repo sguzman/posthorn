@@ -216,6 +216,83 @@ async fn percent_nul_image_path_uses_mako_c_filename_prefix_over_private_dbus()
 }
 
 #[tokio::test]
+async fn icon_file_is_retained_after_notify_and_refreshed_only_on_replacement()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let dir=tempfile::tempdir()?;
+    let png=dir.path().join("mutable.png");
+    let image=gdk_pixbuf::Pixbuf::new(gdk_pixbuf::Colorspace::Rgb,true,8,18,18)
+        .ok_or("unable to allocate image fixture")?;
+    image.fill(0xFF0000FF);
+    image.savev(&png,"png",&[])?;
+    let config=Config::parse(
+        "width=160\nheight=60\nborder-size=0\npadding=4\nmax-icon-size=16\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let notify=|replace:u32|(
+        "retained-icon-test",replace,
+        png.to_str().unwrap(),"Icon retained","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    );
+    let id:u32=desktop.call("Notify",&notify(0)).await?;
+    let note=runtime.store.lock().unwrap().active()[0].clone();
+    assert!(note.icon_snapshot.as_ref().is_some_and(Option::is_some),
+        "Notify must capture decoded PNG before any redraw");
+    let before=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    image.fill(0x0000FFFF);
+    image.savev(&png,"png",&[])?;
+    let same=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_eq!(before.pixels,same.pixels,
+        "source Mako renders the retained PNG, not changed disk bytes");
+    let replaced:u32=desktop.call("Notify",&notify(id)).await?;
+    assert_eq!(replaced,id);
+    let after=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_ne!(before.pixels,after.pixels,
+        "direct Notify replacement recreates the icon with current bytes");
+    std::fs::remove_file(&png)?;
+    let retained=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_eq!(retained.pixels,after.pixels,
+        "removing the file must not affect an already-decoded icon");
+    Ok(())
+}
+
+#[tokio::test]
+async fn missing_icon_is_not_retried_until_notify_replacement()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let dir=tempfile::tempdir()?;
+    let png=dir.path().join("later.png");
+    let config=Config::parse(
+        "width=160\nheight=60\nborder-size=0\npadding=4\nmax-icon-size=16\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let notify=|replace:u32|(
+        "missing-icon-test",replace,png.to_str().unwrap(),
+        "Initially absent","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    );
+    let id:u32=desktop.call("Notify",&notify(0)).await?;
+    let before=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_eq!(runtime.store.lock().unwrap().active()[0].icon_snapshot,
+        Some(None),"an attempted missing-icon lookup must be recorded");
+    let image=gdk_pixbuf::Pixbuf::new(gdk_pixbuf::Colorspace::Rgb,true,8,18,18)
+        .ok_or("unable to allocate image fixture")?;
+    image.fill(0xFF0000FF);
+    image.savev(&png,"png",&[])?;
+    let same=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_eq!(before.pixels,same.pixels,
+        "Mako does not retry icons that were missing at Notify");
+    let replaced:u32=desktop.call("Notify",&notify(id)).await?;
+    assert_eq!(replaced,id);
+    let after=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_ne!(before.pixels,after.pixels,
+        "new Notify payload does load the now-existing image");
+    Ok(())
+}
+
+#[tokio::test]
 async fn empty_image_path_hint_clears_app_icon_through_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
