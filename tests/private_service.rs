@@ -96,6 +96,41 @@ async fn private_service_expires_and_archives_a_notification() -> Result<(), Box
 }
 
 #[tokio::test]
+async fn private_notify_ids_skip_hidden_render_placeholder_allocations()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Pinned Mako render.c creates a synthetic notification on every
+    // overflow redraw, consuming a state->last_id even though the
+    // pseudo-notification is destroyed immediately. Check the externally
+    // observable Notify IDs across private D-Bus, never the user bus.
+    let (conn,runtime)=open_private_service(Config::parse(
+        "width=90\nheight=30\nmax-visible=1\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let notify=|summary:&str|(
+        "overflow-id-test".to_owned(),0u32,"",
+        summary.to_owned(),"",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    );
+    let first:u32=desktop.call("Notify",&notify("first")).await?;
+    let second:u32=desktop.call("Notify",&notify("second")).await?;
+    assert_eq!((first,second),(1,2));
+    assert!(posthorn::desktop::snapshot_frame(&runtime)?.is_some());
+    assert!(posthorn::desktop::snapshot_frame(&runtime)?.is_some());
+    let third:u32=desktop.call("Notify",&notify("third")).await?;
+    assert_eq!(third,5,
+        "two real overflow renders consume unused IDs 3 and 4");
+    let listed:Vec<HashMap<String,OwnedValue>>=ctl.call("ListNotifications",&()).await?;
+    let active_ids=listed.iter().map(|record|
+        u32::try_from(record.get("id").unwrap()).unwrap()).collect::<Vec<_>>();
+    assert_eq!(active_ids,vec![third,second,first]);
+    assert_eq!(listed.len(),3,
+        "overflow pseudo-notifications must not enter the live D-Bus list");
+    Ok(())
+}
+
+#[tokio::test]
 async fn private_dbus_image_path_preserves_raw_linux_file_url_through_cairo()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
