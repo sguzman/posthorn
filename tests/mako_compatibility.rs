@@ -40,8 +40,8 @@ fn posthornctl_usage_writes_stderr_with_mako_exit_semantics() {
     assert!(String::from_utf8_lossy(&no_args.stderr).contains(
         "Usage: posthornctl <command> [options...]"
     ));
-    assert!(no_args.stderr.ends_with(b"\\n"),"usage requires one final LF");
-    assert!(!no_args.stderr.ends_with(b"\\n\\n"),
+    assert!(no_args.stderr.ends_with(b"\n"),"usage requires one final LF");
+    assert!(!no_args.stderr.ends_with(b"\n\n"),
         "pinned Mako writes usage via fprintf without an extra blank line");
 
     // The parser's error diagnostics are user-visible CLI compatibility,
@@ -60,7 +60,7 @@ fn posthornctl_usage_writes_stderr_with_mako_exit_semantics() {
         assert!(!output.status.success(),"{args:?} unexpectedly accepted");
         assert!(output.stdout.is_empty(),"{args:?} leaked into stdout");
         assert_eq!(String::from_utf8_lossy(&output.stderr),
-            format!("{message}\\n"),"makoctl diagnostic mismatch for {args:?}");
+            format!("{message}\n"),"makoctl diagnostic mismatch for {args:?}");
     }
 
     for flag in ["help","-h","--help"] {
