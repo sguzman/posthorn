@@ -212,10 +212,14 @@ impl SharedRuntime {
         if has_match{
             // Notifications matching one Mako surface must use ONE output
             // observation. A direct replacement may transfer to that surface.
+            // None is the legacy single-presenter fallback to the
+            // compositor's global wl_surface.enter observation. Only
+            // Some(None) means an explicitly tracked surface that has not
+            // entered an output. Do not fabricate Some(None) when the
+            // existing registry holds no per-surface observation.
             let observation=store.active().iter()
                 .find(|n|n.surface_spec.as_ref()==Some(&key))
-                .map(|n|n.surface_output_override.clone())
-                .unwrap_or(Some(None));
+                .and_then(|n|n.surface_output_override.clone());
             store.bind_surface(id,key,observation);
         }else if !has_old{
             known.push(key.clone());
