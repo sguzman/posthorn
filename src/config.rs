@@ -257,10 +257,13 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
                 normalized.push(ch);
             }
             '[' if in_class => {
-                normalized.push(ch);
-                // POSIX [[:alpha:]], [[.ch.]] and [[=a=]] are nested
-                // bracket elements, not the end of the surrounding class.
+                // A bare '[' in glibc's POSIX bracket class is a literal
+                // member: [a[] matches 'a' or '['. Rust regex instead
+                // starts a nested set, so escape it. Only actual POSIX
+                // [[:class:]], [[.collating.]], [[=equivalence=]] elements
+                // retain their recognized nested syntax.
                 if let Some(delimiter @ (':' | '.' | '=')) = chars.peek().copied() {
+                    normalized.push('[');
                     chars.next();
                     normalized.push(delimiter);
                     let mut previous = '\0';
@@ -271,6 +274,9 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
                         }
                         previous = next;
                     }
+                }else{
+                    normalized.push('\\');
+                    normalized.push('[');
                 }
             }
             ']' if in_class => {
@@ -1536,6 +1542,45 @@ mod tests {
         assert_eq!(quiet["background-color"],"#305747");
         assert_eq!(quiet["on-notify"],"none");
     }
+    #[test]
+    fn glibc_bare_opening_bracket_is_literal_in_ere_character_class(){
+        // Native glibc REG_EXTENDED in the C locale accepts a lone '['
+        // as a member of an existing bracket class. Rust regex requires
+        // escaping to avoid interpreting it as nested set algebra.
+        for (pattern,yes,no) in [
+            (r"^[[]$",vec!["["],vec!["a","]","1"]),
+            (r"^[a[]$",vec!["[","a"],vec!["b","]"]),
+            (r"^[a[b]$",vec!["a","[","b"],vec!["z","]"]),
+            (r"^[^[]$",vec!["a","]","1"],vec!["["]),
+            (r"^[a[[:digit:]]+$",vec!["a","[","1","a1["],vec!["z","]"]),
+            (r"^[[[:digit:]]+$",vec!["[","1"],vec!["a","]"]),
+        ]{
+            let sel=Selector::new("summary~",pattern).unwrap_or_else(|e|
+                panic!("glibc accepts {pattern:?}: {e}"));
+            let mut fields=note("normal",&["default"]);
+            for value in yes{
+                fields.summary=value;
+                assert!(sel.matches(&fields),
+                    "{pattern:?} must match {value:?} with glibc");
+            }
+            for value in no{
+                fields.summary=value;
+                assert!(!sel.matches(&fields),
+                    "{pattern:?} must reject {value:?} with glibc");
+            }
+        }
+        assert_eq!(mako_posix_ere_escapes(r"^[a[]$"),r"^[a\[]$");
+        assert_eq!(mako_posix_ere_escapes(r"^[[:digit:]]$"),r"^[[:digit:]]$");
+        let cfg=Config::parse("[body~=\"^[a[]$\"]\nwidth=472\n").unwrap();
+        let mut fields=note("normal",&["default"]);
+        fields.body="[";
+        assert_eq!(cfg.style_for(&fields)["width"],"472");
+        fields.body="a";
+        assert_eq!(cfg.style_for(&fields)["width"],"472");
+        fields.body="z";
+        assert_eq!(cfg.style_for(&fields)["width"],"300");
+    }
+
     #[test]
     fn glibc_c_locale_class_backslashes_are_literal_range_endpoints(){
         // Compared with native C-locale glibc regcomp(REG_EXTENDED) and
