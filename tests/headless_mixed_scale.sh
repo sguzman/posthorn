@@ -125,34 +125,45 @@ notify
 bounds="$(read_bounds '#00FF00' '#FF0000' "$root/max-2x.png")" || exit 1
 read -r x1_min x1_max y1_min y1_max <<<"$bounds"
 tall_height=$((y1_max-y1_min+1))
-# A live scale change must reselect the red 1x icon and shrink the
-# SAME notification on HEADLESS-1 without replacing its D-Bus ID.
+# A live output scale change must NEVER refit the existing icon.
+# Mako holds the decoded @2 asset until the notification is replaced.
 swaymsg -s "$ipc" 'output HEADLESS-2 scale 1' >/dev/null
-bounds="$(read_bounds '#FF0000' '#00FF00' "$root/max-1x.png")" || exit 1
-read -r x2_min x2_max y2_min y2_max <<<"$bounds"
-short_height=$((y2_max-y2_min+1))
-[[ "$tall_height" -ge $((short_height+5)) ]] || {
-  echo "Icon-scale change did not reflow popup: tall=$tall_height, short=$short_height"
+bounds="$(read_bounds '#00FF00' '#FF0000' "$root/max-1x-old-retained.png")" || exit 1
+read -r old_x_min old_x_max old_y_min old_y_max <<<"$bounds"
+[[ $((old_y_max-old_y_min+1)) -eq "$tall_height" ]] || {
+  echo 'The already-created @2 icon was unexpectedly resized at monitor change'
   cat "$root/posthorn.log"
   exit 1
 }
-# Target the bottommost painted portion, which was unavailable to the
-# old 1x-only hit-test geometry. Bounds are measured, not guessed.
+click_x=$((old_x_min+12))
+click_y=$((old_y_max-1))
+POSTHORN_HEADLESS_POINTER_TEST=1 \
+  ./target/debug/examples/qa_virtual_pointer "$click_x" "$click_y" 2560 720 273
+wait_disappearance
+# A NEW Notify at current maximum scale 1 must select the red, short PNG.
+notify
+bounds="$(read_bounds '#FF0000' '#00FF00' "$root/new-max-1x.png")" || exit 1
+read -r x2_min x2_max y2_min y2_max <<<"$bounds"
+short_height=$((y2_max-y2_min+1))
+[[ "$tall_height" -ge $((short_height+5)) ]] || {
+  echo "New Notify at scale 1 did not pick the shorter asset: tall=$tall_height, short=$short_height"
+  cat "$root/posthorn.log"
+  exit 1
+}
 click_x=$((x2_min+12))
 click_y=$((y2_max-1))
 POSTHORN_HEADLESS_POINTER_TEST=1 \
   ./target/debug/examples/qa_virtual_pointer "$click_x" "$click_y" 2560 720 273
 wait_disappearance
-# Restore the 2x monitor, remap a fresh notification and click at the
-# bottom of the now-taller 1x target. This would fail if the compositor
-# input region still used the short 1x icon's height.
+# Restore the 2x monitor, create another fresh notification, and confirm
+# its tall hit region and @2 asset rather than retroactively changing old.
 swaymsg -s "$ipc" 'output HEADLESS-2 scale 2' >/dev/null
 sleep 0.35
 notify
-bounds="$(read_bounds '#00FF00' '#FF0000' "$root/max-2x-restored.png")" || exit 1
+bounds="$(read_bounds '#00FF00' '#FF0000' "$root/new-max-2x.png")" || exit 1
 read -r x3_min x3_max y3_min y3_max <<<"$bounds"
 [[ $((y3_max-y3_min+1)) -ge $((short_height+5)) ]] || {
-  echo 'Restored 2x monitor did not produce the tall popup'
+  echo 'New Notify at restored 2x scale did not select tall icon'
   cat "$root/posthorn.log"
   exit 1
 }
@@ -161,4 +172,4 @@ click_y=$((y3_max-1))
 POSTHORN_HEADLESS_POINTER_TEST=1 \
   ./target/debug/examples/qa_virtual_pointer "$click_x" "$click_y" 1920 720 273
 wait_disappearance
-echo 'Mixed 1x/2x output icon selection, reflow and real bottom-edge pointer routing: OK'
+echo 'Mixed-scale icon lifetime, new arrivals and real pointer routing: OK'

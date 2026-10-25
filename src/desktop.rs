@@ -642,17 +642,31 @@ fn render_loop_multi(
 
 /// Drive the D-Bus service and the live Wayland preview in one process, each
 /// with its own event-loop thread. Both components share notification state.
+fn initialize_icon_creation_scale(runtime:&SharedRuntime)->io::Result<()>{
+    // Mako owns wl_output scale information before it accepts Notify.
+    // Preparing a temporary registry-only presenter avoids a race where
+    // the first private D-Bus message arrives before the render loop starts.
+    // No layer surface is created and the real session is never touched.
+    let presenter=LivePresenter::connect().map_err(other)?;
+    runtime.set_icon_creation_scale(presenter.maximum_output_scale());
+    Ok(())
+}
+
 pub async fn run_private_desktop(config: crate::config::Config)
     -> Result<(),Box<dyn std::error::Error + Send + Sync>>
 {
-    let (conn,runtime)=crate::service::open_private_service(config).await?;
+    let runtime=SharedRuntime::new(config);
+    initialize_icon_creation_scale(&runtime)?;
+    let (conn,runtime)=crate::service::open_private_runtime(runtime).await?;
     run_private_desktop_instance(conn,runtime).await
 }
 
 pub async fn run_private_desktop_from_path(path:&std::path::Path)
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
-    let (conn,runtime)=crate::service::open_private_service_from_path(path).await?;
+    let runtime=SharedRuntime::from_path(path)?;
+    initialize_icon_creation_scale(&runtime)?;
+    let (conn,runtime)=crate::service::open_private_runtime(runtime).await?;
     run_private_desktop_instance(conn,runtime).await
 }
 
@@ -661,7 +675,9 @@ pub async fn run_private_desktop_from_path(path:&std::path::Path)
 pub async fn run_private_multi_desktop_from_path(path:&std::path::Path)
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
-    let (conn,runtime)=crate::service::open_private_service_from_path(path).await?;
+    let runtime=SharedRuntime::from_path(path)?;
+    initialize_icon_creation_scale(&runtime)?;
+    let (conn,runtime)=crate::service::open_private_runtime(runtime).await?;
     run_private_desktop_instance_with_mode(conn,runtime,true).await
 }
 

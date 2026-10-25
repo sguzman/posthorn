@@ -76,6 +76,14 @@ pub async fn open_private_service(config: Config) -> zbus::Result<(Connection, S
     open_named_service(config, PRIVATE_BUS_NAME).await
 }
 
+/// The private Wayland desktop learns monitor scale BEFORE requesting its
+/// development D-Bus name, so even the earliest Notify uses the right theme.
+pub(crate) async fn open_private_runtime(
+    runtime:SharedRuntime
+)->zbus::Result<(Connection,SharedRuntime)>{
+    open_named_runtime(runtime,PRIVATE_BUS_NAME).await
+}
+
 /// Prepare the eventual desktop notification server. This method is *only*
 /// exercised under dbus-run-session in CI; no startup command invokes it yet.
 /// A full replacement is forbidden until the MVP parity gate is complete.
