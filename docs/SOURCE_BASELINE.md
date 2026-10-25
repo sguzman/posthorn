@@ -3690,3 +3690,53 @@ displayed 90%. Real Hyprland T503 remains **51%**;
 explicitly authorized reversible cutover T504 remains
 **0%**. No live Mako, production bus, or personal
 Hyprland configuration was accessed or changed.
+
+## Empty HOME and XDG_CONFIG_HOME default-config path semantics (2026-10-25)
+
+Pinned Mako v1.11.0 `config.c:743-760` builds its
+implicit config candidates by string concatenation:
+`"%s/.mako/config"` with `getenv("HOME")`, then
+`"%s/mako/config"` with `XDG_CONFIG_HOME`, defaulting
+to `"%s/.config"` with HOME when XDG is unset
+**or an empty string**.
+
+Mako distinguishes absent HOME (no default file)
+from a defined but empty HOME. With `HOME=""`,
+its implicit legacy and fallback paths are
+`/.mako/config` and `/.config/mako/config`.
+Posthorn formerly used an empty Rust `Path` as the
+join base and incorrectly searched relative files
+`.mako/config` and `.config/mako/config` in the
+current working directory.
+
+Posthorn now constructs candidates using `/` as
+the *path base* only when HOME is defined but empty.
+An explicitly empty `XDG_CONFIG_HOME` also falls
+back to HOME's `.config`, matching Mako's
+`config_home[0] == '\0'` check. Nonempty XDG paths
+remain literal, including supported relative paths.
+The existing legacy-first lookup order and
+`XDG_CONFIG_DIRS` omission are unchanged.
+
+Deterministic tests verify both empty-HOME candidates,
+nonempty HOME paths, an explicit nonempty XDG path,
+an explicitly empty XDG value, and a relative XDG
+path. They inspect only the constructed candidate
+names, without reading or writing config files at
+the host filesystem root. The pre-existing temporary
+directory precedence test remains green.
+
+- [Pinned Mako default path discovery](https://github.com/emersion/mako/blob/v1.11.0/config.c#L743-L777)
+- [Empty HOME candidate correction eb45d27](https://github.com/sguzman/posthorn/commit/eb45d27b60930c84e0e960ca9e661ace04b5d64e)
+- [Empty XDG_CONFIG_HOME fallback correction 8b3822f](https://github.com/sguzman/posthorn/commit/8b3822f1c8201efb0435201bd8329121472b9d02)
+- [Full green CI 40243488785](https://github.com/sguzman/posthorn/actions/runs/40243488785):
+  **339 Rust library tests, 90 isolated private D-Bus
+  tests, and complete headless Wayland acceptance passed**.
+
+**Accepted progress:** T104 **93% → 94% (+1 pp)**;
+P1 raw **94.8% → 95.0% (+0.2 pp)**, displayed 95%;
+strict 24-task M0 raw **90.000% → 90.042% (+0.042 pp)**,
+displayed 90%. Physical Hyprland T503 remains
+51% and the expressly authorized cutover T504
+remains 0%. No live Mako, session bus, or user's
+Hyprland configuration was touched.
