@@ -1276,7 +1276,7 @@ async fn blank_output_selector_waits_for_real_compositor_enter_over_private_dbus
         HashMap::<String,OwnedValue>::new(),-1i32
     );
     let id:u32=desktop.call("Notify",&notify(0)).await?;
-    assert!(runtime.store.lock()?.active()[0].surface_associated);
+    assert!(runtime.store.lock().unwrap().active()[0].surface_associated);
     assert_eq!(runtime.next_deadline()?,None,
         "a fresh unassociated note must not match output=");
     let replaced:u32=desktop.call("Notify",&notify(id)).await?;
