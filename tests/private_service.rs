@@ -2811,6 +2811,43 @@ async fn private_dbus_progress_value_has_exact_mako_integer_pixel_boundary()
 }
 
 #[tokio::test]
+async fn short_inline_image_payload_aborts_private_dbus_notify_without_replacing()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Pinned Mako xdg.c aborts a Notify when the sender's image-data array
+    // contains fewer bytes than the iiibii metadata promises. Accepting the
+    // notification without the image would also consume an ID or replace a
+    // previously valid notification, a sender-visible protocol divergence.
+    let (conn,runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let original:u32=desktop.call("Notify",&(
+        "short-image-test",0u32,"","Original payload","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    for key in ["image-data","image_data","icon_data"] {
+        let short=(2i32,2i32,8i32,true,8i32,4i32,vec![255u8;15]);
+        let hint=OwnedValue::try_from(zbus::zvariant::Value::from(short))?;
+        let result:Result<u32,zbus::Error>=desktop.call("Notify",&(
+            "short-image-test",original,"","Incorrect replacement","",
+            Vec::<String>::new(),HashMap::from([(key.to_string(),hint)]),-1i32
+        )).await;
+        assert!(result.is_err(),"{key} truncated wire bytes must reject Notify");
+        let store=runtime.store.lock().unwrap();
+        assert_eq!(store.active().len(),1);
+        assert_eq!(store.active()[0].id,original);
+        assert_eq!(store.active()[0].summary,"Original payload");
+    }
+    // The first valid new call receives the next ID; the rejected requests
+    // must not have allocated a sender-visible notification ID.
+    let next:u32=desktop.call("Notify",&(
+        "short-image-test",0u32,"","Valid next","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_eq!(next,original+1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn image_data_declared_channels_differ_from_gdk_pixbuf_pixel_channels()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
