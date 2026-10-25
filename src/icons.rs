@@ -184,8 +184,11 @@ pub fn resolve_icon_scaled(
         .chain(std::iter::once(PathBuf::from("/usr/share/icons/hicolor")));
     for root in themes {
         let Ok(first_levels)=fs::read_dir(&root) else{continue};
-        let mut exact=Vec::new();
-        let mut smaller=Vec::new();
+        // Mako uses glob(..., GLOB_NOSORT): the first exact match wins,
+        // and an undersized match replaces its predecessor only when
+        // strictly larger. Sorting candidates by filename changes both.
+        let mut exact:Option<PathBuf>=None;
+        let mut smaller:Option<(u32,PathBuf)>=None;
         for first in first_levels.flatten(){
             if !first.path().is_dir(){continue;}
             let first_name=first.file_name().to_string_lossy().into_owned();
@@ -201,19 +204,18 @@ pub fn resolve_icon_scaled(
                         theme_icon_size(&first_name,&second_name,&file_name)
                         else{continue};
                     if size==max_size && scale==max_scale {
-                        exact.push(file);
-                    }else if size<physical_cap {
-                        smaller.push((size,file));
+                        if exact.is_none(){exact=Some(file);}
+                    }else if size<physical_cap
+                        && smaller.as_ref().is_none_or(|(best,_)|size>*best) {
+                        smaller=Some((size,file));
                     }
                 }
             }
         }
-        exact.sort();
-        if let Some(path)=exact.into_iter().next(){return Some(path);}
-        // Mako accepts an undersized candidate, not an arbitrary oversized
-        // nearest match. Preserve deterministic ordering for equal sizes.
-        smaller.sort_by(|(a,pa),(b,pb)|b.cmp(a).then_with(||pa.cmp(pb)));
-        if let Some((_,path))=smaller.into_iter().next(){return Some(path);}
+        if let Some(path)=exact{return Some(path);}
+        // Equal-sized fallback candidates retain their first filesystem
+        // enumeration order, just as Mako's strict > best-size check does.
+        if let Some((_,path))=smaller{return Some(path);}
     }
     icon_files(Path::new("/usr/share/pixmaps"),name).into_iter().next()
 }
@@ -510,6 +512,29 @@ mod tests {
         assert_eq!(resolve_icon_scaled(
             "posthorn",second.path().to_str().unwrap(),64,2
         ),Some(dir.join("posthorn.png@2")));
+    }
+
+    #[test]
+    fn equal_size_theme_icons_follow_unsorted_filesystem_order(){
+        // Mako v1.11 icon.c calls glob(GLOB_NOSORT), breaks on its
+        // first exact match, and keeps the first equally sized fallback.
+        // Read filesystem enumeration order rather than assuming ext4,
+        // tmpfs or overlayfs returns lexicographically sorted entries.
+        let root=tempfile::tempdir().unwrap();
+        let dir=root.path().join("64x64/apps");
+        fs::create_dir_all(&dir).unwrap();
+        for suffix in ["zeta","alpha","middle"] {
+            fs::write(dir.join(format!("posthorn.{suffix}")),b"fixture").unwrap();
+        }
+        let expected=fs::read_dir(&dir).unwrap().flatten()
+            .map(|entry|entry.path())
+            .find(|path|path.file_name().is_some_and(|name|
+                name.to_string_lossy().starts_with("posthorn.")))
+            .expect("fixture files");
+        assert_eq!(resolve_icon_scaled("posthorn",root.path().to_str().unwrap(),64,1),
+            Some(expected.clone()),"first exact match wins without sorting");
+        assert_eq!(resolve_icon_scaled("posthorn",root.path().to_str().unwrap(),128,1),
+            Some(expected),"equal-size fallback must keep the first match");
     }
 
     #[test]
