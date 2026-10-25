@@ -40,6 +40,28 @@ fn posthornctl_usage_writes_stderr_with_mako_exit_semantics() {
     assert!(String::from_utf8_lossy(&no_args.stderr).contains(
         "Usage: posthornctl <command> [options...]"
     ));
+    assert!(no_args.stderr.ends_with(b"\\n"),"usage requires one final LF");
+    assert!(!no_args.stderr.ends_with(b"\\n\\n"),
+        "pinned Mako writes usage via fprintf without an extra blank line");
+
+    // The parser's error diagnostics are user-visible CLI compatibility,
+    // not generic Rust error formatting. These fail before session bus access.
+    for (args,message) in [
+        (vec!["dismiss","-a","-g"],"-a and -g cannot be used together"),
+        (vec!["dismiss","-a","-n","3"],"-n cannot be used with -a or -g"),
+        (vec!["menu"],"Missing menu command"),
+        (vec!["mode","-s","-a","quiet"],"-a/-r/-t and -s cannot be used together"),
+        (vec!["mode","quiet"],"positional arguments can only be used with -s"),
+        (vec!["strange"],"Unknown command: strange"),
+    ] {
+        let output=Command::new(binary).args(&args)
+            .env("DBUS_SESSION_BUS_ADDRESS","unix:path=/no/such/bus")
+            .output().unwrap();
+        assert!(!output.status.success(),"{args:?} unexpectedly accepted");
+        assert!(output.stdout.is_empty(),"{args:?} leaked into stdout");
+        assert_eq!(String::from_utf8_lossy(&output.stderr),
+            format!("{message}\\n"),"makoctl diagnostic mismatch for {args:?}");
+    }
 
     for flag in ["help","-h","--help"] {
         let help=Command::new(binary).arg(flag).output().unwrap();
