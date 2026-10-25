@@ -906,7 +906,7 @@ fn validate_option(key: &str, value: &str) -> Result<(), String> {
     else if key == "group-by" {
         const FIELDS: &[&str] = &[
             "app-name", "app-icon", "actionable", "expiring", "urgency",
-            "category", "desktop-entry", "summary", "body", "grouped",
+            "category", "desktop-entry", "summary", "body", "hidden", "grouped",
             "group-index", "anchor", "output", "none",
         ];
         // Mako accepts comma-separated criteria *field names*, not selector values.
@@ -1847,6 +1847,9 @@ mod tests {
             "[hidden]\nformat=%h\n",
             "[category=urgent hidden=false]\nformat=%s\n",
             "group-by=app-name,category\n",
+            "group-by=hidden\n",
+            "group-by=hidden,app-name\n",
+            "group-by=none,hidden\n",
             "group-by=none,app-name\n",
             "group-by=app-name,,category\n",
             "group-by=\n",
