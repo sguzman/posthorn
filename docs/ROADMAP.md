@@ -33,7 +33,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 ### 🚌 P3 — D-Bus protocol and control surface — `█████████░ 94%`
 
-- 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `██████████ 98%`
+- 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `██████████ 99%`
 - 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `██████████ 98%`
 - 🔄 T303 — Correct startup, bus ownership and config reload behavior — `█████████░ 86%`
 
