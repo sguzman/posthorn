@@ -97,7 +97,22 @@ fn decode_mako_file_bytes(bytes:&[u8],source:&str)->Result<String,ConfigError>{
         if matches!(uncommented.into_iter().next(),Some(b'#'|b'\0')){
             continue;
         }
-        let decoded=std::str::from_utf8(line).map_err(|_|err(
+        // Ordinary Mako key=value options are parsed with C strchr,
+        // strcmp and strtol. Those functions stop at the first NUL,
+        // even if getline() obtained more physical bytes after it.
+        // Preserve that terminating NUL so append() trims the *whole*
+        // physical line before discarding the hidden suffix: a space
+        // immediately before NUL is not trailing config whitespace.
+        // Section headers require their physical closing ']' and
+        // keep separate bracket grammar, so don't shorten them here.
+        let first=line.iter().copied()
+            .skip_while(|byte|*byte==b' '||*byte==b'\t').next();
+        let visible=if first==Some(b'['){
+            line
+        } else if let Some(index)=line.iter().position(|byte|*byte==b'\0'){
+            &line[..=index]
+        } else {line};
+        let decoded=std::str::from_utf8(visible).map_err(|_|err(
             format!("{source}:{}",index+1),
             "non-UTF-8 bytes in active config line",
         ))?;
@@ -1322,8 +1337,14 @@ impl Config {
         // and tabs only. Rust lines() and trim() also discard CRLF and
         // Unicode whitespace, silently accepting files Mako rejects.
         for (lineno, raw) in text.split('\n').enumerate() {
-            let line = raw.trim_matches([' ', '\t']);
-            if line.is_empty() || line.starts_with('#') || line.starts_with('\0') {
+            let physical = raw.trim_matches([' ', '\t']);
+            // In a non-section option, the C key/value parser sees no
+            // bytes beyond the first embedded NUL. Trimming must run
+            // BEFORE truncating: the NUL hides any subsequent bytes,
+            // but does not make whitespace before it trailing.
+            let line=if physical.starts_with('['){physical}
+                else {physical.split('\0').next().unwrap_or(physical)};
+            if line.is_empty() || line.starts_with('#') {
                 continue;
             }
             let location = format!("{source}:{}", lineno + 1);
@@ -2024,6 +2045,38 @@ mod tests {
         std::fs::write(file(21),format!("include={}\n",file(0).display())).unwrap();
         let result=Config::from_path(&file(0)).unwrap_err();
         assert!(result.message.contains("recursive include"));
+    }
+
+    #[test]
+    fn mako_option_value_ends_at_nul_without_hiding_preceding_whitespace(){
+        // Pinned config.c:801-877 uses getline() for the physical line,
+        // then strchr() and strtol() on its NUL-terminated C string.
+        let dir=tempfile::tempdir().unwrap();
+        let child=dir.path().join("child.conf");
+        let root=dir.path().join("root.conf");
+        let mut bytes=b"width=472\0".to_vec();
+        bytes.extend_from_slice(&[0xff,0xfe,b'\n']);
+        bytes.extend_from_slice(b"height=114\0not-an-option\n");
+        std::fs::write(&child,bytes).unwrap();
+        std::fs::write(&root,format!("include={}\n",child.display())).unwrap();
+        let config=Config::from_path(&root).unwrap();
+        assert_eq!(config.global["width"],"472");
+        assert_eq!(config.global["height"],"114");
+        let direct=Config::parse("width=472\0ignored\nheight=114\n").unwrap();
+        assert_eq!(direct.global["width"],"472");
+        assert_eq!(direct.global["height"],"114");
+
+        // Source Mako's ASCII trailing whitespace stripper looks at
+        // the physical line end, not the truncated pre-NUL prefix.
+        // A space before NUL therefore remains in the numeric value.
+        std::fs::write(&child,b"width=472 \0ignored\n").unwrap();
+        assert!(Config::from_path(&root).is_err());
+        assert!(Config::parse("width=472 \0ignored\n").is_err());
+
+        // Invalid bytes before the C terminator remain a hard error,
+        // while such bytes after the NUL are ignored as source C data.
+        std::fs::write(&child,b"width=\xff\0ignored\n").unwrap();
+        assert!(Config::from_path(&root).is_err());
     }
 
     #[test]
