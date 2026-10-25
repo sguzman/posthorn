@@ -2814,10 +2814,11 @@ async fn private_dbus_progress_value_has_exact_mako_integer_pixel_boundary()
 async fn short_inline_image_payload_aborts_private_dbus_notify_without_replacing()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
-    // Pinned Mako xdg.c aborts a Notify when the sender's image-data array
-    // contains fewer bytes than the iiibii metadata promises. Accepting the
-    // notification without the image would also consume an ID or replace a
-    // previously valid notification, a sender-visible protocol divergence.
+    // Pinned Mako xdg.c attempts to read the byte count from iiibii,
+    // but fails to handle sd-bus's zero return at end-of-array. This
+    // Posthorn-only hardening rejects truncated data instead of copying
+    // an uninitialized C byte; it is NOT strict malformed-input parity.
+    // No rejected call may consume an ID or replace a valid notification.
     let (conn,runtime)=open_private_service(Config::default()).await?;
     let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
     let original:u32=desktop.call("Notify",&(
