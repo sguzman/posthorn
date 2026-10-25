@@ -102,6 +102,69 @@ fn decode_mako_file_bytes(bytes:&[u8],source:&str)->Result<String,ConfigError>{
     Ok(text)
 }
 
+/// C-locale glibc accepts a POSIX bracket made entirely of one to four
+/// hyphens, all meaning literal '-'. Five or more are REG_ERANGE. Rust
+/// regex's class subtraction syntax gives some of these a different
+/// meaning. Canonicalize only a *complete* hyphen-only bracket, including
+/// [^---], without interpreting interior '[' from other character classes.
+fn mako_posix_ere_dash_only_brackets(pattern:&str)->Result<String,String>{
+    let mut result=String::with_capacity(pattern.len());
+    let mut chars=pattern.chars().peekable();
+    let mut in_class=false;
+    let mut first=false;
+    while let Some(ch)=chars.next(){
+        match ch {
+            '\\' => {
+                result.push('\\');
+                if let Some(next)=chars.next(){result.push(next);}
+            }
+            '[' if !in_class => {
+                let mut probe=chars.clone();
+                let negated=probe.peek()==Some(&'^');
+                if negated{probe.next();}
+                let mut count=0usize;
+                while probe.peek()==Some(&'-'){count+=1;probe.next();}
+                if count>0 && probe.peek()==Some(&']'){
+                    if count>4{
+                        return Err("invalid glibc POSIX all-hyphen bracket range".into());
+                    }
+                    for _ in 0..(count+usize::from(negated)+1){chars.next();}
+                    result.push_str(if negated{r"[^\-]"}else{r"[\-]"});
+                }else{
+                    in_class=true;
+                    first=true;
+                    result.push('[');
+                }
+            }
+            '[' if in_class => {
+                result.push('[');
+                if let Some(delimiter @ (':'|'.'|'='))=chars.peek().copied(){
+                    result.push(chars.next().expect("peeked delimiter"));
+                    let mut prev='\0';
+                    for next in chars.by_ref(){
+                        result.push(next);
+                        if prev==delimiter && next==']'{break;}
+                        prev=next;
+                    }
+                }
+                first=false;
+            }
+            ']' if in_class && !first=>{
+                in_class=false;
+                result.push(']');
+            }
+            '^' if in_class && first=>{
+                result.push('^');
+            }
+            _=>{
+                result.push(ch);
+                if in_class{first=false;}
+            }
+        }
+    }
+    Ok(result)
+}
+
 /// glibc's C-locale REG_EXTENDED treats '\' INSIDE a bracket class as
 /// an ordinary literal character, not as an escape for the next byte.
 /// Rust regex treats it as a metacharacter. Turn each source backslash
@@ -812,7 +875,8 @@ impl Selector {
             if has_rust_only_posix_class(value) {
                 return Err("glibc POSIX ERE does not recognize this bracket class".into());
             }
-            let backslashes=mako_posix_c_class_backslashes(value);
+            let dash_only=mako_posix_ere_dash_only_brackets(value)?;
+            let backslashes=mako_posix_c_class_backslashes(&dash_only);
             let leading=mako_posix_ere_literal_leading_closer(&backslashes);
             let collated=mako_posix_c_collating_elements(&leading)?;
             // Validate the original POSIX syntax BEFORE GNU word-boundary
@@ -2155,6 +2219,52 @@ mod tests {
         assert_eq!(config.style_for(&fields)["width"],"463");
         fields.summary="a(";
         assert_eq!(config.style_for(&fields)["width"],"300");
+    }
+
+    #[test]
+    fn glibc_dash_only_bracket_classes_have_one_to_four_literal_hyphens(){
+        // Direct C-locale regcomp(REG_EXTENDED | REG_NOSUB) probes:
+        // [-], [--], [---], [----] accept only '-', and their negated
+        // counterparts accept every single byte except '-'.
+        // Five or more hyphens report REG_ERANGE (invalid range end).
+        let mut fields=note("normal",&["default"]);
+        for n in 1..=4{
+            let positive=format!("^[{}]$","-".repeat(n));
+            let negative=format!("^[^{}]$","-".repeat(n));
+            assert_eq!(mako_posix_ere_dash_only_brackets(&positive).unwrap(),
+                r"^[\-]$");
+            assert_eq!(mako_posix_ere_dash_only_brackets(&negative).unwrap(),
+                r"^[^\-]$");
+            let yes=Selector::new("summary~",&positive).unwrap();
+            let no=Selector::new("summary~",&negative).unwrap();
+            for (text,positive_match) in [("-",true),("a",false),("0",false)]{
+                fields.summary=text;
+                assert_eq!(yes.matches(&fields),positive_match,
+                    "{positive:?} must match only literal hyphen");
+                assert_eq!(no.matches(&fields),!positive_match,
+                    "{negative:?} must invert literal hyphen");
+            }
+        }
+        for n in [5usize,6,10] {
+            for pattern in [
+                format!("^[{}]$","-".repeat(n)),
+                format!("^[^{}]$","-".repeat(n)),
+            ]{
+                assert!(mako_posix_ere_dash_only_brackets(&pattern).is_err());
+                assert!(Selector::new("summary~",&pattern).is_err());
+                assert!(Selector::new("body~",&pattern).is_err());
+            }
+        }
+        // This pass must not reinterpret an escaped opening bracket or
+        // alter a real POSIX character-class element.
+        for pattern in [r"^\[---\]$",r"^[[:digit:]]$",r"^[--a]$"]{
+            assert_eq!(mako_posix_ere_dash_only_brackets(pattern).unwrap(),pattern);
+        }
+        let cfg=Config::parse("[body~=^[----]$]\nwidth=467\n").unwrap();
+        fields.body="-";
+        assert_eq!(cfg.style_for(&fields)["width"],"467");
+        fields.body="a";
+        assert_eq!(cfg.style_for(&fields)["width"],"300");
     }
 
     #[test]
