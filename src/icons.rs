@@ -27,7 +27,7 @@ pub fn decode_raw_image(
     width:i32,height:i32,rowstride:i32,has_alpha:bool,
     bits_per_sample:i32,channels:i32,bytes:&[u8],
 ) -> Option<IconPixels> {
-    let (w,h,stride,channels)=(
+    let (w,h,stride,declared_channels)=(
         u32::try_from(width).ok()?,
         u32::try_from(height).ok()?,
         usize::try_from(rowstride).ok()?,
@@ -35,20 +35,30 @@ pub fn decode_raw_image(
     );
     if w==0 || h==0 || w>4096 || h>4096
         || u64::from(w)*u64::from(h)>4_194_304
-        || bits_per_sample!=8
-        || channels != if has_alpha {4}else{3}
+        || bits_per_sample!=8 || declared_channels==0
     {return None;}
-    let row=(w as usize).checked_mul(channels)?;
-    let last=(h as usize-1).checked_mul(stride)?.checked_add(row)?;
-    if stride<row||last>bytes.len()||bytes.len()>16*1024*1024{
+    // Pinned Mako dbus/xdg.c uses the sender's channel count only for
+    // image_len = (height - 1)*rowstride + width*channels (8 bits/sample).
+    // Its icon.c then hands that buffer to GdkPixbuf, which determines
+    // the *actual* RGB/RGBA pixel stride from has_alpha alone.
+    // Accept an oversized declared count (Mako does), but never read
+    // beyond bytes actually copied by its D-Bus handler.
+    let pixel_channels=if has_alpha {4usize}else{3usize};
+    let wire_row=(w as usize).checked_mul(declared_channels)?;
+    let pixel_row=(w as usize).checked_mul(pixel_channels)?;
+    let preceding=(h as usize-1).checked_mul(stride)?;
+    let wire_last=preceding.checked_add(wire_row)?;
+    let pixel_last=preceding.checked_add(pixel_row)?;
+    if stride<pixel_row || pixel_last>wire_last
+        || wire_last>bytes.len() || bytes.len()>16*1024*1024 {
         return None;
     }
     let mut bgra=vec![0u8;(w as usize).checked_mul(h as usize)?.checked_mul(4)?];
     for y in 0..h as usize {
         let row_base=y.checked_mul(stride)?;
         for x in 0..w as usize {
-            let pos=row_base.checked_add(x.checked_mul(channels)?)?;
-            let rgba=bytes.get(pos..pos+channels)?;
+            let pos=row_base.checked_add(x.checked_mul(pixel_channels)?)?;
+            let rgba=bytes.get(pos..pos+pixel_channels)?;
             let a=if has_alpha{rgba[3]}else{255};
             let premultiply=|color:u8|((u16::from(color)*u16::from(a)+127)/255) as u8;
             let dest=(y*w as usize+x)*4;
@@ -313,6 +323,28 @@ mod tests {
         assert!(decode_raw_image(1,1,3,true,8,4,&[0;4]).is_none());
         assert!(decode_raw_image(1,1,4,true,16,4,&[0;4]).is_none());
         assert!(decode_raw_image(1,1,4,true,8,3,&[0;4]).is_none());
+    }
+
+    #[test]
+    fn image_data_channel_metadata_only_bounds_wire_payload_like_mako(){
+        // Mako calculates its D-Bus copy length with channels=5, then
+        // GdkPixbuf treats has_alpha=1 as FOUR channels per actual pixel.
+        // The fifth advertised channel must not misalign the second pixel.
+        let pixels=decode_raw_image(2,1,10,true,8,5,&[
+            200,100,50,128, 0,255,0,255, 91,92,
+        ]).expect("Mako accepts adequate oversized channel metadata");
+        assert_eq!(pixels.bgra,vec![25,50,100,128,0,255,0,255]);
+        // Conversely has_alpha=0 always makes GdkPixbuf read RGB triples,
+        // despite a larger declared count used for the payload length.
+        let opaque=decode_raw_image(1,2,4,false,8,4,&[
+            1,2,3,99, 11,22,33,88,
+        ]).expect("opaque RGB uses three channels per pixel");
+        assert_eq!(opaque.bgra,vec![3,2,1,255,33,22,11,255]);
+        // A smaller advertised channel count would cause the C handler
+        // to copy fewer bytes than GdkPixbuf may subsequently read.
+        // Retain Posthorn's bounded safety rejection instead.
+        assert!(decode_raw_image(1,1,4,true,8,3,&[1,2,3,4]).is_none());
+        assert!(decode_raw_image(1,1,4,true,8,5,&[1,2,3,4]).is_none());
     }
 
     #[test]
