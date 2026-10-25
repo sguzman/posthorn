@@ -163,7 +163,7 @@ impl MakoControl {
         })).collect()
     }
 
-    fn dismiss_impl(&self, options: &HashMap<String, OwnedValue>) -> zbus::fdo::Result<Vec<u32>> {
+    fn dismiss_impl(&self, options: &HashMap<String, OwnedValue>) -> zbus::fdo::Result<Vec<(u32,bool)>> {
         // Mako's sd_bus_message_read("v", expected_type) fails for a
         // present field of the wrong type. Never silently fall back to id=0:
         // that could dismiss the first unrelated notification.
@@ -202,16 +202,20 @@ impl MakoControl {
             else if store.active().iter().any(|n|n.id==id){vec![id]}
             else{Vec::new()}
         };
-        for notification_id in &ids {
+        let mut removed=Vec::new();
+        for notification_id in ids {
             if let Some(runtime) = &self.runtime {
-                runtime.close(*notification_id, CloseReason::Dismissed, history)
-                    .map_err(|e| zbus::fdo::Error::Failed(e.into()))?;
-            } else {
-                self.store.lock().map_err(|_| internal_error())?
-                    .close(*notification_id, CloseReason::Dismissed, history, true);
+                if let Some(change)=runtime.close_with_change(
+                    notification_id, CloseReason::Dismissed, history
+                ).map_err(|e| zbus::fdo::Error::Failed(e.into()))? {
+                    removed.push((notification_id,change));
+                }
+            } else if self.store.lock().map_err(|_|internal_error())?
+                .close(notification_id,CloseReason::Dismissed,history,true).is_some(){
+                removed.push((notification_id,true));
             }
         }
-        Ok(ids)
+        Ok(removed)
     }
 
     fn set_modes_impl(&self, modes: Vec<String>) -> zbus::fdo::Result<()> {
@@ -321,12 +325,14 @@ impl MakoControl {
         let options = options.into_effective_map()?;
         let ids = self.dismiss_impl(&options)?;
         if !ids.is_empty() {
-            for id in ids {
+            for (id,changed) in ids {
                 emit_notification_signal(conn, "NotificationClosed", id,
                     CloseReason::Dismissed as u32).await?;
+                if changed {
+                    crate::signals::invalidate(conn, "Notifications").await
+                        .map_err(|e|zbus::fdo::Error::Failed(e.to_string()))?;
+                }
             }
-            crate::signals::invalidate(conn, "Notifications").await
-                .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         }
         Ok(())
     }
@@ -762,7 +768,7 @@ mod tests {
         // Unknown extension keys may be ignored, as in upstream Mako.
         let opts=[("future-option".to_string(),OwnedValue::from(true)),
                   ("id".into(),OwnedValue::from(id))].into();
-        assert_eq!(control.dismiss_impl(&opts).unwrap(),vec![id]);
+        assert_eq!(control.dismiss_impl(&opts).unwrap(),vec![(id,true)]);
     }
 
     #[test]
@@ -799,7 +805,7 @@ mod tests {
             runtime.schedule_without_hook(id,now).unwrap();
         }
         let opts=[("group".into(),OwnedValue::from(true))].into();
-        assert_eq!(control.dismiss_impl(&opts).unwrap(),vec![latest,first]);
+        assert_eq!(control.dismiss_impl(&opts).unwrap(),vec![(latest,true),(first,true)]);
         assert_eq!(runtime.store.lock().unwrap().active().len(),1);
         assert_eq!(runtime.store.lock().unwrap().active()[0].id,other);
         assert_eq!(runtime.store.lock().unwrap().history().len(),2);
