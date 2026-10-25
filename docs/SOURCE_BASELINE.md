@@ -2833,3 +2833,53 @@ implementation and isolated reference regression contribute real
 renderer parity evidence, but **T503 remains 51%** until actual
 Hyprland work is authorized and performed. M0 stays
 **89.292% raw (89% displayed)**; session ledger delta is **0 pp**.
+
+## Source parity: unbounded Cairo glyph overhang after Pango layout (2026-10-25)
+
+Pinned Mako v1.11.0 `render.c:318-325` calls `move_to`,
+`pango_cairo_update_layout`, and `pango_cairo_show_layout`
+after setting the Pango layout's width, height, wrapping,
+ellipsizing and alignment. It does **not** add a separate Cairo
+`rectangle(...); cairo_clip(...)` before drawing text. The
+Pango layout is the formatting/ellipsizing boundary, while ink
+overhangs (such as oblique or italic glyphs) can extend beyond
+the layout's nominal ink rectangle and remain visible within the
+underlying notification surface.
+
+Posthorn previously created an additional Cairo rectangle clip
+at `text_x, text_y, available_w, available_h` immediately
+before `show_layout`. That clipped Pango glyph overhang ink
+which real Mako paints. The correction removes precisely that
+redundant clip without changing layout text, sizing, alignment,
+notifications, other Cairo drawing or buffer safety.
+
+A discriminating pixel regression constructs an isolated
+Pango/Cairo reference for a right-aligned oblique-font
+notification on a transparent surface, **without** the extra clip.
+It compares all frame bytes with Posthorn's raster and renders
+the old clipped variant as a negative control. The test requires
+at least one glyph fixture where the old clip **actually changes
+pixels**; it passed, so the correction is not merely a source
+comment with an inert fixture.
+
+This follows the earlier successful exact Mako Cairo rounded
+border path and SOURCE stroke correction, but is a distinct
+Pango painting behavior.
+
+- [Pinned source: `render.c:318-325`](https://github.com/emersion/mako/blob/v1.11.0/render.c#L318-L325)
+- [Renderer change e60bce0](https://github.com/sguzman/posthorn/commit/e60bce0ad3b288c613ce6df39ec3a03fb735a611)
+- [Discriminating raster regression 9c52f5b](https://github.com/sguzman/posthorn/commit/9c52f5b339f932a5f5e840e8da6cacb4e77b71f2)
+- [Full green CI 40220558551](https://github.com/sguzman/posthorn/actions/runs/40220558551):
+  **322 Rust library tests, 89 isolated private D-Bus tests,
+  and all headless Wayland compositor checks passed**.
+
+**Evidence-backed progress:** T205 **85% → 86% (+1 pp)**,
+P2's raw average **96.600% → 96.800%**
+(displayed **97% → 97%**); strict 24-task M0
+**89.292% → 89.333% (+0.042 pp raw)**,
+displayed **89% → 89%**. This source-specific
+Pango drawing acceptance does **not** close full markup,
+formatting, actions, physical Hyprland, or opt-in cutover
+acceptance. T503 remains **51%** and T504 **0%**.
+No installed Mako, production D-Bus notification owner
+or personal Hyprland configuration was accessed.
