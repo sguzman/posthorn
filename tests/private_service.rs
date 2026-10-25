@@ -121,6 +121,100 @@ async fn history_disabled_close_suppresses_only_mako_control_property_invalidati
 }
 
 #[tokio::test]
+async fn notify_only_invalidates_mako_control_on_real_insertion_not_id_or_tag_replace()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use futures_util::StreamExt;
+    // Source: dbus/xdg.c calls insert_notification only when the id was
+    // not reused; that function alone emits the initial property change.
+    let (conn,runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let props=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,
+        "org.freedesktop.DBus.Properties").await?;
+    let mut changed=props.receive_signal("PropertiesChanged").await?;
+
+    let fresh:u32=desktop.call("Notify",&(
+        "replacements",0u32,"","Fresh","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    tokio::time::timeout(Duration::from_secs(3),changed.next()).await?
+        .ok_or("new insertion must invalidate Notifications")?;
+    let replaced:u32=desktop.call("Notify",&(
+        "replacements",fresh,"","Direct update","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_eq!(replaced,fresh);
+    assert!(tokio::time::timeout(Duration::from_millis(130),changed.next())
+        .await.is_err(),"existing-ID Notify must not emit insertion invalidation");
+    assert_eq!(runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==fresh).unwrap().summary,"Direct update");
+
+    let tag:HashMap<String,OwnedValue>=[(
+        "x-dunst-stack-tag".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from("progress"))?
+    )].into();
+    let tagged:u32=desktop.call("Notify",&(
+        "tagged-app",0u32,"","Tagged initial","",Vec::<String>::new(),
+        tag.clone(),-1i32
+    )).await?;
+    tokio::time::timeout(Duration::from_secs(3),changed.next()).await?
+        .ok_or("first tagged Notify must invalidate")?;
+    let tag_update:u32=desktop.call("Notify",&(
+        "tagged-app",0u32,"","Tagged update","",Vec::<String>::new(),
+        tag,-1i32
+    )).await?;
+    assert_eq!(tag_update,tagged);
+    assert!(tokio::time::timeout(Duration::from_millis(130),changed.next())
+        .await.is_err(),"stack-tag replacement must not emit insertion invalidation");
+    let store=runtime.store.lock().unwrap();
+    assert_eq!(store.active().len(),2);
+    assert_eq!(store.active().iter().find(|n|n.id==tagged).unwrap().summary,
+        "Tagged update");
+    Ok(())
+}
+
+#[tokio::test]
+async fn on_notify_dismiss_emits_insertion_invalidation_then_source_close_policy()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use futures_util::StreamExt;
+    let (conn,runtime)=open_private_service(Config::parse(
+        "[category=quiet]\nhistory=0\non-notify=dismiss\n\
+         [category=archive]\non-notify=dismiss\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let props=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,
+        "org.freedesktop.DBus.Properties").await?;
+    let mut changed=props.receive_signal("PropertiesChanged").await?;
+    let mut closed=desktop.receive_signal("NotificationClosed").await?;
+    for (category,expected_extra_change) in [("quiet",false),("archive",true)] {
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".into(),OwnedValue::try_from(
+                zbus::zvariant::Value::from(category))?
+        )].into();
+        let id:u32=desktop.call("Notify",&(
+            "notify-dismiss-test",0u32,"","Transient","",
+            Vec::<String>::new(),hints,-1i32
+        )).await?;
+        tokio::time::timeout(Duration::from_secs(3),changed.next()).await?
+            .ok_or("insertion must invalidate before post-insertion hook")?;
+        let signal=tokio::time::timeout(Duration::from_secs(3),closed.next())
+            .await?.ok_or("on-notify dismissal needs NotificationClosed")?;
+        let (signal_id,reason):(u32,u32)=signal.body().deserialize()?;
+        assert_eq!((signal_id,reason),(id,2));
+        if expected_extra_change{
+            tokio::time::timeout(Duration::from_secs(3),changed.next()).await?
+                .ok_or("history-enabled on-notify close must invalidate again")?;
+        }else{
+            assert!(tokio::time::timeout(Duration::from_millis(140),changed.next())
+                .await.is_err(),"history=0 hook must not add a close invalidation");
+        }
+        assert!(runtime.store.lock().unwrap().active().is_empty());
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn notification_bus_name_collision_never_queues_or_displaces_owner()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
