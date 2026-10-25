@@ -2376,3 +2376,43 @@ almost-finished T402 rendering task, so
 test. The previous, separately verified icon implementation
 already advanced T303 from 84% to 86% (+2pp), and P3 from
 93% to 94% (+1pp) this development session.
+
+## Themed icon glob candidate parity (2026-10-25)
+
+Pinned Mako v1.11.0 `icon.c:resolve_icon` searches
+`%s/*/*/%s.*` using `glob(..., GLOB_NOSORT)`. It does not sort
+the returned matches, require regular files or pass `GLOB_PERIOD`.
+For each theme, the **first** nominal-size/scale exact match wins.
+Otherwise Mako retains the **first** candidate at the greatest
+eligible nominal size: `icon_size > last_icon_size` replaces a
+fallback, but equal sizes do not. An unmatched dot-prefixed directory
+is not traversed by either `*` directory component. Matching
+directories and dangling symlinks are still eligible paths, even
+though subsequent GdkPixbuf decoding may fail.
+
+Posthorn previously sorted candidates by filename, searched dot-prefixed
+wildcard directories, and filtered out nonregular candidates. These
+three deviations are now corrected without changing the configured
+icon search roots or bypassing GdkPixbuf decode errors.
+The new source-grounded Rust regressions cover exact-size ties,
+same-size fallback ties, both levels of dot-prefixed directories,
+and matching directories/dangling symlinks.
+
+- [First-match selection `9f360d3`](https://github.com/sguzman/posthorn/commit/9f360d3168322ab9a3d9e41c914a3918fb003c71),
+  [green CI](https://github.com/sguzman/posthorn/actions/runs/40202864882).
+- [Hidden glob directories `e4ff530`](https://github.com/sguzman/posthorn/commit/e4ff5304b3d74c3241dd7e7dc55e2412adac3e83),
+  [green CI](https://github.com/sguzman/posthorn/actions/runs/40203038250).
+- [Nonregular matches `614cd47`](https://github.com/sguzman/posthorn/commit/614cd4754c0bd143cbd30a87c60fb2cf4454b8a5),
+  [final green CI](https://github.com/sguzman/posthorn/actions/runs/40203108396).
+
+Final CI passed **312 Rust library tests**, **82 private D-Bus
+integration tests**, and both mandatory CI jobs including the isolated
+headless Wayland compositor suite. This acceptance covers the listed
+icon lookup cases; it does not assert that GdkPixbuf or filesystem
+enumeration behaves identically on all filesystems, that every Mako
+rendering behavior is complete, or that physical Hyprland acceptance
+has occurred. **T402 remains 99% (delta 0pp), P4 remains 99%
+(delta 0pp), strict M0 remains 89% (delta 0pp), physical
+Hyprland acceptance remains 51% (delta 0pp), and cutover
+remains 0% (delta 0pp).** Live Mako and workstation settings
+were not changed.
