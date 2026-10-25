@@ -5,7 +5,7 @@ Progress is the average of documented atomic task percentages. A task at 100%
 requires acceptance evidence; partial work stays below 100%. Future ideas
 do not count toward Mako MVP. No runtime parity is claimed yet.
 
-## 📯 M0 — Mako parity and MVP inauguration — `█████████░ 89%`
+## 📯 M0 — Mako parity and MVP inauguration — `█████████░ 90%`
 **Acceptance gate:** Full upstream parity + Hyprland end-to-end QA
 
 ### 🧭 P0 — Source baseline and safeguards — `██████████ 99%`
@@ -19,7 +19,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 - 📄 T101 — Parse Mako configuration sections and ordered overrides — `██████████ 100%`
 - 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `██████████ 99%`
-- 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `█████████░ 86%`
+- 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `█████████░ 87%`
 - 📂 T104 — Include files with Mako-compatible path behavior — `█████████░ 88%`
 - 📐 T105 — Type/layout/style parity for all Mako config settings — `█████████░ 88%`
 
