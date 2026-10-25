@@ -2234,3 +2234,55 @@ The previously awarded progress point has been withdrawn:
 **T103 80% -> 79% (-1pp correction), P1 91% (0pp), M0 89% (0pp).**
 No real Mako service, workstation bus or Hyprland session
 was used.
+
+## Group-by parser contract reverified with isolated D-Bus Reload
+
+The correction commit
+[1544bdc](https://github.com/sguzman/posthorn/commit/1544bdc5d4a770c20b3e40c9994c4fa1631f040d)
+has [green CI run 40197080478](https://github.com/sguzman/posthorn/actions/runs/40197080478).
+A second [source-contract test commit e2c4f2e](https://github.com/sguzman/posthorn/commit/e2c4f2ec848fa86f4e7a8ab7bdd0f9343333e96c)
+exhaustively exercises each valid `types.c:parse_criteria_spec`
+field and rejects selector-only fields, including `hidden`
+and `mode`. Its private D-Bus Reload regression shows that
+`group-by=hidden` and `group-by=none,hidden` raise the
+`fr.emersion.Mako.InvalidConfig` method error while the
+previous valid `[hidden]` selector configuration remains
+active; a later valid `group-by=app-name` reload succeeds.
+
+[CI run 40197573630](https://github.com/sguzman/posthorn/actions/runs/40197573630)
+passed both jobs: 308 Rust library tests, 77 isolated private
+D-Bus integration tests, plus the full existing headless Sway
+compositor acceptance matrix. This strengthens evidence for the
+**corrected 79% T103**, not for the rejected false-positive
+`group-by=hidden` implementation. Phase P1 is still 91%,
+strict MVP 89%.
+
+## Remaining source-backed icon lifetime discrepancy — NOT accepted
+
+Pinned Mako v1.11.0 `dbus/xdg.c:handle_notify` (lines
+401-413) calls `create_icon` once on Notify after determining the
+notification's initial style. `icon.c:create_icon` (lines
+253-288) holds a decoded Cairo icon and its scale chosen with
+the **initial** `max-icon-size` and largest currently attached
+output scale. Mako's `dbus/mako.c:reapply_config` (lines
+302-334) destroys/rebuilds surfaces and reapplies styles but
+does not call `destroy_icon`/`create_icon` again. In
+`render.c`, each frame uses the retained `notif->icon` if
+the current style still enables icons.
+
+Posthorn currently uses `load_note_icon_scaled` from
+`src/render.rs` for each measurement/render and the *current*
+style to select, decode and size a file icon. A themed/absolute
+icon changed on disk, an icon created later on disk, or mode
+changes to `max-icon-size`/`icon-path` can therefore affect
+an already-active Posthorn notification but not an equivalent
+already-active Mako notification. This is **a known source
+mismatch**, not a passing acceptance item. A future correction
+must retain the per-notification icon payload and initial
+scale across redraws, mode changes and reloads, reset it only
+when Mako creates a replacement icon, and account for the
+compositor's multi-output maximum scale *at arrival*.
+It needs isolated D-Bus + Cairo regression with a temporary
+PNG overwritten after Notify plus mixed-output DPI checks.
+Do not close T402 (99%), T503 (51%) or the MVP gate on
+the basis of today's tests.
