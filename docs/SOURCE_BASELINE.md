@@ -3787,3 +3787,44 @@ displayed 90%. Physical Hyprland T503 remains
 production cutover T504 remains **0%**.
 No production Mako service, real D-Bus name, or
 personal Hyprland configuration was touched.
+
+## GNU getopt POSIXLY_CORRECT option-order parity (2026-10-25)
+
+Pinned Mako v1.11.0 `makoctl.c:83-202,468-492,674-694,810-882`
+uses glibc `getopt()` / `getopt_long()` for `dismiss`,
+`invoke`, `menu`, `list`/`history`, and `mode`.
+When `POSIXLY_CORRECT` is absent, GNU option permutation can parse
+a recognized option after a positional argument. When the variable
+is defined (even as an empty string), glibc instead stops processing
+options at the first positional argument and leaves all subsequent
+arguments untouched.
+
+Posthorn previously always permuted. For example, with
+`POSIXLY_CORRECT=1`, Mako `mode -s quiet -a urgent` treats
+`-a` and `urgent` as literal replacement mode names rather than
+rejecting a mixed `-s`/`-a` invocation. Similarly,
+`menu picker -n7` passes `-n7` to the menu helper rather than
+using notification ID 7. The equivalent GNU-permuting forms retain
+their previous behavior.
+
+`parse_command()` now selects the ordering policy from the variable
+and delegates to a deterministic parser helper, so regressions can
+exercise both policies without mutating process-wide environment
+variables. Direct C/glibc `getopt` probes confirm the command
+interpretations for `mode`, `menu`, `invoke`, `dismiss`,
+and `list`. The regression also preserves explicit `--` handling.
+Unrelated command implementation and the private test bus are unchanged.
+
+- [Pinned Mako getopt uses](https://github.com/emersion/mako/blob/v1.11.0/makoctl.c)
+- [Implementation de59166](https://github.com/sguzman/posthorn/commit/de59166afb4fae5d2867c1930f6df217fdd5c5f8)
+- [Fully green isolated CI 40245482127](https://github.com/sguzman/posthorn/actions/runs/40245482127):
+  **340 Rust library tests, 90 private D-Bus tests, complete
+  headless Wayland acceptance passed**.
+
+**Accepted progress:** T501 **96% → 97% (+1 pp)**;
+P5 raw **56.00% → 56.25% (+0.25 pp)**, displayed 56%;
+strict 24-task M0 raw **90.083% → 90.125% (+0.042 pp)**,
+displayed 90%. Physical Hyprland T503 remains **51%**
+and explicitly authorized production cutover T504 remains **0%**.
+The installed Mako daemon, real D-Bus name, and personal
+Hyprland configuration were not accessed or changed.
