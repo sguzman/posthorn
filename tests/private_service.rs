@@ -385,6 +385,70 @@ async fn icon_survives_private_reload_history_and_restore_after_file_deletion()
 }
 
 #[tokio::test]
+async fn icon_visibility_modes_keep_initial_icon_absence_and_retained_file_pixels()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Mako xdg.c:handle_notify only calls create_icon when style.icons=1.
+    // Reapply on mode changes does not create/destroy notif->icon.
+    let dir=tempfile::tempdir()?;
+    let png=dir.path().join("mode-png.png");
+    let image=gdk_pixbuf::Pixbuf::new(gdk_pixbuf::Colorspace::Rgb,true,8,18,18)
+        .ok_or("unable to allocate PNG fixture")?;
+    image.fill(0xFF0000FF);
+    image.savev(&png,"png",&[])?;
+    let config=Config::parse(
+        "width=160\nheight=70\npadding=4\nborder-size=0\n\
+         max-icon-size=16\n[mode=hide]\nicons=0\n\
+         [mode=show]\nicons=1\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let notify=|summary:&str|(
+        "mode-icon-fixture",0u32,png.to_str().unwrap(),
+        summary,"",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    );
+
+    let _:()=ctl.call("SetMode",&("hide",)).await?;
+    let absent_id:u32=desktop.call("Notify",&notify("Absent")).await?;
+    let absent=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==absent_id).cloned().ok_or("missing first note")?;
+    assert_eq!(absent.icon_snapshot,Some(None),
+        "Notify under icons=0 must mark icon capture absent");
+    let no_icon=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+
+    let _:()=ctl.call("SetMode",&("show",)).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==absent_id).unwrap().icon_snapshot,Some(None),
+        "mode reapply cannot create an icon for an older notification");
+    let still_absent=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_eq!(no_icon.pixels,still_absent.pixels,
+        "turning icons on must not reveal an icon that was absent at Notify");
+
+    let captured_id:u32=desktop.call("Notify",&notify("Captured")).await?;
+    let cached=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==captured_id).unwrap().icon_snapshot.clone();
+    assert!(cached.as_ref().is_some_and(Option::is_some),
+        "new Notify under icons=1 must decode its PNG");
+    let with_icon=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+
+    let _:()=ctl.call("SetMode",&("hide",)).await?;
+    let hidden=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_ne!(with_icon.pixels,hidden.pixels,
+        "hiding captured icon must change visible pixels");
+    image.fill(0x0000FFFF);
+    image.savev(&png,"png",&[])?;
+    let _:()=ctl.call("SetMode",&("show",)).await?;
+    let shown_again=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_eq!(shown_again.pixels,with_icon.pixels,
+        "re-enabling icons must paint initial PNG, not changed file bytes");
+    assert_eq!(runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==captured_id).unwrap().icon_snapshot,cached);
+    Ok(())
+}
+
+#[tokio::test]
 async fn empty_image_path_hint_clears_app_icon_through_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
