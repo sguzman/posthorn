@@ -696,6 +696,58 @@ mod tests {
     }
 
     #[test]
+    fn rounded_translucent_border_and_progress_match_pinned_mako_cairo_path(){
+        // render.c:215-272 fills the radius-preserving centerline path,
+        // clips progress to it, and finally strokes that SAME path with
+        // SOURCE. A filled outer border plus inset background is not
+        // equivalent at translucent antialiased rounded corners.
+        let mut note=fixture();
+        note.summary.clear();
+        note.body.clear();
+        note.progress=63;
+        let style=crate::config::Config::parse(
+            "width=95\nheight=90\npadding=0\nborder-size=4\n             border-radius=17\nformat=%s\n             background-color=#C22444B0\nborder-color=#1648AC85\n             progress-color=source #8B9237BF\n"
+        ).unwrap().global;
+        let frame=render_notification(&note,&style).unwrap();
+        let reference=cairo::ImageSurface::create(cairo::Format::ARgb32,
+            frame.width as i32,frame.height as i32).unwrap();
+        let context=cairo::Context::new(&reference).unwrap();
+        let b=4.0;
+        let w=f64::from(frame.width);
+        let h=f64::from(frame.height);
+        let radius=CornerRadii{tl:17.0,tr:17.0,br:17.0,bl:17.0};
+        rounded(&context,b/2.0,b/2.0,w-b,h-b,radius);
+        set_color(&context,Color::parse_mako("#C22444B0").unwrap());
+        context.fill_preserve().unwrap();
+        let border_path=context.copy_path().unwrap();
+        context.save().unwrap();
+        context.clip();
+        context.set_operator(cairo::Operator::Source);
+        set_color(&context,Color::parse_mako("#8B9237BF").unwrap());
+        let progress_width=((frame.width as i64-8)*63/100) as f64;
+        context.rectangle(b,b,progress_width,h-b);
+        context.fill().unwrap();
+        context.restore().unwrap();
+        context.new_path();
+        context.append_path(&border_path);
+        context.set_operator(cairo::Operator::Source);
+        set_color(&context,Color::parse_mako("#1648AC85").unwrap());
+        context.set_line_width(b);
+        context.stroke().unwrap();
+        reference.flush();
+        let mut expected=Vec::new();
+        reference.with_data(|pixels|expected.extend_from_slice(pixels)).unwrap();
+        assert_eq!(frame.pixels,expected,
+            "render.c's centerline SOURCE border and progress clipping differ");
+        // An isolated straight border pixel should show premultiplied
+        // translucent blue rather than opaque mixed background color.
+        let y=(frame.height/2) as usize;
+        let edge=y*frame.stride as usize+4;
+        assert_eq!(&frame.pixels[edge..edge+4],&[0x58,0x25,0x0b,0x85],
+            "SOURCE stroke must preserve border alpha instead of blending");
+    }
+
+    #[test]
     fn pinned_mako_signed_vertical_padding_reduces_shrinkwrapped_height(){
         // v1.11.0 render.c adds padding.top+padding.bottom directly
         // to the measured Pango text height, even when those are negative.
