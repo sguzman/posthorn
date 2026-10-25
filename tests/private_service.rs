@@ -2811,6 +2811,51 @@ async fn private_dbus_progress_value_has_exact_mako_integer_pixel_boundary()
 }
 
 #[tokio::test]
+async fn image_data_declared_channels_differ_from_gdk_pixbuf_pixel_channels()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Mako xdg.c calculates its incoming image length from the declared
+    // channels, but icon.c supplies only has_alpha to GdkPixbuf. Use a
+    // real private Notify to pin these two independent interpretations.
+    let config=Config::parse("icons=1\nwidth=160\nheight=80\n")?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+
+    let rgba=(2i32,1i32,10i32,true,8i32,5i32,
+        vec![200u8,100,50,128,0,255,0,255,91,92]);
+    let hint=OwnedValue::try_from(zbus::zvariant::Value::from(rgba))?;
+    let id:u32=desktop.call("Notify",&(
+        "metadata-rgba",0u32,"","RGBA metadata","",
+        Vec::<String>::new(),
+        HashMap::from([("image-data".to_string(),hint)]),-1i32
+    )).await?;
+    let note=runtime.store.lock().unwrap().active().iter()
+        .find(|note|note.id==id).cloned().ok_or("RGBA Notify missing")?;
+    assert_eq!(note.image_data.as_ref().ok_or("RGBA image missing")?.bgra,
+        vec![25,50,100,128,0,255,0,255]);
+    assert_eq!(note.icon_snapshot.as_ref()
+        .and_then(Option::as_ref).ok_or("RGBA icon missing")?.pixels.bgra,
+        vec![25,50,100,128,0,255,0,255]);
+
+    let rgb=(1i32,2i32,4i32,false,8i32,4i32,
+        vec![1u8,2,3,99,11,22,33,88]);
+    let hint=OwnedValue::try_from(zbus::zvariant::Value::from(rgb))?;
+    let id:u32=desktop.call("Notify",&(
+        "metadata-rgb",0u32,"","RGB metadata","",
+        Vec::<String>::new(),
+        HashMap::from([("image-data".to_string(),hint)]),-1i32
+    )).await?;
+    let note=runtime.store.lock().unwrap().active().iter()
+        .find(|note|note.id==id).cloned().ok_or("RGB Notify missing")?;
+    assert_eq!(note.image_data.as_ref().ok_or("RGB image missing")?.bgra,
+        vec![3,2,1,255,33,22,11,255]);
+    assert_eq!(note.icon_snapshot.as_ref()
+        .and_then(Option::as_ref).ok_or("RGB icon missing")?.pixels.bgra,
+        vec![3,2,1,255,33,22,11,255]);
+    Ok(())
+}
+
+#[tokio::test]
 async fn dbus_inline_image_and_progress_reach_rendered_pixels()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
