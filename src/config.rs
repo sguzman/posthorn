@@ -102,6 +102,55 @@ fn decode_mako_file_bytes(bytes:&[u8],source:&str)->Result<String,ConfigError>{
     Ok(text)
 }
 
+/// In POSIX bracket syntax the very first ']' (or first after '^')
+/// is a LITERAL class member. Rust regex requires it escaped. Normalize
+/// before every other POSIX class pass so later scanners do not mistake
+/// the leading ']' for the end of the bracket expression.
+fn mako_posix_ere_literal_leading_closer(pattern:&str)->String{
+    let mut normalized=String::with_capacity(pattern.len());
+    let mut chars=pattern.chars().peekable();
+    let mut in_class=false;
+    while let Some(ch)=chars.next(){
+        match ch{
+            '\\' => {
+                normalized.push(ch);
+                if let Some(next)=chars.next(){normalized.push(next);}
+            }
+            '[' if !in_class => {
+                in_class=true;
+                normalized.push('[');
+                if chars.peek()==Some(&'^'){
+                    normalized.push(chars.next().expect("peeked negation"));
+                }
+                if chars.peek()==Some(&']'){
+                    normalized.push('\\');
+                    normalized.push(chars.next().expect("peeked leading closer"));
+                }
+            }
+            '[' if in_class => {
+                normalized.push('[');
+                // Don't let a nested POSIX class, collating element or
+                // equivalence element's own ']' close its enclosing class.
+                if let Some(delimiter @ (':'|'.'|'='))=chars.peek().copied(){
+                    normalized.push(chars.next().expect("peeked delimiter"));
+                    let mut previous='\0';
+                    for next in chars.by_ref(){
+                        normalized.push(next);
+                        if previous==delimiter && next==']'{break;}
+                        previous=next;
+                    }
+                }
+            }
+            ']' if in_class => {
+                in_class=false;
+                normalized.push(']');
+            }
+            _ => normalized.push(ch),
+        }
+    }
+    normalized
+}
+
 /// In glibc's POSIX REG_EXTENDED, escaped ASCII letters are literals
 /// except the GNU word/whitespace operators \b, \B, \w, \W, \s, \S.
 /// Within bracket expressions *all* escaped ASCII letters are literals.
@@ -397,7 +446,8 @@ impl Selector {
             if has_rust_only_posix_class(value) {
                 return Err("glibc POSIX ERE does not recognize this bracket class".into());
             }
-            let collated=mako_posix_c_collating_elements(value)?;
+            let leading=mako_posix_ere_literal_leading_closer(value);
+            let collated=mako_posix_c_collating_elements(&leading)?;
             let pattern = mako_posix_ere_empty_min_repetitions(
                 &mako_posix_ere_escapes(&collated));
             Some(Regex::new(&format!("(?s-u:{pattern})"))
@@ -1419,6 +1469,50 @@ mod tests {
         assert_eq!(quiet["background-color"],"#305747");
         assert_eq!(quiet["on-notify"],"none");
     }
+    #[test]
+    fn glibc_leading_right_bracket_is_a_literal_not_a_class_terminator(){
+        // Checked directly with glibc regcomp/regexec in the C locale.
+        // The first ']' after '[' or '[^' is a member of the bracket set.
+        for (pattern,matches,rejects) in [
+            (r"^[]]$",vec!["]"],vec!["[","a"]),
+            (r"^[^]]$",vec!["a","[","w"],vec!["]"]),
+            (r"^[]a]+$",vec!["]","a","a]"],vec!["b","w"]),
+            (r"^[]\w]+$",vec!["]","w","w]"],vec!["z","1"]),
+            (r"^[^]\w]+$",vec!["a","z","[","1"],vec!["]","w"]),
+            (r"^[]&&a]+$",vec!["]","&","a","a&"],vec!["b","~"]),
+            (r"^[]~~a]+$",vec!["]","~","a","a~"],vec!["b","&"]),
+        ] {
+            let rule=Selector::new("summary~",pattern).unwrap_or_else(|e|
+                panic!("glibc accepts {pattern:?}: {e}"));
+            let mut fields=note("normal",&["default"]);
+            for candidate in matches{
+                fields.summary=candidate;
+                assert!(rule.matches(&fields),
+                    "{pattern:?} must match {candidate:?} on glibc");
+            }
+            for candidate in rejects{
+                fields.summary=candidate;
+                assert!(!rule.matches(&fields),
+                    "{pattern:?} must reject {candidate:?} on glibc");
+            }
+        }
+        assert_eq!(mako_posix_ere_literal_leading_closer(r"^[]\w]$"),
+            r"^[\]\w]$");
+        assert_eq!(mako_posix_ere_literal_leading_closer(r"^[^]\w]$"),
+            r"^[^\]\w]$");
+        assert_eq!(mako_posix_ere_literal_leading_closer(r"^\[literal\]$"),
+            r"^\[literal\]$");
+        // Exercise the loader and body selector, not just local selectors.
+        let config=Config::parse("[body~=\"^[]\\\\w]+$\"]\nwidth=462\n").unwrap();
+        let mut fields=note("normal",&["default"]);
+        fields.body="]";
+        assert_eq!(config.style_for(&fields)["width"],"462");
+        fields.body="w";
+        assert_eq!(config.style_for(&fields)["width"],"462");
+        fields.body="z";
+        assert_eq!(config.style_for(&fields)["width"],"300");
+    }
+
     #[test]
     fn glibc_bracket_ampersand_and_tilde_are_literals_not_rust_set_operators(){
         // Independently probed with glibc regcomp(REG_EXTENDED|REG_NOSUB)
