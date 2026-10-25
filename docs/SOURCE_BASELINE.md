@@ -2049,3 +2049,64 @@ whereas Mako invokes each timer callback between selections.
 Physical Hyprland T503 remains 51%, and T504 remains 0%.
 No production bus, running Mako, workstation input, or personal
 configuration was accessed.
+
+## Output selectors require compositor-established surface identity
+
+Pinned Mako v1.11.0 `criteria.c:match_criteria` explicitly rejects
+an `[anchor=...]` selector when `notif->surface == NULL`, and an
+`[output=...]` selector when either `notif->surface == NULL`
+**or** `notif->surface->surface_output == NULL`. Mako
+`dbus/xdg.c:handle_notify` applies the initial criteria before
+associating a new notification's layer surface, while
+`wl_surface.enter` establishes its actual output later.
+A configured target output is not a compositor output observation.
+
+Posthorn previously encoded both missing fields as empty Rust strings.
+That allowed the syntactically valid but ordinarily unmatchable
+`[output=]` selector to match a fresh notification before it even
+had a surface, affecting default-timeout and on-notify behavior.
+`src/config.rs::Traits` now records **separately** whether a
+surface is associated and whether its compositor-enter output is
+known. Anchor/output criteria reject missing associations even if
+their value is the empty string. The distinction propagates through
+runtime scheduling, visible notification styling and the synthetic
+hidden-notification projection.
+
+Surface reuse also uncovered a secondary mismatch: the legacy
+single-surface compositor output is represented by an unset
+per-notification override (`None`), not an explicit absent observation
+(`Some(None)`). Posthorn no longer manufactures `Some(None)`
+when a notification is rebound to a known surface lacking an
+individual observation. This preserves actual output matching
+through direct-ID replacements without conflating unset, unknown
+and known compositor output names.
+
+[Source/fixture implementation 35b6239](https://github.com/sguzman/posthorn/commit/35b6239ea4e278a3e39492b6ffec9c6804a0935f),
+[private D-Bus regression 24688b3](https://github.com/sguzman/posthorn/commit/24688b30c7fc0329c967c78a4bcbdbc8e5cb8a49),
+[surface reuse correction 0d64846](https://github.com/sguzman/posthorn/commit/0d64846f805e6d6392ceb12240f7da939128d1a7)
+and [full fixture correction 5270a36](https://github.com/sguzman/posthorn/commit/5270a3623a97375beb0ec2a21e971fd0ed2caa76)
+are committed on `main`. New tests verify the surface/enter
+preconditions directly, the absence of a spurious timeout on initial
+Notify, an existing surface with no entered output, the positive case
+of a genuinely entered *empty-name* output on replacement, and
+rejection when the same surface subsequently enters `HEADLESS-1`.
+
+Intermediary runs
+[40148329066](https://github.com/sguzman/posthorn/actions/runs/40148329066),
+[40148398154](https://github.com/sguzman/posthorn/actions/runs/40148398154)
+and [40148409774](https://github.com/sguzman/posthorn/actions/runs/40148409774)
+were red while all Rust `Traits` constructor call sites were being
+updated. They are not acceptance evidence. The corrected final
+implementation passed both mandatory jobs in
+[run 40148493499](https://github.com/sguzman/posthorn/actions/runs/40148493499).
+Its test job passed 302 library tests, 74 private D-Bus integration
+tests, and remaining targeted tests, including the new private
+surface lifecycle case. The isolated Sway job passed the 1x,
+fractional 1.25x, 2x, 9x and multi-output / input / DPI QA suite.
+No real Hyprland session or production notification service was used.
+
+**T105 86% -> 87% (+1 percentage point); P1 90% -> 91%
+(+1 percentage point); strict M0 remains 89% (0pp).** Neither
+exact physical workstation behavior nor every cross-output
+criteria/render interaction is asserted complete. T503 physical
+Hyprland stays at 51%, T504 cutover at 0%.
