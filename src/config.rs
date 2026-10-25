@@ -1457,7 +1457,7 @@ mod tests {
         assert_eq!(cfg.style_for(&fields)["width"],"438");
         fields.body="c";
         assert_eq!(cfg.style_for(&fields)["width"],"300");
-        assert_eq!(mako_posix_ere_escapes(r"[a\\&\\~b]"),r"[a\\&\\~b]");
+        assert_eq!(mako_posix_ere_escapes(r"[a\&\~b]"),r"[a\&\~b]");
         // Outside brackets these punctuation characters stay unchanged.
         assert_eq!(mako_posix_ere_escapes("a&&b~~c"),"a&&b~~c");
     }
