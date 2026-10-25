@@ -51,31 +51,6 @@ fn set_mako_formatted_text(layout:&pango::Layout,rendered:&str){
     }
 }
 
-/// Mako render.c's final move_to adds style->border_size after computing
-/// (size - measured_extent - border_size)/2, so the origin is shifted by
-/// border_size/2 relative to naive centering in the whole popup.
-fn mako_centered_text_origin(size:f64,measured_extent:f64,border:f64)->f64{
-    (size-measured_extent-border)/2.0+border
-}
-
-#[cfg(test)]
-#[test]
-fn centered_text_origin_includes_mako_border_offset_for_both_axes(){
-    for (size,text,border,expected) in [
-        (100.0,40.0,0.0,30.0),
-        (100.0,40.0,2.0,31.0),
-        (100.0,40.0,4.0,32.0),
-        (101.0,40.0,3.0,32.0),
-        (42.0,20.0,6.0,14.0),
-    ]{
-        let actual=mako_centered_text_origin(size,text,border);
-        assert_eq!(actual,expected,
-            "Mako final border+center origin mismatch for {size}/{text}/{border}");
-        assert_eq!(actual,border+(size-text-border)/2.0,
-            "Mako border-aware center must equal render.c's two expressions");
-    }
-}
-
 fn set_color(cr: &cairo::Context, c: Color) {
     cr.set_source_rgba(f64::from(c.red) / 255.0, f64::from(c.green) / 255.0,
         f64::from(c.blue) / 255.0, f64::from(c.alpha) / 255.0);
@@ -465,14 +440,13 @@ pub fn render_notification_group_with_icon_scale(
     }else{(0,0)};
     let vertical_icon=matches!(style.get("icon-location").map(String::as_str),
         Some("top"|"bottom"));
-    // Pinned Mako render.c (lines 312-323) centers the measured Pango
-    // extent inside (notification_size - border_size), then adds the full
-    // border_size to the final move_to. The resulting center is shifted by
-    // half a border, including no-icon notifications.
+    // Mako render.c defines local border_size=2*style->border_size.
+    // It centers inside (size-2*border) then adds border to move_to,
+    // yielding exact centering over the whole notification surface.
     if vertical_icon {
-        text_x=mako_centered_text_origin(f64::from(width),f64::from(text_width),border);
+        text_x=(f64::from(width)-f64::from(text_width))/2.0;
     }else{
-        text_y=mako_centered_text_origin(f64::from(height),f64::from(text_height),border);
+        text_y=(f64::from(height)-f64::from(text_height))/2.0;
     }
     context.rectangle(text_x,text_y,available_w,available_h);
     context.clip();
