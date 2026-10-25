@@ -3740,3 +3740,50 @@ displayed 90%. Physical Hyprland T503 remains
 51% and the expressly authorized cutover T504
 remains 0%. No live Mako, session bus, or user's
 Hyprland configuration was touched.
+
+## Makoctl menu C-string selected-title boundary (2026-10-25)
+
+Pinned Mako v1.11.0 `makoctl.c:674-783` launches the
+configured menu process, prints notification action
+titles to its stdin, reads exactly one selection with
+POSIX `getline()`, removes a terminal LF (but not a
+preceding CR), and compares that selection against
+titles using C `strcmp(title, selected_title)`.
+
+`getline()` may return bytes containing an embedded NUL.
+The following `strcmp()` sees **only the bytes before
+the first NUL**, regardless of any later bytes, including
+invalid UTF-8. Posthorn's `choose_from_menu()` already
+reads only the first line and preserves CR, but its
+Rust `str::from_utf8` incorrectly decoded the invisible
+suffix. Thus an otherwise valid `Open\0<invalid UTF-8>`
+selection would be rejected, unlike the pinned Mako.
+
+`mako_menu_selected_line()` now extracts the first
+physical line and then its C-visible prefix before NUL.
+The existing subprocess behavior and strict label-to-key
+comparison are unchanged. Regressions exercise a real
+shell menu command producing `Open`, NUL, invalid
+UTF-8, and LF; a NUL at the very start (which must
+not match a nonempty action title); direct byte controls
+for CR, LF, and trailing output; and invalid UTF-8
+**before** NUL (which remains an error).
+
+This is specifically `makoctl menu` selection parsing,
+not a claim of complete command-line parity or
+workstation action activation acceptance.
+
+- [Pinned Makoctl menu comparison](https://github.com/emersion/mako/blob/v1.11.0/makoctl.c#L674-L783)
+- [Source-parity fix 9e09001](https://github.com/sguzman/posthorn/commit/9e0900191fda9e0d5cdb3f1b8e7d1de83283e809)
+- [Fully green CI 40244170082](https://github.com/sguzman/posthorn/actions/runs/40244170082):
+  **339 Rust library tests, 90 private D-Bus tests,
+  complete isolated headless Wayland acceptance passed**.
+
+**Accepted progress:** T501 **95% → 96% (+1 pp)**;
+P5 raw **55.75% → 56.00% (+0.25 pp)**, displayed 56%;
+strict 24-task M0 raw **90.042% → 90.083% (+0.042 pp)**,
+displayed 90%. Physical Hyprland T503 remains
+**51%** and explicitly authorized reversible
+production cutover T504 remains **0%**.
+No production Mako service, real D-Bus name, or
+personal Hyprland configuration was touched.
