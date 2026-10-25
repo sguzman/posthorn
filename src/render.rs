@@ -946,6 +946,45 @@ mod tests {
     }
 
     #[test]
+    fn pinned_mako_only_expands_popup_height_when_below_corner_radius_sum(){
+        // Upstream render.c:199-213 conditionally compares the CURRENT
+        // measured height to the corner pair, and only THEN adds 2*border.
+        // Blindly applying max(height, corners + 2*border) was too tall.
+        let round=CornerRadii{tl:7.0,tr:7.0,br:7.0,bl:7.0};
+        for (base,expected) in [
+            (8,22),(12,22),(13,22),
+            (14,14),(15,15),(16,16),(21,21),(22,22),(25,25),
+        ]{
+            assert_eq!(round.adjust_height(base,4),expected,
+                "Mako condition changed at measured height {base}");
+        }
+        // The source executes two independent if statements in order.
+        // Expanding for the left radius may already satisfy the right
+        // radius without a second addition of the border.
+        let asymmetric=CornerRadii{tl:6.0,bl:4.0,tr:10.0,br:8.0};
+        assert_eq!(asymmetric.adjust_height(8,4),18);
+        assert_eq!(asymmetric.adjust_height(14,4),26);
+        assert_eq!(asymmetric.adjust_height(18,4),18);
+
+        let mut note=fixture();
+        note.summary.clear();
+        note.body.clear();
+        note.image_data=None;
+        for (padding,expected) in [
+            (2,22u32),(3,14),(4,16),(6,20),(7,22),
+        ]{
+            let style=crate::config::Config::parse(&format!(
+                "width=100\nheight=100\nicons=0\nborder-size=4\n                 padding={padding}\nborder-radius=7\nformat=%s\n"
+            )).unwrap().global;
+            let measured=measure_notification_height(&note,&style).unwrap();
+            assert_eq!(measured,expected,
+                "empty popup with padding={padding} differs from Mako");
+            let frame=render_notification(&note,&style).unwrap();
+            assert_eq!(frame.height,expected,"render and measure must agree");
+        }
+    }
+
+    #[test]
     fn mako_directional_border_radii_draw_each_corner_independently() {
         let note=fixture();
         let mut style=Options::new();
