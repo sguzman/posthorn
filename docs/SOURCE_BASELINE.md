@@ -3103,35 +3103,35 @@ or user's Hyprland configuration was touched.
 
 ## Glibc POSIX escaped ordinary punctuation and zero in regex criteria (2026-10-25)
 
-Pinned Mako v1.11.0 compiles \`summary~\` and \`body~\`
-through glibc \`regcomp(REG_EXTENDED | REG_NOSUB)\` in
-\`criteria.c:332-349\`. Native C-locale \`regcomp\` /
-\`regexec\` probes establish that an escaped ordinary punctuation
+Pinned Mako v1.11.0 compiles `summary~` and `body~`
+through glibc `regcomp(REG_EXTENDED | REG_NOSUB)` in
+`criteria.c:332-349`. Native C-locale `regcomp` /
+`regexec` probes establish that an escaped ordinary punctuation
 character matches the character, not a Rust-specific escape
 or a regex syntax error. Tested anchored examples include
-\`\\!\`, \`\\#\`, \`\\@\`, \`\\_\`, \`\\=\`, \`\\,\`,
-\`\\/\`, \`\\:\`, \`\\ \`, \`\\.\`, \`\\+\`,
-\`\\(\`, and \`\\{\`. GNU \`\\0\` means a literal
+`\!`, `\#`, `\@`, `\_`, `\=`, `\,`,
+`\/`, `\:`, `\ `, `\.`, `\+`,
+`\(`, and `\{`. GNU `\0` means a literal
 ASCII **0**, not a NUL escape.
 
 Posthorn now converts these *outside-class* escaped literals to
-Rust-safe escaped/literal text using \`regex::escape\`. This
-retains backslashes where Rust requires them (for example \`\\#\`
-and \`\\+\`) but drops them where Rust would otherwise reject
+Rust-safe escaped/literal text using `regex::escape`. This
+retains backslashes where Rust requires them (for example `\#`
+and `\+`) but drops them where Rust would otherwise reject
 or reinterpret the glibc expression. It deliberately leaves
 bracket-class backslash membership, GNU word and buffer anchors,
-and digit backreferences \`\\1\` to \`\\9\` on their existing
+and digit backreferences `\1` to `\9` on their existing
 paths. Support for full POSIX backreference matching is **not**
 claimed.
 
 A new library regression covers 15 glibc-probed patterns
-with positive and negative matches plus end-to-end \`Config::parse\`
-for a \`body~\` rule. The initial CI attempt caught a wrong
+with positive and negative matches plus end-to-end `Config::parse`
+for a `body~` rule. The initial CI attempt caught a wrong
 assertion about Rust's *normalized source representation* for
-\`\\#\`; that assertion was corrected before acceptance, without
+`\#`; that assertion was corrected before acceptance, without
 changing the semantic glibc fixtures.
 
-- [Pinned upstream \`criteria.c\`](https://github.com/emersion/mako/blob/v1.11.0/criteria.c#L332-L349)
+- [Pinned upstream `criteria.c`](https://github.com/emersion/mako/blob/v1.11.0/criteria.c#L332-L349)
 - [Translator and regression ed4005c](https://github.com/sguzman/posthorn/commit/ed4005cd3cb03bccfe03f0902a2f9857737e7f50)
 - [Regression assertion correction 6328444](https://github.com/sguzman/posthorn/commit/6328444d141c3a963ac5fa3daddbd9d1a7598289)
 - [Full green isolated CI 40227727438](https://github.com/sguzman/posthorn/actions/runs/40227727438):
