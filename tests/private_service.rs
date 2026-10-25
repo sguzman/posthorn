@@ -10,6 +10,44 @@ use posthorn::service::{open_private_service, open_standard_service, tick_expira
 use zbus::{Proxy, zvariant::OwnedValue};
 
 #[tokio::test]
+async fn max_history_zero_expiration_emits_closed_but_not_notifications_invalidation()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use futures_util::StreamExt;
+    // Mako notification.c:close_notification returns before
+    // emit_notifications_changed when config.max_history <= 0,
+    // including expiry via dbus/xdg.c:handle_notification_timer.
+    let (conn,runtime)=open_private_service(Config::parse(
+        "history=1\nmax-history=0\nignore-timeout=1\ndefault-timeout=25\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let props=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,
+        "org.freedesktop.DBus.Properties").await?;
+    let mut changes=props.receive_signal("PropertiesChanged").await?;
+    let mut closed=desktop.receive_signal("NotificationClosed").await?;
+    let id:u32=desktop.call("Notify",&(
+        "max-history-test",0u32,"","Ephemeral","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),5000i32
+    )).await?;
+    tokio::time::timeout(Duration::from_secs(3),changes.next()).await?
+        .ok_or("missing initial Notify invalidation")?;
+    tokio::time::sleep(Duration::from_millis(55)).await;
+    assert_eq!(tick_expirations(&conn,&runtime).await?,1);
+    let signal=tokio::time::timeout(Duration::from_secs(3),closed.next()).await?
+        .ok_or("max-history=0 must still send NotificationClosed")?;
+    let (closed_id,reason):(u32,u32)=signal.body().deserialize()?;
+    assert_eq!((closed_id,reason),(id,1),
+        "the timed-out notification retains Mako's Expired reason");
+    assert!(tokio::time::timeout(Duration::from_millis(150),changes.next())
+        .await.is_err(),"max-history=0 expiry must skip control invalidation");
+    assert_eq!(tick_expirations(&conn,&runtime).await?,0);
+    let state=runtime.store.lock().unwrap();
+    assert!(state.active().is_empty());
+    assert!(state.history().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
 async fn history_disabled_close_suppresses_only_mako_control_property_invalidation()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
