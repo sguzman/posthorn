@@ -422,16 +422,17 @@ impl MakoControl {
     }
 
     #[zbus(name = "Reload")]
-    async fn reload(
-        &self, #[zbus(connection)] conn:&Connection
-    ) -> Result<(),ReloadError> {
+    async fn reload(&self) -> Result<(),ReloadError> {
         let runtime=self.runtime.as_ref().ok_or_else(||
             ReloadError::InvalidConfig("Unable to parse configuration file".into())
         )?;
         runtime.reload().map_err(|_|
             ReloadError::InvalidConfig("Unable to parse configuration file".into())
         )?;
-        crate::signals::invalidate(conn,"Notifications").await?;
+        // Pinned Mako dbus/mako.c:handle_reload -> reapply_config rebuilds
+        // notification styles, surfaces and group placement, but NEVER calls
+        // emit_notifications_changed(). No new notification is inserted.
+        // A redraw is not a control Notifications property invalidation.
         Ok(())
     }
 }
