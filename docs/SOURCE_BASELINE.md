@@ -2673,3 +2673,92 @@ acceptance remains **51%** and production cutover remains
 **0%**. All D-Bus and compositor tests were isolated; installed
 Mako, the desktop notification bus, and Hyprland settings
 were never touched.
+
+## Source parity: Notify insertion and Reload property invalidation timing (2026-10-25)
+
+The pinned Mako v1.11.0 code has an observable distinction between an
+**inserted** notification, a **replacement**, and **configuration reload**:
+
+1. `dbus/xdg.c:handle_notify` calls `insert_notification(state, notif)`
+   only when `replaces_id != notif->id` after explicit-ID lookup and
+   the stack-tag reuse check (source lines 362–383).
+   `notification.c:insert_notification` always invokes
+   `emit_notifications_changed(state)` (lines 487–512).
+   Therefore **new** Notify inserts emit the control interface's
+   `Notifications` property invalidation; existing-ID and app-scoped
+   stack-tag replacements **do not**, even though their stored
+   payload changes. No later unconditional property emission occurs
+   in Mako's Notify handler.
+2. The insertion occurs **before** applying notification criteria,
+   grouping, and executing the resolved `on-notify` binding
+   (`dbus/xdg.c` lines 385–430). Thus when a new notification
+   immediately dismisses itself via `on-notify=dismiss`, the
+   insertion invalidation precedes the resulting
+   `NotificationClosed`. The close path may emit an *additional*
+   property invalidation if history is enabled and `max-history > 0`.
+   A `history=0` close still emits `NotificationClosed`, but
+   does **not** emit this second property invalidation.
+3. `dbus/mako.c:handle_reload` only calls `reload_config` and
+   `reapply_config` before its method reply (lines 354–368).
+   `reapply_config` destroys/rebuilds surfaces, rematches criteria
+   and groups, and marks surfaces dirty (lines 302–335).
+   **Neither method emits** `emit_notifications_changed`.
+   A restyle is not an insertion or close event, so **successful
+   Reload must not invalidate** the control `Notifications`
+   property. A rejected reload remains silent as well.
+
+Posthorn previously emitted `Notifications` invalidation **after
+every Notify**, even replacements, and **after** any on-notify
+binding. It also invalidated `Notifications` unconditionally
+following a successful `Reload`. Both behaviors diverged from
+Mako's public D-Bus signals.
+
+**Corrections:** the notification store now reports whether
+`push()` increased active cardinality while holding its mutex.
+This distinguishes new insertions from either replacement form
+without duplicating replacement matching logic. The freedesktop
+D-Bus adapter emits an insertion invalidation **before** executing
+the staged notify binding, and none for replacement. The Mako
+control Reload method now reloads and reapplies normally without
+emitting a spurious Notifications property change. Existing
+control `SetMode`/`SetModes` behavior still emits its **Modes**
+invalidation, as upstream `mode.c:set_modes` always does;
+expiry and dismissal invalidations retain the separate
+history-gated semantics already verified.
+
+**Regression acceptance:** private D-Bus subscriptions test fresh
+Notify, direct-ID replacement, app-scoped stack-tag replacement,
+and immediately dismissed new notifications under both
+`history=0` and normal history. The reload regression supplies
+a temporary source config file, verifies a real rendered popup
+width change under successful Reload **without a signal**,
+verifies rejected Reload retains the last good config without
+a signal, and confirms subsequent fresh Notify still emits
+invalidation.
+
+- [Notify implementation baa73961](https://github.com/sguzman/posthorn/commit/baa73961c657f4279dce6b8d4d213653d7c50552)
+- [Insertion/replacement and on-notify regression 41075e58](https://github.com/sguzman/posthorn/commit/41075e58c9162a2dbc1390becf2850d89703d0f6)
+- [Fully green CI 40216156479](https://github.com/sguzman/posthorn/actions/runs/40216156479):
+  **320 library, 88 private D-Bus, all isolated headless Wayland tests**
+- [Reload implementation 156f549](https://github.com/sguzman/posthorn/commit/156f54956ab16ad9293466490e78ba4fe1d6ebd6)
+- [Reload private D-Bus regression c30bb50](https://github.com/sguzman/posthorn/commit/c30bb501842f8c624de49d50a31eee0d5181ff7d)
+- [Fully green CI 40216477420](https://github.com/sguzman/posthorn/actions/runs/40216477420):
+  **320 Rust library, 89 private D-Bus, and all isolated headless
+  Wayland checks passed**
+
+**Progress, evidence-backed:** T303 **86% → 87% (+1 pp)**
+for the accepted Reload source-parity correction.
+T301 and T302 remain **99%** (no extra parity credit for
+additional Notify signal coverage at already near-complete tasks).
+P3's exact task average is **95.000%**, previously
+**94.667%** (rounded display **95% → 95%**).
+The strict 24-task M0 average rises **89.250% → 89.292%**
+(display remains **89%**). Production cutover remains
+**0%**, physical Hyprland acceptance **51%**.
+The installed Mako instance, desktop session notification name
+and personal compositor configuration were never accessed.
+
+**Remaining caveats:** these changes do not certify all asynchronous
+signal interleavings or physical Hyprland behavior. Mako's
+synchronous close/order semantics and the eventual opt-in
+production cutover are separate acceptance gates.
