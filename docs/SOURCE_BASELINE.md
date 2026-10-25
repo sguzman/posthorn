@@ -3828,3 +3828,51 @@ displayed 90%. Physical Hyprland T503 remains **51%**
 and explicitly authorized production cutover T504 remains **0%**.
 The installed Mako daemon, real D-Bus name, and personal
 Hyprland configuration were not accessed or changed.
+
+## Makoctl CLI diagnostic text and usage newline parity (2026-10-25)
+
+Pinned Mako v1.11.0 `makoctl.c:122-128, 695-697, 865-881,
+942-954, 980-982` emits specific diagnostic strings on argument
+conflicts and unknown commands. The previous Posthorn parser emitted
+generic descriptions, changing user-visible stderr used by shell
+scripts and interactive troubleshooting.
+
+Posthorn now distinguishes `-a` with `-g` from a nonzero `-n`
+combined with either flag, and mirrors the upstream messages
+`-a and -g cannot be used together` and
+`-n cannot be used with -a or -g`. The chosen argument ID still
+determines the conflict, so an explicit `-n0` remains compatible.
+The `mode` conflicts and invalid positional modes now emit Mako's
+exact wording; a missing `menu` command and unknown commands do too.
+
+Mako's no-argument usage path calls `fprintf(stderr, "%s", usage)`,
+not an additional line-printing operation. Posthorn's bare-CLI
+failure now prints its already-terminated usage exactly once,
+without a second trailing newline. The explicit `help` path
+continues to print usage on stderr with a successful exit. The
+development-only branding and private bus remain intentionally
+unchanged; this fix does **not** authorize production D-Bus ownership.
+
+A direct parser regression asserts nine diagnostic cases plus
+explicit `-n0` acceptance. An actual `posthornctl` subprocess
+regression exercises six failing invocations and exact stderr
+line endings with `DBUS_SESSION_BUS_ADDRESS` pointed at a
+nonexistent socket. The synthetic tests do not access the user's
+installed notification service. Both CI jobs passed:
+
+- [Pinned upstream Makoctl implementation](https://github.com/emersion/mako/blob/v1.11.0/makoctl.c)
+- [Diagnostic implementation 9cd4ce6](https://github.com/sguzman/posthorn/commit/9cd4ce6bbed647291bdae94f285dd3811184546b)
+- [Usage newline implementation 8d974df](https://github.com/sguzman/posthorn/commit/8d974df90ee9f610512984931d6f1c9b811c2eb7)
+- [Executable regression and final assertion fix 76c8579](https://github.com/sguzman/posthorn/commit/76c8579ad28677df98db7417e307dd6cc3bfab16)
+- [Fully successful Rust + Wayland CI 40246620433](https://github.com/sguzman/posthorn/actions/runs/40246620433):
+  **341 Rust library tests, 90 private D-Bus tests,
+  and the complete isolated headless Wayland acceptance suite**.
+
+**Accepted progress:** T501 **97% → 98% (+1 pp)**;
+P5 raw **56.25% → 56.50% (+0.25 pp)** (Python-generated
+display stays 56% at the tie); M0 strict 24-task raw
+**90.125% → 90.167% (+0.042 pp)** (display stays 90%).
+Actual Hyprland T503 remains **51%**, and authorized
+reversible production cutover T504 remains **0%**.
+No installed Mako, live bus, or personal Hyprland setup
+was accessed or modified.
