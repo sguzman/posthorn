@@ -2541,3 +2541,66 @@ not accepted here; this does not certify complete regex parity.
 Physical Hyprland remains **51% (+0 pp)**, and explicit production
 cutover remains **0% (+0 pp)**. The installed Mako and real D-Bus
 name were never accessed.
+
+## POSIX ERE bracket member semantics: literal backslashes, pipes, opening bracket (2026-10-25)
+
+Building on the earlier accepted `&&`, `~~` and leading `]`
+compatibility fixes, native glibc `regcomp(REG_EXTENDED|REG_NOSUB)`
+and `regexec` probes in the initial C locale exposed **three more
+configuration-selector divergences** from Rust `regex::bytes`:
+
+1. **A backslash inside a POSIX bracket class is a literal member, not
+   an escape for the next character.** For example, Mako's
+   `[\\w]` matches both the character `\\` and `w`. The
+   class `[a\\-b]` includes the range from `\\` to `b`
+   (including `]`, `^`, `_`, `a`, `b`) and does **not**
+   match a hyphen. The old translator consumed backslashes before
+   letters and interpreted escapes before punctuation as Rust escapes,
+   changing both class membership and range boundaries. A new
+   bracket-aware prepass retains every C-locale bracket backslash as a
+   Rust literal backslash while leaving the GNU `\\w` operator
+   **outside** classes untouched.
+2. **`||` is literal in glibc bracket classes.** Mako accepts
+   `[a||b]` and matches the pipe symbol in addition to `a` and
+   `b`. Rust regex reserves `||` for explicit class union.
+   Posthorn now escapes literal pipes inside POSIX bracket classes,
+   extending its prior handling for `&&` and `~~`.
+3. **An unescaped `[` inside a bracket class is an ordinary class
+   member unless it begins a POSIX named class, collating element or
+   equivalence element.** Mako accepts `[[]`, `[a[]` and
+   `[^[]`. Rust regex can interpret the internal `[` as a nested
+   character set, so Posthorn now quotes the ordinary literal opening
+   bracket while preserving valid `[[:digit:]]` etc.
+
+The regression suite tests glibc-confirmed positive and negative
+matches for `[a\\-b]`, `[a\\^b]`, `[a\\&b]`,
+`[a\\~b]`, `[\\w]`, `[\\d]`, `[\\-]`,
+`[\\^]`, `[a\\-z]`, `[a\\d-z]`,
+`[a\\[:digit:]]`, `[a||b]`, `[||]`,
+`[[]`, `[a[]`, `[a[b]`, `[^[]`, mixed literal
+`[`/named-class contents, and full config `body~`
+selectors. These are **actual C-locale matching semantics**, not
+just successful compilation of a Rust regex.
+
+- [POSIX bracket backslash implementation 2552f12](https://github.com/sguzman/posthorn/commit/2552f12f24c3ddd293cd3a5d1b7a72b87a9c1b65)
+- [POSIX pipe literal implementation bdc3d53](https://github.com/sguzman/posthorn/commit/bdc3d53247f43ea02f27c0844a9fdbc806f37d6e)
+- [POSIX opening-bracket implementation fa27579](https://github.com/sguzman/posthorn/commit/fa275791da53344c68a45e26fe73b095b7bdf8dd)
+- [Green required CI 40211609315](https://github.com/sguzman/posthorn/actions/runs/40211609315):
+  **318 Rust library tests, 84 private D-Bus tests and the full
+  isolated headless Wayland compositor suite all passed.**
+
+Earlier notes asserting that bracket-escaped letters were just
+unescaped into ordinary letters were incomplete: glibc also preserves
+the backslash *as a matching character*, which this source-verified
+patch corrects. Mako's external `\\w`, `\\s` and word
+boundaries remain separate operations. A complete POSIX ERE matcher
+(including all range/collation and backreference edge cases) is **not
+claimed**.
+
+Accepted: **T103 81% → 84% (+3 pp)** and P1
+**91% → 92% (+1 pp, raw average 91.0% → 91.6%)**.
+The 24-task strict M0 average rises from **89.083% → 89.208%**
+but displays as **89% (+0 whole-number pp)**.
+Physical Hyprland remains **51% (+0 pp)** and production
+cutover **0% (+0 pp)**. Real Mako, Wayland compositor and
+notification bus were not accessed.
