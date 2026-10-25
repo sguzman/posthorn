@@ -491,7 +491,7 @@ mod tests {
             }],..Request::default()
         });
         let instance=runtime.store.lock().unwrap().active_instance(id).unwrap();
-        assert_eq!(prepare_invocation(&runtime,id,"default").unwrap(),Some(true));
+        assert_eq!(prepare_invocation(&runtime,id,"default").unwrap(),Some((true,true)));
         assert!(runtime.store.lock().unwrap().active_instance(id).is_none(),
             "the clicked incarnation must close before ActionInvoked emits");
         let replacement=runtime.store.lock().unwrap().push(Request{
@@ -518,10 +518,10 @@ mod tests {
                 }
             ],..Request::default()
         });
-        assert_eq!(prepare_invocation(&runtime,id,"default").unwrap(),Some(false));
+        assert_eq!(prepare_invocation(&runtime,id,"default").unwrap(),Some((false,true)));
         assert!(runtime.store.lock().unwrap().active_instance(id).is_none());
         let other=runtime.store.lock().unwrap().push(Request::default());
-        assert_eq!(prepare_invocation(&runtime,other,"default").unwrap(),Some(false),
+        assert_eq!(prepare_invocation(&runtime,other,"default").unwrap(),Some((false,true)),
             "missing sender action must dismiss without ActionInvoked");
     }
 
