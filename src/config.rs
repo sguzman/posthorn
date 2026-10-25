@@ -632,6 +632,11 @@ fn mako_posix_ere_validate_intervals(pattern:&str)->Result<(),String>{
     while let Some(ch)=chars.next(){
         if ch=='\\'{
             chars.next();
+            // A normalized escaped first member (such as [\\-] or
+            // [\\]]) already occupies the opening class slot. The
+            // subsequent ']' must close the class so a following
+            // {32768} cannot evade glibc's RE_DUP_MAX validator.
+            if in_class { first_in_class=false; }
             continue;
         }
         if in_class{
@@ -2282,6 +2287,23 @@ mod tests {
             assert_eq!(mako_posix_ere_dash_only_brackets(&normalized).unwrap(),
                 normalized);
         }
+        // The escaped first class atom must not cause the interval
+        // validator to mistake a following counted repetition for a
+        // member of the bracket. Glibc rejects the numeric overflow.
+        for pattern in [
+            "^[---]{32768}$",
+            "^[----]{32768}$",
+            "^[^---]{32768}$",
+            "^[]a]{32768}$",
+        ]{
+            assert!(Selector::new("summary~",pattern).is_err(),
+                "post-class glibc RE_DUP_MAX must be enforced: {pattern:?}");
+        }
+        let pair=Selector::new("summary~","^[---]{2}$").unwrap();
+        fields.summary="--";
+        assert!(pair.matches(&fields));
+        fields.summary="-";
+        assert!(!pair.matches(&fields));
         let cfg=Config::parse("[body~=^[----]$]\nwidth=467\n").unwrap();
         fields.body="-";
         assert_eq!(cfg.style_for(&fields)["width"],"467");
