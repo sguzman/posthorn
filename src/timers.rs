@@ -4,6 +4,7 @@
 //! Mako uses per-notification event loop timers; here we keep the same
 //! replacement/cancellation semantics without binding to a particular runtime.
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -11,7 +12,11 @@ use crate::notification::{CloseReason, NotificationStore};
 
 #[derive(Clone, Debug, Default)]
 pub struct ExpirationScheduler {
-    deadlines: HashMap<u32, Instant>,
+    // Mako prepends timers to its wl_list. When timestamps are equal,
+    // the newest timer is selected first by the strict timespec_less()
+    // comparison in event-loop.c:update_event_loop_timer().
+    deadlines: HashMap<u32, (Instant, u128)>,
+    next_sequence: u128,
 }
 
 impl ExpirationScheduler {
@@ -20,7 +25,9 @@ impl ExpirationScheduler {
         self.deadlines.remove(&id);
         if let Some(ms) = timeout_ms.filter(|value| *value != 0) {
             if let Some(deadline) = now.checked_add(Duration::from_millis(u64::from(ms))) {
-                self.deadlines.insert(id, deadline);
+                self.next_sequence = self.next_sequence.checked_add(1)
+                    .expect("notification timer serial exhausted");
+                self.deadlines.insert(id, (deadline, self.next_sequence));
             }
         }
     }
@@ -30,23 +37,26 @@ impl ExpirationScheduler {
     }
 
     pub fn deadline(&self, id: u32) -> Option<Instant> {
-        self.deadlines.get(&id).copied()
+        self.deadlines.get(&id).map(|(deadline, _)| *deadline)
     }
 
     pub fn next_deadline(&self) -> Option<Instant> {
-        self.deadlines.values().copied().min()
+        self.deadlines.values().map(|(deadline, _)| *deadline).min()
     }
 
-    /// Remove and return expired IDs in deadline order, stable by ID for ties.
+    /// Mako fires earliest deadlines first. For identical timestamps, its
+    /// wl_list_insert(head) plus strict '<' comparison picks the most
+    /// recently armed timer (including a rearmed existing notification).
     pub fn take_expired(&mut self, now: Instant) -> Vec<u32> {
         let mut ready: Vec<_> = self.deadlines.iter()
-            .filter(|(_, at)| **at <= now)
-            .map(|(&id, &at)| (at, id)).collect();
+            .filter(|(_, (deadline, _))| *deadline <= now)
+            .map(|(&id, &(deadline, sequence))| (deadline, Reverse(sequence), id))
+            .collect();
         ready.sort_unstable();
-        for &(_, id) in &ready {
+        for &(_, _, id) in &ready {
             self.deadlines.remove(&id);
         }
-        ready.into_iter().map(|(_, id)| id).collect()
+        ready.into_iter().map(|(_, _, id)| id).collect()
     }
 
     /// Close due active notifications; the caller must emit NotificationClosed
@@ -102,6 +112,36 @@ mod tests {
         assert!(t.take_expired(now + Duration::from_millis(49)).is_empty());
         assert_eq!(t.take_expired(now + Duration::from_millis(50)), vec![2]);
         assert_eq!(t.take_expired(now + Duration::from_millis(100)), vec![1, 3]);
+    }
+
+    #[test]
+    fn identical_deadlines_expire_newest_armed_first_regardless_of_id() {
+        let now = Instant::now();
+        let mut t = ExpirationScheduler::default();
+        t.set(1, now, Some(100));
+        t.set(500, now, Some(100));
+        t.set(7, now, Some(100));
+        assert_eq!(t.next_deadline(), Some(now + Duration::from_millis(100)));
+        assert_eq!(t.take_expired(now + Duration::from_millis(99)), Vec::<u32>::new());
+        assert_eq!(t.take_expired(now + Duration::from_millis(100)), vec![7, 500, 1]);
+    }
+
+    #[test]
+    fn rearm_moves_an_existing_id_ahead_of_equal_deadline_peers() {
+        let now = Instant::now();
+        let mut t = ExpirationScheduler::default();
+        t.set(1, now, Some(100));
+        t.set(2, now, Some(100));
+        // Replacing an existing timer destroys it and prepends a fresh one
+        // in Mako, even when its new absolute deadline is unchanged.
+        t.set(1, now, Some(100));
+        assert_eq!(t.deadline(1), Some(now + Duration::from_millis(100)));
+        assert_eq!(t.take_expired(now + Duration::from_millis(100)), vec![1, 2]);
+        // Cancelled timers never participate in a deadline tie.
+        t.set(8, now, Some(200));
+        t.set(9, now, Some(200));
+        assert!(t.cancel(9));
+        assert_eq!(t.take_expired(now + Duration::from_millis(200)), vec![8]);
     }
 
     #[test]
