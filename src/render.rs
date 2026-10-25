@@ -321,23 +321,15 @@ pub fn render_notification_group_with_icon_scale(
         .map_err(|e| e.to_string())?;
     let context = cairo::Context::new(&surface).map_err(|e| e.to_string())?;
     context.scale(f64::from(pixel_scale),f64::from(pixel_scale));
-    context.set_operator(cairo::Operator::Source);
-    set_color(&context, border_color);
-    rounded(&context, 0.0, 0.0, f64::from(width), f64::from(height), radius);
-    context.fill().map_err(|e| e.to_string())?;
-    context.set_operator(cairo::Operator::Over);
-    if border > 0.0 {
-        set_color(&context, background);
-        rounded(&context, border, border, f64::from(width) - 2.0*border,
-            f64::from(height) - 2.0*border, radius.inset(border));
-        context.fill().map_err(|e| e.to_string())?;
-    } else {
-        // An unbordered rectangle is entirely the configured background.
-        set_color(&context, background);
-        rounded(&context, 0.0, 0.0, f64::from(width), f64::from(height), radius);
-        context.fill().map_err(|e| e.to_string())?;
-    }
-
+    // Mako render.c:215-272 draws the background on the CENTERLINE of
+    // a stroked border: x=b/2, width=w-b, with unmodified corner radii.
+    // Drawing a filled outer border then an inset rounded background
+    // changes the corner geometry and alpha blending of translucent borders.
+    rounded(&context,border/2.0,border/2.0,
+        f64::from(width)-border,f64::from(height)-border,radius);
+    set_color(&context,background);
+    context.fill_preserve().map_err(|e|e.to_string())?;
+    let border_path=context.copy_path().map_err(|e|e.to_string())?;
     if note.progress>0 {
         let configured=style.get("progress-color").map(String::as_str)
             .unwrap_or("#5588AAFF");
@@ -347,25 +339,31 @@ pub fn render_notification_group_with_icon_scale(
             ProgressBlend::Over=>cairo::Operator::Over,
             ProgressBlend::Source=>cairo::Operator::Source,
         };
-        let inner_width=(f64::from(width)-2.0*border).max(0.0);
-        let inner_height=(f64::from(height)-2.0*border).max(0.0);
         context.save().map_err(|e|e.to_string())?;
-        rounded(&context,border,border,inner_width,inner_height,
-            radius.inset(border));
+        // Upstream progress is clipped by the original background path,
+        // not by a newly constructed inset with reduced corner radii.
         context.clip();
         context.set_operator(operator);
         set_color(&context,color);
-        // Mako v1.11 render.c computes progress_width as an integer:
-        // (notification_width - 2*border_size) * progress / 100.
-        // Fractional Cairo rectangles introduce an unwanted blended edge
-        // pixel that is absent from Mako's pixel-aligned progress bar.
         let logical_width=i64::from(width).saturating_sub(2*(border as i64));
         let progress_width=logical_width.saturating_mul(i64::from(note.progress.min(100)))
             / 100;
-        context.rectangle(border,border,progress_width as f64,inner_height);
+        // render.c uses y=b and height=notification_height-b. The
+        // background-path clip and subsequent border stroke bound it.
+        context.rectangle(border,border,progress_width as f64,
+            f64::from(height)-border);
         context.fill().map_err(|e|e.to_string())?;
         context.restore().map_err(|e|e.to_string())?;
     }
+    // Upstream paints the border LAST with SOURCE, so translucent border
+    // pixels replace the prior background/progress instead of mixing with it.
+    context.new_path();
+    context.append_path(&border_path);
+    context.set_operator(cairo::Operator::Source);
+    set_color(&context,border_color);
+    context.set_line_width(border);
+    context.stroke().map_err(|e|e.to_string())?;
+    context.set_operator(cairo::Operator::Over);
 
     let markup = style.get("markup")
         .is_none_or(|v| v == "1" || v.eq_ignore_ascii_case("true"));
