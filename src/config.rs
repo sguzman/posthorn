@@ -148,6 +148,46 @@ fn mako_posix_reject_simple_invalid_dash_ranges(pattern:&str)->Result<(),String>
     Ok(())
 }
 
+/// GNU glibc C-locale ERE: a double '-' AFTER punctuation below '-'
+/// is an ascending range followed by a literal hyphen: [!--z] spans
+/// '!'..'-' plus 'z'. Rust regex sees a bare '--' as set difference.
+/// Rewrite only simple classes after glibc source-backslash lowering.
+fn mako_posix_ere_low_punctuation_dash_ranges(pattern:&str)->String{
+    let chars:Vec<char>=pattern.chars().collect();
+    let mut out=String::with_capacity(pattern.len());
+    let mut i=0usize;
+    while i<chars.len(){
+        if chars[i]=='\\' {
+            out.push(chars[i]);i+=1;
+            if i<chars.len(){out.push(chars[i]);i+=1;}
+            continue;
+        }
+        if chars[i]!='['{out.push(chars[i]);i+=1;continue;}
+        let start=i+1;
+        let Some(offset)=chars[start..].iter().position(|ch|*ch==']')
+            else{out.push('[');i+=1;continue};
+        let end=start+offset;
+        let class=&chars[start..end];
+        let safe=class.iter().all(|ch|ch.is_ascii_alphanumeric()
+            || matches!(*ch,'-'|'^'|' '|'!'|'"'|'#'|'$'|'%'|'&'|'\''|'('|')'|'*'|'+'|','));
+        if !safe{out.push('[');i+=1;continue;}
+        out.push('[');
+        let mut j=0usize;
+        while j<class.len(){
+            if j>0 && j+1<class.len() && class[j]=='-'
+                && class[j+1]=='-' && (' '..=',').contains(&class[j-1])
+                && (j+2==class.len() || class[j+2]!='-')
+            {
+                out.push_str(r"-\-");
+                j+=2;
+            }else{out.push(class[j]);j+=1;}
+        }
+        out.push(']');
+        i=end+1;
+    }
+    out
+}
+
 /// C-locale glibc accepts a POSIX bracket made entirely of one to four
 /// hyphens, all meaning literal '-'. Five or more are REG_ERANGE. Rust
 /// regex's class subtraction syntax gives some of these a different
@@ -959,10 +999,11 @@ impl Selector {
             }
             mako_posix_reject_simple_invalid_dash_ranges(value)?;
             let backslashes=mako_posix_c_class_backslashes(value);
+            let low_ranges=mako_posix_ere_low_punctuation_dash_ranges(&backslashes);
             // This pass recognizes the escaped initial '-' emitted by the
             // C-class-backslash normalizer. Running it earlier would make
             // the newly inserted Rust escape look like source C syntax.
-            let dash_only=mako_posix_ere_dash_only_brackets(&backslashes)?;
+            let dash_only=mako_posix_ere_dash_only_brackets(&low_ranges)?;
             let leading=mako_posix_ere_literal_leading_closer(&dash_only);
             let collated=mako_posix_c_collating_elements(&leading)?;
             // Validate the original POSIX syntax BEFORE GNU word-boundary
@@ -2305,6 +2346,47 @@ mod tests {
         assert_eq!(config.style_for(&fields)["width"],"463");
         fields.summary="a(";
         assert_eq!(config.style_for(&fields)["width"],"300");
+    }
+
+    #[test]
+    fn glibc_ascending_low_punctuation_ranges_survive_rust_lowering(){
+        // Native C-locale glibc REG_EXTENDED|REG_NOSUB controls.
+        for (source,expected) in [
+            ("^[!--z]$",r"^[!-\-z]$"),
+            ("^[+--z]$",r"^[+-\-z]$"),
+            ("^[a+--z]$",r"^[a+-\-z]$"),
+            ("^[a%--z]$",r"^[a%-\-z]$"),
+            ("^[a&--z]$",r"^[a&-\-z]$"),
+            ("^[a, --z]$",r"^[a, -\-z]$"),
+            ("^[^!--z]$",r"^[^!-\-z]$"),
+        ]{
+            assert_eq!(mako_posix_ere_low_punctuation_dash_ranges(source),expected);
+        }
+        let mut fields=note("normal",&["default"]);
+        for (pattern,yes,no) in [
+            ("^[!--z]$",vec!["!","\"","#","+","-","z"],vec![".","0","a"]),
+            ("^[+--z]$",vec!["+",",","-","z"],vec![".","0","a"]),
+            ("^[a&--z]$",vec!["a","&",",","-","z"],vec!["!","%","0"]),
+            ("^[^!--z]$",vec![".","0","a"],vec!["!","#","-","z"]),
+        ]{
+            let rule=Selector::new("summary~",pattern).unwrap();
+            for summary in yes{
+                fields.summary=summary;
+                assert!(rule.matches(&fields),"{pattern:?} must match {summary:?}");
+            }
+            for summary in no{
+                fields.summary=summary;
+                assert!(!rule.matches(&fields),"{pattern:?} rejects {summary:?}");
+            }
+        }
+        for raw in ["^[--a]$","^[---a]$","^[[.a.]]$",r"^[\--a]$","^[a--z]$"]{
+            assert_eq!(mako_posix_ere_low_punctuation_dash_ranges(raw),raw);
+        }
+        let cfg=Config::parse("[body~=^[!--z]$]\nwidth=471\n").unwrap();
+        fields.body="#";
+        assert_eq!(cfg.style_for(&fields)["width"],"471");
+        fields.body="0";
+        assert_eq!(cfg.style_for(&fields)["width"],"300");
     }
 
     #[test]
