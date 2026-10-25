@@ -542,7 +542,14 @@ fn render_loop_multi(
     type FrameStamp=(Vec<Notification>,Vec<String>,u64,u32,u32,bool);
     let mut viewers=std::collections::HashMap::<Key,LivePresenter>::new();
     let mut rendered=std::collections::HashMap::<Key,FrameStamp>::new();
+    // Mako tracks wl_output scale independently of notification surfaces.
+    // Keep a registry-only observer even with zero active notifications:
+    // otherwise changing DPI while the popup list is empty leaves the
+    // NEXT Notify stuck with the previous icon-search scale.
+    let mut output_observer=LivePresenter::connect().map_err(other)?;
     loop{
+        output_observer.poll_events().map_err(other)?;
+        runtime.set_icon_creation_scale(output_observer.maximum_output_scale());
         let surfaces=surface_visibility(&runtime)?;
         let keys=surfaces.iter().map(|s|s.surface_key.clone())
             .collect::<std::collections::HashSet<_>>();
