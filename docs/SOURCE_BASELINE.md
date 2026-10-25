@@ -2416,3 +2416,43 @@ has occurred. **T402 remains 99% (delta 0pp), P4 remains 99%
 Hyprland acceptance remains 51% (delta 0pp), and cutover
 remains 0% (delta 0pp).** Live Mako and workstation settings
 were not changed.
+
+## Inline image-data channel metadata versus GdkPixbuf pixel layout (2026-10-25)
+
+Pinned Mako v1.11.0 `dbus/xdg.c:handle_notify` uses the sender's
+`channels` integer when computing how many bytes of the `image-data`
+(`(iiibiiay)`) hint to copy:
+`(height - 1) * rowstride + width * ceil(channels * bits_per_sample / 8)`.
+Later `icon.c:load_image_data` passes **has_alpha**, not that reported
+channel count, into `gdk_pixbuf_new_from_data`. With eight-bit samples,
+GdkPixbuf reads three RGB channels when `has_alpha=0` and four RGBA
+channels when `has_alpha=1`. Thus Mako can render an otherwise safely
+sized notification even when the metadata's declared channel count is
+larger than the GdkPixbuf pixel count.
+
+Posthorn previously rejected every mismatched channel count. It now
+separately checks the Mako D-Bus wire-copy length and GdkPixbuf's
+alpha-selected per-pixel stride. It accepts safely sized oversized
+counts, while rejecting counts that would leave the C decoder reading
+past copied data. The existing maximum allocation/image dimension
+bounds remain in force; **unsafe, undersized or malformed inputs are
+not emulated for crash parity**.
+
+The regression exercises both RGBA with reported five channels and
+opaque RGB with reported four, plus undersized negative cases. A
+real isolated `org.posthorn.Development` Notify test confirms the
+received pixel bytes and retained icon snapshot for both variants,
+without claiming ownership of the workstation notification bus.
+
+- [Implementation 3d1892b](https://github.com/sguzman/posthorn/commit/3d1892bf7ee3251377f5105c6f0ac0bca44fd4b5)
+- [Private D-Bus acceptance 050a151](https://github.com/sguzman/posthorn/commit/050a1511394818acedbe14af627c397808401b1a)
+- [Green mandatory CI run 40204356917](https://github.com/sguzman/posthorn/actions/runs/40204356917):
+  **313 Rust library tests, 83 private D-Bus tests, full isolated
+  headless Wayland compositor suite**.
+
+This accepts the specific wire/pixel-layout discrepancy and advances
+**T301 98% → 99% (+1 pp)**. It does not establish full Notify protocol
+parity or physical compositor acceptance. P3 remains **94% (0 pp)**,
+strict M0 remains **89% (0 pp)**, physical Hyprland acceptance remains
+**51% (0 pp)**, and cutover remains **0% (0 pp)**. No live Mako,
+Hyprland or production D-Bus configuration was changed.
