@@ -107,11 +107,28 @@ fn decode_mako_file_bytes(bytes:&[u8],source:&str)->Result<String,ConfigError>{
         // keep separate bracket grammar, so don't shorten them here.
         let first=line.iter().copied()
             .skip_while(|byte|*byte==b' '||*byte==b'\t').next();
-        let visible=if first==Some(b'['){
+        // Mako identifies a section by its physical closing ']' before
+        // calling strndup() on the bytes between brackets. strndup()
+        // subsequently stops at the first C NUL, so the hidden suffix
+        // may include non-UTF-8 bytes without affecting the selector.
+        // Do NOT turn a line lacking a physical closing ']' into a
+        // section merely because a NUL truncates its visible prefix.
+        let physical_last=line.iter().rev()
+            .find(|byte|**byte!=b' '&&**byte!=b'\t').copied();
+        let section=if first==Some(b'[') && physical_last==Some(b']'){
+            line.iter().position(|byte|*byte==b'\0').map(|nul|{
+                let mut bytes=line[..nul].to_vec();
+                bytes.push(b']');
+                bytes
+            })
+        }else{None};
+        let visible=if let Some(ref header)=section {
+            header.as_slice()
+        }else if first==Some(b'['){
             line
-        } else if let Some(index)=line.iter().position(|byte|*byte==b'\0'){
+        }else if let Some(index)=line.iter().position(|byte|*byte==b'\0'){
             &line[..=index]
-        } else {line};
+        }else{line};
         let decoded=std::str::from_utf8(visible).map_err(|_|err(
             format!("{source}:{}",index+1),
             "non-UTF-8 bytes in active config line",
@@ -1349,7 +1366,12 @@ impl Config {
             }
             let location = format!("{source}:{}", lineno + 1);
             if line.starts_with('[') && line.ends_with(']') {
-                let selector = &line[1..line.len()-1];
+                // `strndup(stripped_line+1,len-2)` in Mako stops at
+                // NUL even though the physical trailing ']' triggered
+                // the section branch. The raw source is the visible
+                // prefix, not the hidden garbage after that NUL.
+                let section=&line[1..line.len()-1];
+                let selector=section.split('\0').next().unwrap_or(section);
                 let selectors = parse_selectors(selector).map_err(|e| err(&location, e))?;
                 self.rules.push(Rule {
                     source: location, raw_selector: selector.into(), selectors,
@@ -2045,6 +2067,34 @@ mod tests {
         std::fs::write(file(21),format!("include={}\n",file(0).display())).unwrap();
         let result=Config::from_path(&file(0)).unwrap_err();
         assert!(result.message.contains("recursive include"));
+    }
+
+    #[test]
+    fn mako_physical_section_closer_precedes_c_nul_selector_truncation(){
+        // Mako config.c:831-848 tests the physical closing ']' then
+        // strndup() stops at NUL within the criteria bytes.
+        let temp=tempfile::tempdir().unwrap();
+        let child=temp.path().join("sections.conf");
+        let root=temp.path().join("root.conf");
+        let mut bytes=b"width=401\n[category=success\0".to_vec();
+        bytes.extend_from_slice(&[0xff,b']',b'\n']);
+        bytes.extend_from_slice(b"height=117\n");
+        std::fs::write(&child,bytes).unwrap();
+        std::fs::write(&root,format!("include={}\n",child.display())).unwrap();
+        let cfg=Config::from_path(&root).unwrap();
+        assert_eq!(cfg.global["width"],"401");
+        assert_eq!(cfg.rules.len(),1);
+        assert_eq!(cfg.rules[0].raw_selector,"category=success");
+        assert_eq!(cfg.rules[0].source,format!("{}:2",child.display()));
+        assert_eq!(cfg.rules[0].options["height"],"117");
+        let inline=Config::parse("[category=success\0ignored]\nheight=117\n").unwrap();
+        assert_eq!(inline.rules[0].raw_selector,"category=success");
+        assert_eq!(inline.rules[0].options["height"],"117");
+        // Merely seeing the prefix before NUL must not invent a closing
+        // bracket that the physical source line never supplied.
+        assert!(Config::parse("[category=success\0ignored\nheight=117\n").is_err());
+        std::fs::write(&child,b"[category=success\0garbage\nheight=117\n").unwrap();
+        assert!(Config::from_path(&root).is_err());
     }
 
     #[test]
