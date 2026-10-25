@@ -178,6 +178,44 @@ async fn private_dbus_image_path_preserves_raw_linux_file_url_through_cairo()
 }
 
 #[tokio::test]
+async fn percent_nul_image_path_uses_mako_c_filename_prefix_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::render::render_notification;
+    let dir=tempfile::tempdir()?;
+    let png=dir.path().join("loaded.png");
+    let icon=gdk_pixbuf::Pixbuf::new(
+        gdk_pixbuf::Colorspace::Rgb,true,8,12,12
+    ).ok_or("unable to allocate icon fixture")?;
+    icon.fill(0xFF0000FF);
+    icon.savev(&png,"png",&[])?;
+    let uri=format!("file://{}%00not-the-real-filename",png.display());
+    let (conn,runtime)=open_private_service(Config::default()).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let hints:HashMap<String,OwnedValue>=[(
+        "image-path".into(),
+        OwnedValue::try_from(zbus::zvariant::Value::from(uri.clone()))?
+    )].into();
+    let id:u32=desktop.call("Notify",&(
+        "icon-nul-fixture",0u32,"","NUL path","",
+        Vec::<String>::new(),hints,-1i32
+    )).await?;
+    let note=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).cloned().ok_or("missing NUL icon note")?;
+    assert_eq!(note.app_icon,uri,
+        "the original hint stays unchanged on the D-Bus notification");
+    let config=Config::parse(
+        "width=160\nheight=70\npadding=4\nborder-size=0\n\
+         icon-location=left\nmax-icon-size=16\n"
+    )?;
+    let frame=render_notification(&note,&config.global)?;
+    let at=(frame.height as usize/2)*frame.stride as usize+6*4;
+    assert_eq!(&frame.pixels[at..at+4],&[0,0,255,255],
+        "C filename prefix before decoded %00 should be opened by GdkPixbuf");
+    Ok(())
+}
+
+#[tokio::test]
 async fn empty_image_path_hint_clears_app_icon_through_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
