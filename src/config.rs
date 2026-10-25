@@ -217,6 +217,70 @@ fn mako_posix_ere_literal_leading_closer(pattern:&str)->String{
     normalized
 }
 
+/// In GNU glibc REG_EXTENDED, a closing ')', ']' or '}' with no
+/// matching active opener is a literal atom rather than a syntax error.
+/// Rust regex rejects an unmatched closing parenthesis. Escape only those
+/// *unpaired* closers, preserving balanced capture groups, real repetition
+/// intervals, POSIX bracket elements and escaped delimiters. This runs
+/// before GNU word-boundary rewriting adds Rust-only \b{start}/\b{end}.
+fn mako_posix_ere_literal_unmatched_closers(pattern:&str)->String {
+    let mut out=String::with_capacity(pattern.len());
+    let mut chars=pattern.chars().peekable();
+    let mut in_class=false;
+    let mut group_depth=0usize;
+    while let Some(ch)=chars.next() {
+        match ch {
+            '\\' => {
+                out.push('\\');
+                if let Some(next)=chars.next(){out.push(next);}
+            }
+            '[' if !in_class => {
+                in_class=true;
+                out.push('[');
+            }
+            '[' if in_class => {
+                out.push('[');
+                if let Some(delimiter @ (':'|'.'|'='))=chars.peek().copied(){
+                    out.push(chars.next().expect("peeked POSIX bracket delimiter"));
+                    let mut previous='\0';
+                    for next in chars.by_ref(){
+                        out.push(next);
+                        if previous==delimiter && next==']'{break;}
+                        previous=next;
+                    }
+                }
+            }
+            ']' if in_class => {
+                in_class=false;
+                out.push(']');
+            }
+            ']' => out.push_str(r"\]"),
+            '(' if !in_class => {
+                group_depth+=1;
+                out.push('(');
+            }
+            ')' if !in_class && group_depth>0 => {
+                group_depth-=1;
+                out.push(')');
+            }
+            ')' if !in_class => out.push_str(r"\)"),
+            '{' if !in_class => {
+                // All unescaped opening braces were already checked by
+                // the glibc interval validator. Copy through its matching
+                // closing brace so it remains repetition syntax.
+                out.push('{');
+                for next in chars.by_ref(){
+                    out.push(next);
+                    if next=='}'{break;}
+                }
+            }
+            '}' if !in_class => out.push_str(r"\}"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// In glibc's POSIX REG_EXTENDED, escaped ASCII letters are literals
 /// except the GNU word/whitespace operators \b, \B, \w, \W, \s, \S.
 /// Within bracket expressions glibc treats the *backslash itself*
@@ -734,8 +798,9 @@ impl Selector {
             // escapes become Rust \b{start}/\b{end} assertions. Those
             // Rust-only braces are not POSIX repetition intervals.
             mako_posix_ere_validate_intervals(&collated)?;
+            let closers=mako_posix_ere_literal_unmatched_closers(&collated);
             let repeat=mako_posix_ere_empty_min_repetitions(
-                &mako_posix_ere_escapes(&collated));
+                &mako_posix_ere_escapes(&closers));
             let pattern=mako_posix_ere_stacked_quantifiers(&repeat);
             Some(Regex::new(&format!("(?s-u:{pattern})"))
                 .map_err(|e| format!("invalid regex: {e}"))?)
@@ -1968,6 +2033,49 @@ mod tests {
         assert_eq!(cfg.style_for(&fields)["width"],"461");
         fields.body="x";
         assert_eq!(cfg.style_for(&fields)["width"],"300");
+    }
+
+    #[test]
+    fn glibc_unmatched_closing_delimiters_are_literal_regex_atoms(){
+        // Direct native glibc REG_EXTENDED|REG_NOSUB fixtures. A closing
+        // delimiter without a matching opener is a literal, and repeated
+        // unmatched closers can themselves take postfix quantifiers.
+        let mut fields=note("normal",&["default"]);
+        for (pattern,yes,no) in [
+            (r"^)$",")","("),
+            (r"^]$","]","["),
+            (r"^}$","}","{"),
+            (r"^(a))$","a)","a"),
+            (r"^a)*$","a)))","a("),
+            (r"^a]*$","a]]","a["),
+            (r"^a}*$","a}}","a{"),
+            (r"^a{2}}*$","aa}}","a}"),
+            (r"^[]]$","]","["),
+            (r"^\)$",")","("),
+            (r"^\]$","]","["),
+            (r"^\}$","}","{"),
+        ] {
+            let selector=Selector::new("summary~",pattern).unwrap_or_else(|e|
+                panic!("glibc accepts {pattern:?}: {e}"));
+            fields.summary=yes;
+            assert!(selector.matches(&fields),
+                "{pattern:?} must match glibc literal {yes:?}");
+            fields.summary=no;
+            assert!(!selector.matches(&fields),
+                "{pattern:?} must reject {no:?}");
+        }
+        assert_eq!(mako_posix_ere_literal_unmatched_closers(r"^(a))$"),
+            r"^(a)\)$");
+        assert_eq!(mako_posix_ere_literal_unmatched_closers(r"^a{2}}*$"),
+            r"^a{2}\}*$");
+        assert_eq!(mako_posix_ere_literal_unmatched_closers(r"^\)$"),
+            r"^\)$","explicit escaping must not be doubled");
+        // The full Mako config path must accept literal closing parens.
+        let config=Config::parse("[summary~=^a)*$]\nwidth=463\n").unwrap();
+        fields.summary="a)))";
+        assert_eq!(config.style_for(&fields)["width"],"463");
+        fields.summary="a(";
+        assert_eq!(config.style_for(&fields)["width"],"300");
     }
 
     #[test]
