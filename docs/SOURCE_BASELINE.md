@@ -3384,3 +3384,61 @@ displayed 90%. Physical Hyprland T503 still 51%,
 explicitly authorized reversible cutover T504 still 0%.
 The installed Mako, real notification bus and Hyprland
 configuration remain untouched.
+
+## Glibc C-locale POSIX punctuation-range parity (2026-10-25)
+
+Mako v1.11.0 `criteria.c:332-349` compiles `summary~`
+and `body~` with `regcomp(REG_EXTENDED | REG_NOSUB)`.
+Native GNU glibc C-locale `regcomp`/`regexec` probes
+established two distinct punctuation cases:
+
+- An interior `--` following an ASCII class member above
+  `'-'` (0x2d) is an invalid descending range end.
+  Glibc rejects forms such as `[a.--z]`, `[.--z]`,
+  `[a/--z]`, `[a:--z]`, `[a;--z]`, `[a<--z]`,
+  `[a=--z]`, `[a>--z]`, `[a?--z]`, `[a@--z]`,
+  `[a_--z]`, and `[a~--z]`.
+- A double hyphen following an ordinary ASCII punctuation
+  character **below** `'-'` can be a valid ascending range.
+  `[!--z]` includes all bytes from `!` through `-` plus
+  `z`; `[+--z]` includes `+`, `,`, `-` and `z`;
+  `[a&--z]` includes `a`, the characters `&` through
+  `-`, and `z`. The corresponding negated class complements
+  the accepted set. Rust regex would otherwise interpret
+  an unescaped `--` as class set subtraction.
+
+The original conservative simple-class source validator
+now includes the tested ASCII punctuation above `'-'`.
+It does **not** reject lower-punctuation operators which
+glibc accepts. A new normalization pass handles
+simple classes with exactly two hyphens following
+low punctuation: it preserves the first `-` as the range
+operator and quotes the second for Rust regex. It runs
+**after** the glibc class-backslash lowering, so its
+inserted Rust escape is not reinterpreted as a literal
+C-source backslash. Classes with nested POSIX elements,
+source escapes, or other unsupported syntax are passed
+through to the existing specialized translators.
+
+Rust regressions include native-glibc validated positive
+and negative match controls, both summary and body selectors
+through `Config::parse`, and unchanged controls for the
+separate leading-hyphen and POSIX collating grammars.
+This does **not** claim complete glibc regex compatibility,
+notably backreferences and other untested bracket grammar.
+
+- [Pinned Mako criteria.c](https://github.com/emersion/mako/blob/v1.11.0/criteria.c#L332-L349)
+- [Reject descending punctuation ranges 2b983c1](https://github.com/sguzman/posthorn/commit/2b983c16710811c03c9e8af653b7352b8798fbad)
+- [Lower valid ascending punctuation ranges 3a7b28f](https://github.com/sguzman/posthorn/commit/3a7b28f2918c61c8fb97139d49b7503df56ea86f)
+- [First code CI 40237083490 fully passed](https://github.com/sguzman/posthorn/actions/runs/40237083490)
+- [Final code CI 40237587087 fully passed](https://github.com/sguzman/posthorn/actions/runs/40237587087):
+  **332 Rust library tests, 90 isolated private D-Bus tests,
+  all headless Wayland acceptance checks passed**.
+
+**Accepted progress:** T103 **93% → 94% (+1 pp)**;
+P1 raw **93.6% → 93.8% (+0.2 pp)**, displayed 94%;
+strict 24-task M0 raw **89.750% → 89.792% (+0.042 pp)**,
+displayed 90%. Real Hyprland T503 remains **51%**,
+production cutover T504 remains **0%**.
+No live Mako, real notification bus, or personal
+Hyprland configuration was accessed or changed.
