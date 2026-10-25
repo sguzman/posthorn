@@ -528,6 +528,38 @@ mod tests {
     }
 
     #[test]
+    fn equal_expiry_deadlines_follow_mako_selected_timer_and_history_order() {
+        // event-loop.c does not dislodge a selected timer on equal
+        // timestamps. Once that timer fires, the newest remaining
+        // equal-deadline timer becomes selected. Expiry ordering also
+        // determines order in the newest-first history deque.
+        let runtime=SharedRuntime::new(
+            Config::parse("default-timeout=100\nmax-history=4\n").unwrap()
+        );
+        let now=Instant::now();
+        let ids={
+            let mut store=runtime.store.lock().unwrap();
+            [
+                store.push(Request{summary:"first".into(),..Request::default()}),
+                store.push(Request{summary:"second".into(),..Request::default()}),
+                store.push(Request{summary:"third".into(),..Request::default()}),
+            ]
+        };
+        for id in ids {
+            runtime.schedule_without_hook(id,now).unwrap();
+        }
+        assert_eq!(runtime.next_deadline().unwrap(),
+            Some(now+Duration::from_millis(100)));
+        assert!(runtime.expire(now+Duration::from_millis(99)).unwrap().is_empty());
+        assert_eq!(runtime.expire(now+Duration::from_millis(100)).unwrap(),
+            vec![ids[0],ids[2],ids[1]]);
+        let store=runtime.store.lock().unwrap();
+        assert!(store.active().is_empty());
+        assert_eq!(store.history().iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![ids[1],ids[2],ids[0]]);
+    }
+
+    #[test]
     fn category_timeout_overrides_and_replacement_reschedules() {
         let config = Config::parse(
             "default-timeout=7000\nignore-timeout=1\n[category=warning]\ndefault-timeout=2000\n"
