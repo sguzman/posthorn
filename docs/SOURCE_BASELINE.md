@@ -2335,3 +2335,44 @@ Documented and tested startup/output-scale knowledge plus reload
 retention advances **T303 84% -> 86% (+2pp)** and
 **P3 93% -> 94% (+1pp)**. Strict M0 remains **89% (0pp)**;
 physical Hyprland T503 remains 51% and cutover T504 remains 0%.
+
+## Initial icons=0 and later mode toggles preserve Mako icon lifetime
+
+Pinned Mako v1.11.0 `dbus/xdg.c:handle_notify` only invokes
+`create_icon` when **the initial matched style has `icons=1`**.
+The cached `notif->icon` is retained across
+`dbus/mako.c:reapply_config`; only its visibility is controlled
+by the current `style.icons` when `render.c` paints the frame.
+Therefore an initially iconless notification cannot suddenly
+load an icon if a later `SetMode` enables icons. Conversely an
+already cached icon survives `icons=0` and is restored from
+the **original decoded bytes** when `icons=1` is reenabled,
+even if its source PNG changed in the meantime.
+
+[Regression 1473a9c](https://github.com/sguzman/posthorn/commit/1473a9ca3eff00b85c249c1870ed0e11bee3611f)
+sends real Notify requests through the isolated private D-Bus:
+(a) SetMode(hide), Notify, SetMode(show) must retain
+`icon_snapshot=Some(None)` and the iconless frame;
+(b) SetMode(show), Notify, SetMode(hide), modify PNG,
+SetMode(show) must paint precisely the cached initial PNG.
+[Fixture lifetime correction c5cede1](https://github.com/sguzman/posthorn/commit/c5cede16125176d75f0a8df40705f81a5e6864a7)
+makes the test's dynamically selected summary an owned string.
+
+The first interim [run 40201487894](https://github.com/sguzman/posthorn/actions/runs/40201487894)
+failed a Rust test-fixture lifetime compilation check; it is not
+an acceptance result. [Run 40201668971](https://github.com/sguzman/posthorn/actions/runs/40201668971)
+passed **both mandatory jobs** after that correction:
+309 Rust library tests, 82 isolated private D-Bus tests, and
+the complete headless Sway compositor suite, including mixed DPI,
+1x, 1.25x, 2x and 9x, input, redraw and multi-output checks.
+Installed Mako, production bus, and the user's live session
+were not accessed.
+
+This expands acceptance of the retained icon-lifetime change.
+It does not justify adding another point to the
+almost-finished T402 rendering task, so
+**T402 stays 99% (0pp); T303 stays 86% (0pp); P3 stays 94%
+(0pp); strict M0 stays 89% (0pp)** for this incremental
+test. The previous, separately verified icon implementation
+already advanced T303 from 84% to 86% (+2pp), and P3 from
+93% to 94% (+1pp) this development session.
