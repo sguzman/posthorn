@@ -169,7 +169,11 @@ pub fn resolve_icon_scaled(
         // resolved against the daemon's working directory by GdkPixbuf.
         // Mako's URL decoder writes raw Linux filename bytes. Requiring
         // valid UTF-8 would discard otherwise valid on-disk filenames.
-        return Some(PathBuf::from(OsString::from_vec(url_decode(uri)?)));
+        let decoded=url_decode(uri)?;
+        // C resolve_icon can return an allocated empty filename, but its
+        // load_image() immediately rejects it (strlen(path)==0).
+        if decoded.is_empty(){return None;}
+        return Some(PathBuf::from(OsString::from_vec(decoded)));
     }
     if !valid_icon_name(name){return None;}
     let max_scale=output_scale.max(1);
@@ -374,6 +378,27 @@ mod tests {
             Some(PathBuf::from("images/")));
         assert_eq!(resolve_icon("file://assets/bad%00%FFsuffix","",64),
             Some(PathBuf::from("assets/bad")));
+    }
+
+    #[test]
+    fn nul_terminated_file_uri_loads_the_exact_c_filename_prefix() {
+        let folder=tempfile::tempdir().unwrap();
+        let png=folder.path().join("literal.png");
+        let image=Pixbuf::new(gdk_pixbuf::Colorspace::Rgb,true,8,2,2).unwrap();
+        image.fill(0xFF0000FF);
+        image.savev(&png,"png",&[]).unwrap();
+        let filename=format!("file://{}%00ignored.png",png.display());
+        let mut store=crate::notification::NotificationStore::new(0);
+        store.push(crate::notification::Request{
+            app_icon:filename,
+            ..crate::notification::Request::default()
+        });
+        let note=store.active().front().unwrap();
+        let style=crate::config::Config::default().global;
+        let loaded=load_note_icon(note,&style)
+            .expect("GdkPixbuf should open the filename before %00");
+        assert_eq!((loaded.width,loaded.height),(2,2));
+        assert_eq!(&loaded.bgra[..4],&[0,0,255,255]);
     }
 
     #[test]
