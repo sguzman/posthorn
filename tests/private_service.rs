@@ -293,6 +293,49 @@ async fn missing_icon_is_not_retried_until_notify_replacement()
 }
 
 #[tokio::test]
+async fn mode_changes_do_not_refit_existing_notify_icon_but_new_notify_does()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    let dir=tempfile::tempdir()?;
+    let png=dir.path().join("fit.png");
+    let image=gdk_pixbuf::Pixbuf::new(
+        gdk_pixbuf::Colorspace::Rgb,true,8,40,40
+    ).ok_or("cannot allocate mode PNG")?;
+    image.fill(0xFF0000FF);
+    image.savev(&png,"png",&[])?;
+    let config=Config::parse(
+        "width=160\nheight=70\npadding=4\nborder-size=0\n         max-icon-size=8\n[mode=large]\nmax-icon-size=32\n"
+    )?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let notify=|summary:&str|(
+        "icon-fit-mode",0u32,png.to_str().unwrap(),
+        summary,"",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    );
+    let old:u32=desktop.call("Notify",&notify("Retained size")).await?;
+    let before=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    let old_note=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==old).unwrap().clone();
+    assert_eq!(old_note.icon_snapshot.as_ref().unwrap()
+        .as_ref().unwrap().max_size,8);
+    let _:()=ctl.call("SetMode",&("large",)).await?;
+    let after=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_eq!(before.pixels,after.pixels,
+        "Mako keeps its originally fitted icon after mode reapplication");
+    let newer:u32=desktop.call("Notify",&notify("New size")).await?;
+    let store=runtime.store.lock().unwrap();
+    let old_icon=store.active().iter().find(|n|n.id==old)
+        .unwrap().icon_snapshot.as_ref().unwrap().as_ref().unwrap();
+    let new_icon=store.active().iter().find(|n|n.id==newer)
+        .unwrap().icon_snapshot.as_ref().unwrap().as_ref().unwrap();
+    assert_eq!(old_icon.max_size,8,"existing notification was refitted");
+    assert_eq!(new_icon.max_size,32,"new notification used new mode's size");
+    Ok(())
+}
+
+#[tokio::test]
 async fn empty_image_path_hint_clears_app_icon_through_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
