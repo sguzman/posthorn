@@ -3185,3 +3185,48 @@ strict 24-task M0 **89.542% → 89.583% (+0.042 pp)**
 and opt-in reversible Mako cutover T504 remains 0%.
 No installed daemon, production notification bus or live
 Hyprland config was modified.
+
+## Glibc long zero-padded POSIX counted repetitions (2026-10-25)
+
+Mako v1.11.0 uses glibc `regcomp(REG_EXTENDED | REG_NOSUB)`
+for `summary~` and `body~` criteria in `criteria.c:332-349`.
+A direct C-locale `regcomp`/`regexec` check confirmed
+that the *numeric value* of a counted repetition, rather than
+the length of its zero-padded spelling, is subject to
+`RE_DUP_MAX=32767`. Glibc accepts a count such as
+`a{0000000000000000000000000000000000002}`, plus
+long-zero-padded ranged, omitted-lower, unbounded, and
+stacked counts. Direct glibc probes accepted 1,025-digit
+zero-padded repetitions with a small numerical value.
+Values of 32768 and descending bounds remain invalid.
+
+Posthorn's source interval validator previously rejected
+more than 32 count characters. It now checks ASCII digit
+syntax, removes leading zeroes before bounded numerical
+conversion, and rejects actual values above 32767.
+The same source-aware pass canonicalizes valid intervals
+to small Rust forms, including `{,2}` → `{0,2}` and
+`{0000000002}` → `{2}`. This is done outside bracket
+classes and escaped brace literals, and before the
+stacked-quantifier rewrite. GNU word-boundary generated
+assertions remain intact.
+
+The isolated Rust regression covers 256 zero digits in
+exact counts, positive ranges, omitted and unbounded bounds,
+stacked counts and their actual match behavior, as well as
+malformed/too-large values, escaped class/literal braces,
+and full parsed `body~` style selection. We avoid compiling
+a full 32,767-fold regex; high-limit cases are validator-only.
+
+- [Pinned Mako criteria.c](https://github.com/emersion/mako/blob/v1.11.0/criteria.c#L332-L349)
+- [Implementation and new regression 8d6d148](https://github.com/sguzman/posthorn/commit/8d6d148c8d2b01a5089ecdb9a8b92096cf0661b9)
+- [Both CI jobs passed 40229820202](https://github.com/sguzman/posthorn/actions/runs/40229820202):
+  **328 Rust library tests, 90 isolated D-Bus tests** and
+  complete isolated headless Wayland acceptance.
+
+**Accepted progress:** T103 **89% → 90% (+1 pp)**;
+P1 raw **92.8% → 93.0% (+0.2 pp)**, displayed 93%;
+strict 24-task M0 raw **89.583% → 89.625% (+0.042 pp)**,
+displayed 90%. Physical Hyprland T503 remains **51%**,
+opt-in production cutover T504 remains **0%**.
+No change to live Mako, its D-Bus ownership, or desktop config.
