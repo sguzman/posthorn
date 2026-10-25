@@ -1292,14 +1292,23 @@ impl Config {
     /// Mako v1.11 searches ~/.mako/config before XDG_CONFIG_HOME/mako/config
     /// (falling back to ~/.config/mako/config). Do not search XDG_CONFIG_DIRS:
     /// upstream Mako does not use it for configuration discovery.
-    pub fn find_default_path(home:&Path,xdg_config_home:Option<&Path>)->Option<PathBuf>{
+    /// Mako config.c:get_default_config_path builds both paths using
+    /// mako_asprintf("%s/...", getenv("HOME")). A defined *empty* HOME
+    /// therefore yields absolute "/.mako/config" and "/.config/mako/config",
+    /// not relative ".mako/config" and ".config/mako/config".
+    fn default_config_candidates(home:&Path,xdg_config_home:Option<&Path>)
+        -> [PathBuf;2]
+    {
+        let home=if home.as_os_str().is_empty(){Path::new("/")}else{home};
         let legacy=home.join(".mako/config");
-        if fs::File::open(&legacy).is_ok(){return Some(legacy);}
         let fallback=home.join(".config");
-        let config_home=xdg_config_home.unwrap_or(&fallback);
-        let modern=config_home.join("mako/config");
-        if fs::File::open(&modern).is_ok(){return Some(modern);}
-        None
+        let modern=xdg_config_home.unwrap_or(&fallback).join("mako/config");
+        [legacy,modern]
+    }
+
+    pub fn find_default_path(home:&Path,xdg_config_home:Option<&Path>)->Option<PathBuf>{
+        Self::default_config_candidates(home,xdg_config_home).into_iter()
+            .find(|candidate|fs::File::open(candidate).is_ok())
     }
 
     /// Read the same implicit config as Mako when available; otherwise use
@@ -2224,6 +2233,30 @@ mod tests {
         let success=config.style_for(&note("success",&["default"]));
         assert_eq!(success["background-color"],"#222222",
             "later outer criteria win over the same selector in included file");
+    }
+
+    #[test]
+    fn mako_defined_empty_home_keeps_absolute_default_path_candidates(){
+        // Mako v1.11 config.c:743-760 uses "%s/.mako/config" and
+        // "%s/.config/mako/config" string concatenation with getenv(HOME).
+        // Do not inspect or modify the host's actual root config files.
+        assert_eq!(Config::default_config_candidates(Path::new(""),None),[
+            PathBuf::from("/.mako/config"),PathBuf::from("/.config/mako/config"),
+        ]);
+        assert_eq!(Config::default_config_candidates(Path::new(""),
+            Some(Path::new("/isolated/xdg"))),[
+            PathBuf::from("/.mako/config"),PathBuf::from("/isolated/xdg/mako/config"),
+        ]);
+        assert_eq!(Config::default_config_candidates(Path::new("/isolated/home"),
+            None),[
+            PathBuf::from("/isolated/home/.mako/config"),
+            PathBuf::from("/isolated/home/.config/mako/config"),
+        ]);
+        // Relative XDG_CONFIG_HOME is accepted as a relative pathname by
+        // Mako's literal %s/mako/config concatenation, not rebased on HOME.
+        assert_eq!(Config::default_config_candidates(Path::new("/isolated/home"),
+            Some(Path::new("relative-xdg")))[1],
+            PathBuf::from("relative-xdg/mako/config"));
     }
 
     #[test]
