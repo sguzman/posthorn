@@ -3587,3 +3587,53 @@ displayed 90%. T503 physical Hyprland remains 51%
 and T504 opt-in production cutover remains 0%. The
 real notification daemon, bus name and user's
 Hyprland configuration were not touched.
+
+## Mako option values with embedded C NUL terminators (2026-10-25)
+
+Pinned Mako v1.11.0 `config.c:801-877` uses
+`getline()` to obtain a physical configuration line
+but then calls `strchr` and the ordinary C option
+parsers on the resulting **NUL-terminated string**.
+For ordinary `key=value` lines, bytes following
+the first embedded NUL are not parsed. This also
+means undecodable bytes after the NUL must not
+invalidate an otherwise valid option.
+
+Posthorn previously decoded **every byte** of each
+active physical line as UTF-8 and used the entire
+Rust string for value validation. A valid glibc
+`width=472\0[non-UTF-8 bytes]` line incorrectly failed.
+
+The byte decoder now preserves each ordinary
+option's original prefix **through its first NUL**
+and ignores later hidden bytes. The line parser
+still strips ASCII outer whitespace **before**
+truncating at that NUL. This ordering is important:
+`width=472 \0ignored` is invalid in upstream Mako
+because the space before NUL remains part of the
+value and `strtol` does not consume trailing space.
+An active invalid byte before the C terminator
+remains an explicit error. Initial `[` section
+lines remain untouched; their closing-bracket
+recognition uses the physical line length and
+requires separate source semantics.
+
+An isolated binary-file regression covers nested
+`include=`, an ordinary option whose trailing
+bytes are undecodable, subsequent options, direct
+`Config::parse` input, the pre-NUL whitespace
+negative case, and invalid UTF-8 before the NUL.
+
+- [Pinned Mako config.c getline and strchr](https://github.com/emersion/mako/blob/v1.11.0/config.c#L801-L877)
+- [Embedded NUL option fix a93cee8](https://github.com/sguzman/posthorn/commit/a93cee82e180985fa3a6380ed5e5cefe472efb8b)
+- [Fully green isolated CI 40240716085](https://github.com/sguzman/posthorn/actions/runs/40240716085):
+  **337 Rust library tests, 90 private D-Bus tests,
+  and complete headless Wayland QA passed**.
+
+**Accepted progress:** T104 **91% → 92% (+1 pp)**;
+P1 raw **94.4% → 94.6% (+0.2 pp)**, displayed 95%;
+strict 24-task M0 raw **89.917% → 89.958% (+0.042 pp)**,
+displayed 90%. T503 physical Hyprland stays 51%,
+T504 opt-in production cutover stays 0%. Nothing
+changed the user's installed Mako, production D-Bus
+name, or live Hyprland configuration.
