@@ -389,9 +389,7 @@ impl SharedRuntime {
             }))
         }else{None};
         if let Some(snapshot)=capture{
-            if let Some(target)=store.active.iter_mut().find(|note|note.id==id){
-                target.icon_snapshot=Some(snapshot);
-            }
+            store.capture_icon(id,snapshot)?;
         }
         self.timers.lock().map_err(|_| "expiration scheduler lock poisoned")?
             .set(id, now, timeout);

@@ -201,6 +201,17 @@ impl NotificationStore {
 
     pub fn active(&self) -> &VecDeque<Notification> { &self.active }
 
+    /// Bind the one-shot decoded Mako icon to the active Notify payload.
+    /// A failed lookup is still a completed capture (Some(None)).
+    pub fn capture_icon(&mut self,id:u32,icon:Option<IconSnapshot>)
+        ->Result<(),&'static str>
+    {
+        let note=self.active.iter_mut().find(|n|n.id==id)
+            .ok_or("notification is not active")?;
+        if note.icon_snapshot.is_none() {note.icon_snapshot=Some(icon);}
+        Ok(())
+    }
+
     /// apply_each_criteria creates or reuses a surface after style selection.
     /// Associate this notification with a Mako surface identity, optionally
     /// inheriting its compositor-entered output from a previously mapped
