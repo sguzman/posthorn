@@ -90,7 +90,11 @@ fn decode_mako_file_bytes(bytes:&[u8],source:&str)->Result<String,ConfigError>{
         if index>0{text.push('\n');}
         let uncommented=line.iter().copied()
             .skip_while(|byte|*byte==b' '||*byte==b'\t');
-        if uncommented.into_iter().next()==Some(b'#'){
+        // Pinned Mako config.c:814 skips a physical line when its
+        // first byte after ASCII indentation is NUL, just like '#'.
+        // getline() may still have collected non-UTF-8 bytes after the
+        // NUL, but Mako does not interpret or validate that line.
+        if matches!(uncommented.into_iter().next(),Some(b'#'|b'\0')){
             continue;
         }
         let decoded=std::str::from_utf8(line).map_err(|_|err(
@@ -1319,7 +1323,9 @@ impl Config {
         // Unicode whitespace, silently accepting files Mako rejects.
         for (lineno, raw) in text.split('\n').enumerate() {
             let line = raw.trim_matches([' ', '\t']);
-            if line.is_empty() || line.starts_with('#') { continue; }
+            if line.is_empty() || line.starts_with('#') || line.starts_with('\0') {
+                continue;
+            }
             let location = format!("{source}:{}", lineno + 1);
             if line.starts_with('[') && line.ends_with(']') {
                 let selector = &line[1..line.len()-1];
@@ -2018,6 +2024,33 @@ mod tests {
         std::fs::write(file(21),format!("include={}\n",file(0).display())).unwrap();
         let result=Config::from_path(&file(0)).unwrap_err();
         assert!(result.message.contains("recursive include"));
+    }
+
+    #[test]
+    fn nul_started_mako_file_lines_ignore_undecodable_trailing_bytes(){
+        // Mako config.c:801-817 calls getline(), strips ASCII indentation,
+        // and skips first-byte NUL before evaluating any option.
+        let dir=tempfile::tempdir().unwrap();
+        let child=dir.path().join("child.conf");
+        let root=dir.path().join("root.conf");
+        let mut bytes=b"\0\xff\xfe\n \t\0\x80\xff\n".to_vec();
+        bytes.extend_from_slice(b"width=478\n[category=success]\nheight=119\n");
+        std::fs::write(&child,bytes).unwrap();
+        std::fs::write(&root,format!("include={}\n",child.display())).unwrap();
+        let conf=Config::from_path(&root).unwrap();
+        assert_eq!(conf.global["width"],"478");
+        assert_eq!(conf.rules.len(),1);
+        assert_eq!(conf.rules[0].source,format!("{}:4",child.display()));
+        assert_eq!(conf.rules[0].options["height"],"119");
+
+        // The same parser entrypoint handles inline source strings without
+        // a file decoder; it must skip those NUL-started physical lines too.
+        let direct=Config::parse(" \t\0ignored\nwidth=478\n").unwrap();
+        assert_eq!(direct.global["width"],"478");
+        // Only leading-NUL lines are ignored. Invalid bytes in active
+        // settings remain explicit errors, never lossy replacements.
+        std::fs::write(&child,b"width=\xff\n").unwrap();
+        assert!(Config::from_path(&root).is_err());
     }
 
     #[test]
