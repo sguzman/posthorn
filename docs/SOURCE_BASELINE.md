@@ -2456,3 +2456,41 @@ parity or physical compositor acceptance. P3 remains **94% (0 pp)**,
 strict M0 remains **89% (0 pp)**, physical Hyprland acceptance remains
 **51% (0 pp)**, and cutover remains **0% (0 pp)**. No live Mako,
 Hyprland or production D-Bus configuration was changed.
+
+## Malformed inline image-data: deliberate bounded-wire safety exception (2026-10-25)
+
+Pinned Mako v1.11.0 `dbus/xdg.c:handle_notify` computes an expected
+byte count from the `(iiibiiay)` image-data hint before reading each
+declared byte using `sd_bus_message_read(msg, "y", &tmp)`. Its loop
+checks `ret < 0` but not `ret == 0`; the libsystemd
+`sd_bus_message_read_basic` API explicitly returns zero at the end
+of the currently opened array. Therefore it is **not source-grounded
+to claim Mako reliably rejects an undersized byte array**. The upstream
+implementation may instead continue using the uninitialized C
+`tmp` variable. We do not emulate that unsafe behavior.
+
+Posthorn safely computes
+`(height-1)*rowstride + width*ceil(channels*bits_per_sample/8)`
+using checked unsigned arithmetic and rejects a truncated sender array
+*before any notification replacement, ID allocation, or alias collapse*.
+This validation is separate from GdkPixbuf pixel acceptance: a complete
+image array using an unsupported bit depth is accepted by Notify but
+retains no rendered icon, and safely oversized channel metadata still
+decodes using the `has_alpha`-selected stride (see previous section).
+
+Evidence and limitations:
+
+- [Pinned upstream D-Bus image loop](https://github.com/emersion/mako/blob/v1.11.0/dbus/xdg.c#L258-L335)
+- [libsystemd sd_bus_message_read_basic return semantics](https://www.freedesktop.org/software/systemd/man/latest/sd_bus_message_read_basic.html)
+- [Wire validation implementation 91a2b44](https://github.com/sguzman/posthorn/commit/91a2b4449fa352d79c9128fc39bedcc9f99d6bbb)
+- [Private D-Bus end-to-end regression 6418680](https://github.com/sguzman/posthorn/commit/641868024a622d79f8d9eb8a188b47a733707219)
+- [Green mandatory CI 40206069699](https://github.com/sguzman/posthorn/actions/runs/40206069699):
+  **314 library tests; 84 private D-Bus tests; isolated headless
+  Wayland compositor suite passed**.
+
+This is an **intentional safety hardening, not a strict upstream parity
+claim**. It earns **no percentage credit**: T301 stays **99% (+0 pp)**,
+P3 **94% (+0 pp)**, M0 **89% (+0 pp)**, physical Hyprland
+acceptance **51% (+0 pp)**, and production cutover **0% (+0 pp)**.
+Live Mako, the real freedesktop notification bus and workstation
+settings are unchanged.
