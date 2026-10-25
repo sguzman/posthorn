@@ -719,9 +719,12 @@ impl Selector {
             let backslashes=mako_posix_c_class_backslashes(value);
             let leading=mako_posix_ere_literal_leading_closer(&backslashes);
             let collated=mako_posix_c_collating_elements(&leading)?;
+            // Validate the original POSIX syntax BEFORE GNU word-boundary
+            // escapes become Rust \b{start}/\b{end} assertions. Those
+            // Rust-only braces are not POSIX repetition intervals.
+            mako_posix_ere_validate_intervals(&collated)?;
             let repeat=mako_posix_ere_empty_min_repetitions(
                 &mako_posix_ere_escapes(&collated));
-            mako_posix_ere_validate_intervals(&repeat)?;
             let pattern=mako_posix_ere_stacked_quantifiers(&repeat);
             Some(Regex::new(&format!("(?s-u:{pattern})"))
                 .map_err(|e| format!("invalid regex: {e}"))?)
@@ -1835,6 +1838,14 @@ mod tests {
         assert!(mako_posix_ere_validate_intervals("a{32767}").is_ok());
         assert!(mako_posix_ere_validate_intervals("a{0,32767}").is_ok());
         assert!(mako_posix_ere_validate_intervals("a{32768}").is_err());
+        // Native GNU POSIX \< and \> are converted into Rust \b{start}
+        // and \b{end}, which are NOT POSIX repetitions and must not be
+        // inspected after that transformation.
+        let boundary=Selector::new("summary~",r"\<word\>").unwrap();
+        fields.summary="a word!";
+        assert!(boundary.matches(&fields));
+        fields.summary="sword";
+        assert!(!boundary.matches(&fields));
         let cfg=Config::parse("[body~=\"^a{foo}$\"]\nwidth=430\n");
         assert!(cfg.is_err(),"Mako rejects malformed body~ sections");
         let cfg=Config::parse("[body~=\"^a{2,3}$\"]\nwidth=430\n").unwrap();
