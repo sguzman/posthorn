@@ -9,7 +9,7 @@ use crate::notification::Notification;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GroupField {
     AppName, AppIcon, Category, DesktopEntry, Summary, Body,
-    Urgency, Actionable, Expiring, Hidden,
+    Urgency, Actionable, Expiring,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -35,7 +35,6 @@ impl GroupSpec {
                 "urgency" => Some(GroupField::Urgency),
                 "actionable" => Some(GroupField::Actionable),
                 "expiring" => Some(GroupField::Expiring),
-                "hidden" => Some(GroupField::Hidden),
                 "none" => { disabled = true; None },
                 // Layout-specific grouping fields require a surface association.
                 "" | "grouped" | "group-index" | "anchor" | "output" =>
@@ -86,12 +85,6 @@ fn key(note: &Notification, spec: &GroupSpec) -> Vec<String> {
         GroupField::Urgency => note.urgency.mako_value().to_string(),
         GroupField::Actionable => (!note.actions.is_empty()).to_string(),
         GroupField::Expiring => (note.requested_timeout_ms != 0).to_string(),
-        // Mako criteria.c:create_criteria_from_notification copies the
-        // target's hidden bit, and match_criteria compares that bit.
-        // The only hidden=true object is render.c's temporary overflow
-        // placeholder, never inserted into state->notifications. All
-        // persistent active/history notifications have hidden=false.
-        GroupField::Hidden => "false".into(),
     }).collect()
 }
 
@@ -294,23 +287,13 @@ mod tests {
     }
 
     #[test]
-    fn hidden_grouping_matches_all_regular_notifications_and_composes() {
-        // Upstream types.c:parse_criteria_spec accepts "hidden" and
-        // criteria.c:validate_criteria does not forbid it in group-by.
-        // No render.c synthetic hidden notification is in the active list.
-        let mut store=NotificationStore::new(5);
-        let first=store.push(request("one","warning"));
-        let second=store.push(request("two","success"));
-        let third=store.push(request("three","failure"));
-        let only_hidden=GroupSpec::parse("hidden").unwrap();
-        let all=group_ordered(store.active(),&only_hidden);
-        assert_eq!(all,vec![Group{ids:vec![third,second,first]}]);
-        assert!(same_group(&store.active()[0],&store.active()[1],&only_hidden));
-        assert_eq!(GroupSpec::parse("hidden,hidden").unwrap(),only_hidden);
-        assert_eq!(GroupSpec::parse("none,hidden").unwrap(),
-            GroupSpec::parse("none").unwrap());
-        let composite=GroupSpec::parse("app-name,hidden").unwrap();
-        assert_eq!(group_ordered(store.active(),&composite).len(),3);
+    fn upstream_rejects_hidden_group_by_even_though_hidden_is_a_selector(){
+        // types.c:parse_criteria_spec recognizes neither hidden nor mode
+        // as grouping fields; both are separately valid criteria selectors.
+        for invalid in ["hidden","app-name,hidden","none,hidden","mode"] {
+            assert!(GroupSpec::parse(invalid).is_err(),
+                "Mako v1.11.0 does not accept group-by={invalid}");
+        }
     }
 
     #[test]

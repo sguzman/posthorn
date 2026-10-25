@@ -837,44 +837,6 @@ async fn makoctl_mode_set_positional_arguments_reach_private_bus()
 }
 
 #[tokio::test]
-async fn group_by_hidden_is_valid_and_groups_regular_notifications_over_private_dbus()
-    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
-{
-    // Mako permits "hidden" as a group-by field; the renderer's
-    // hidden=true overflow pseudo-notification is not an active
-    // notification, so ordinary members compare hidden=false.
-    let (conn,runtime)=open_private_service(Config::parse(
-        "group-by=hidden\nmax-visible=1\n"
-    )?).await?;
-    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
-    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
-    let notify=|app:&str|(
-        app.to_owned(),0u32,"","Group","",Vec::<String>::new(),
-        HashMap::<String,OwnedValue>::new(),-1i32
-    );
-    let a:u32=desktop.call("Notify",&notify("first-app")).await?;
-    let b:u32=desktop.call("Notify",&notify("second-app")).await?;
-    let c:u32=desktop.call("Notify",&notify("third-app")).await?;
-    let members=runtime.store.lock().unwrap().active().iter()
-        .map(|n|(n.id,n.group_index,n.group_count)).collect::<Vec<_>>();
-    assert_eq!(members,vec![(c,0,3),(b,1,3),(a,2,3)],
-        "Mako groups all ordinary notifications by hidden=false");
-    let records:Vec<HashMap<String,OwnedValue>>=
-        ctl.call("ListNotifications",&()).await?;
-    assert_eq!(records.len(),3);
-    // Mako config.c's built-in [grouped] rule hides secondary
-    // members, and [group-index=0] restores the leader's visibility.
-    // All three remain active for D-Bus/group operations, but only
-    // the group's leader occupies the one max-visible slot.
-    let visible=posthorn::desktop::visible_notifications(&runtime)?;
-    assert_eq!(visible.len(),1);
-    assert_eq!(visible[0].id,c);
-    // No renderer-only hidden object should enter the D-Bus list.
-    assert_eq!(runtime.store.lock().unwrap().active().len(),3);
-    Ok(())
-}
-
-#[tokio::test]
 async fn scoped_group_dismissal_uses_selected_notification_criteria_over_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {

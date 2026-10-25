@@ -2206,58 +2206,31 @@ acceptance remains 51% and T504 production cutover remains 0%.
 No private config, production session bus or installed Mako
 was accessed or changed.
 
-## Mako's valid group-by hidden field
+## Correction: hidden is NOT a Mako v1.11.0 group-by field
 
-Pinned Mako v1.11.0 `types.c:parse_criteria_spec` accepts
-`hidden` as a group-by field, and
-`criteria.c:validate_criteria` (lines 552-568) rejects only
-`group-index`, `grouped`, `anchor`, and `output` in
-`group-by` specs. On matching,
-`criteria.c:create_criteria_from_notification` copies
-`notif->hidden`, while `match_criteria` compares the target
-and candidate flags. The renderer's temporary
-`hidden=true` overflow notification is **not** part of
-`state->notifications`; persistent regular notifications
-have `hidden=false`. Consequently, `group-by=hidden`
-groups ordinary active notifications together, while
-`group-by=app-name,hidden` groups by app name as normal.
-Mako's built-in `[grouped]` rule hides the secondary
-members, and its `[group-index=0]` rule makes the
-leader visible again.
+Source re-audit on 2026-10-25 identified a mistake in an
+earlier accepted parity claim. In pinned upstream
+`types.c:parse_criteria_spec` (lines 181-230),
+`hidden` is **absent** from the complete set of recognized
+grouping field names; an unknown token returns `false`.
+`criteria.c:parse_criteria` separately accepts `[hidden]`
+as a **selector**. `criteria.c:validate_criteria` checks
+that selected **already parsed** grouping fields are
+compatible, but it does not expand which fields may parse.
 
-Posthorn's `src/config.rs` previously omitted `hidden` from
-the valid group-by field list and `src/grouping.rs` rejected it.
-Now both accept it, with `GroupField::Hidden` representing
-the persistent active-notification value `false`. Existing
-`none` short-circuiting and duplicate-token elimination
-are preserved; forbidden layout-dependent group keys are
-still rejected. No render-only placeholder is incorrectly
-inserted into active grouping.
+The earlier change 7aaab59/87a5422 incorrectly accepted
+`group-by=hidden` and added a passing D-Bus regression
+that tested non-upstream behavior. The corrected implementation
+removes `GroupField::Hidden`, rejects `group-by=hidden`
+and its combinations in configuration and grouping parsing,
+and adds negative regression tests grounded in the pinned
+`types.c` parser. Its former positive test is removed.
+The green CI run 40155658468 proves the former code compiled
+and worked as its incorrect test expected; it is **not**
+evidence of Mako compatibility for this behavior. Earlier
+source-baseline claims for this field are superseded.
 
-[Implementation and test commit 7aaab59](https://github.com/sguzman/posthorn/commit/7aaab5922f07bbddf1adc307c770642a4f831883)
-adds config acceptance for `hidden` and combinations,
-group projection/same-group unit tests across different
-apps, and a private D-Bus Notify test checking persistent
-group indices and active list. Its original CI
-[run 40155275174](https://github.com/sguzman/posthorn/actions/runs/40155275174)
-failed a **test-only** assertion that all three members
-would be visible; pinned Mako's built-in grouped styling
-actually displays only the leader.
-[Corrected acceptance commit 87a5422](https://github.com/sguzman/posthorn/commit/87a5422b56a25cb69b29deaada3ee2f5de4faf1e)
-checks that the active list contains all three, the group
-indices are 0/1/2 and only the leader is displayed.
-
-[GitHub Actions run 40155433973](https://github.com/sguzman/posthorn/actions/runs/40155433973)
-passed both mandatory jobs at `87a5422`: 306 Rust
-library tests, 77 isolated private D-Bus integration
-tests, plus 1x, fractional 1.25x, 2x HiDPI, 9x, mixed
-output and input acceptance under isolated Sway.
-The earlier red run is retained as discovery evidence
-rather than accepted QA.
-
-**T103 79% -> 80% (+1pp); P1 remains 91% (0pp);
-strict M0 remains 89% (0pp).** Other option/regex and
-grouping parity gaps remain, so no broad 100% claim.
-T503 physical Hyprland remains 51% and T504 production
-cutover remains 0%. Live Mako, the user's notification
-bus and Hyprland configuration were untouched.
+The previously awarded progress point has been withdrawn:
+**T103 80% -> 79% (-1pp correction), P1 91% (0pp), M0 89% (0pp).**
+No real Mako service, workstation bus or Hyprland session
+was used.
