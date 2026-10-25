@@ -44,6 +44,33 @@ impl<'de> Deserialize<'de> for OrderedNotifyHints{
     }
 }
 
+/// Mako v1.11 dbus/xdg.c copies exactly image_len sender bytes before
+/// accepting a Notify: (height-1)*rowstride + width*ceil(channels*bits/8).
+/// A short array makes sd_bus_message_read("y") fail and aborts Notify,
+/// even if a subsequent alias carries a well-formed image-data payload.
+/// This is wire validation, NOT GdkPixbuf's RGB/RGBA decode validation:
+/// unsupported-but-complete pixel layouts may still be accepted with no icon.
+fn image_hint_has_complete_payload(
+    data:&(i32,i32,i32,bool,i32,i32,Vec<u8>)
+)->bool{
+    let (Ok(width),Ok(height),Ok(stride),Ok(bits),Ok(channels))=(
+        usize::try_from(data.0),
+        usize::try_from(data.1),
+        usize::try_from(data.2),
+        usize::try_from(data.4),
+        usize::try_from(data.5),
+    )else{return false};
+    if width==0||height==0||bits==0||channels==0{return false;}
+    let Some(required)=channels.checked_mul(bits)
+        .and_then(|bit_count|bit_count.checked_add(7))
+        .map(|bit_count|bit_count/8)
+        .and_then(|bytes_per_pixel|width.checked_mul(bytes_per_pixel))
+        .and_then(|last_row|(height-1).checked_mul(stride)
+            .and_then(|previous|previous.checked_add(last_row)))
+    else{return false};
+    required<=data.6.len()
+}
+
 fn hint_has_valid_type(name:&str,value:&OwnedValue)->bool{
     match name {
         "category"|"desktop-entry"|"image-path"|"image_path"
@@ -56,7 +83,7 @@ fn hint_has_valid_type(name:&str,value:&OwnedValue)->bool{
         "image-data"|"image_data"|"icon_data"=>{
             let tuple:Option<(i32,i32,i32,bool,i32,i32,Vec<u8>)>=
                 value.try_clone().ok().and_then(|v|v.try_into().ok());
-            tuple.is_some()
+            tuple.as_ref().is_some_and(image_hint_has_complete_payload)
         }
         _=>true,
     }
@@ -542,6 +569,50 @@ mod tests {
         svc.apply_notify("sender",id,"argument-icon","Fourth","",
             Vec::new(),HashMap::new(),-1).unwrap();
         assert_eq!(svc.store.lock().unwrap().active()[0].app_icon,"argument-icon");
+    }
+
+    #[test]
+    fn truncated_image_data_rejects_notify_before_id_or_replacement_side_effects(){
+        use zbus::zvariant::Value;
+        let service=service();
+        let initial=service.apply_notify(
+            "sender",0,"","Original","",Vec::new(),HashMap::new(),-1
+        ).unwrap();
+        let bad=|(bytes:Vec<u8>,bits:i32,channels:i32)|{
+            let tuple=(2i32,2i32,8i32,true,bits,channels,bytes);
+            OwnedValue::try_from(Value::from(tuple)).unwrap()
+        };
+        // Required 8 + 2*4 = 16 bytes; only 15 arrived. Mako's
+        // per-byte D-Bus read fails before its normal Notify reply.
+        for alias in ["image-data","image_data","icon_data"] {
+            let hints=HashMap::from([(alias.to_owned(),bad(vec![0;15],8,4))]);
+            assert!(matches!(service.apply_notify(
+                "sender",initial,"","Replacement","",Vec::new(),hints,-1
+            ),Err(zbus::fdo::Error::InvalidArgs(_))),
+                "truncated {alias} must abort the entire Notify");
+            let store=service.store.lock().unwrap();
+            assert_eq!(store.active().len(),1);
+            assert_eq!(store.active()[0].id,initial);
+            assert_eq!(store.active()[0].summary,"Original");
+        }
+        // Earlier invalid aliases cannot be masked by a valid later one.
+        let ordered=OrderedNotifyHints(vec![
+            ("image-data".into(),bad(vec![0;15],8,4)),
+            ("image_data".into(),bad(vec![0;16],8,4)),
+        ]);
+        assert!(ordered.into_effective_map().is_err());
+        // Non-eight-bit samples can be complete on the wire but fail
+        // GdkPixbuf later. Mako still accepts the notification itself.
+        let unsupported=bad(vec![0;24],16,4);
+        // 8 prior row bytes + 2*8 final row bytes = 24.
+        assert!(hint_has_valid_type("image-data",&unsupported));
+        assert!(!hint_has_valid_type("image-data",&bad(vec![0;23],16,4)));
+        let id=service.apply_notify(
+            "sender",0,"","Unsupported pixels","",Vec::new(),
+            HashMap::from([("image-data".into(),unsupported)]),-1
+        ).unwrap();
+        assert!(service.store.lock().unwrap().active().iter()
+            .find(|n|n.id==id).unwrap().image_data.is_none());
     }
 
     #[test]
