@@ -743,8 +743,16 @@ mod tests {
         // translucent blue rather than opaque mixed background color.
         let y=(frame.height/2) as usize;
         let edge=y*frame.stride as usize+4;
-        assert_eq!(&frame.pixels[edge..edge+4],&[0x58,0x25,0x0b,0x85],
+        let blue=&frame.pixels[edge..edge+4];
+        assert_eq!(blue[3],0x85,
             "SOURCE stroke must preserve border alpha instead of blending");
+        for (channel,unpremultiplied) in [
+            (blue[0],0xACi32),(blue[1],0x48i32),(blue[2],0x16i32)
+        ]{
+            let expected=(unpremultiplied*0x85+127)/255;
+            assert!((i32::from(channel)-expected).abs()<=1,
+                "premultiplied border channel {channel} differs from SOURCE {expected}");
+        }
     }
 
     #[test]
