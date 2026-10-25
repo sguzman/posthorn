@@ -165,10 +165,12 @@ fn hit_test_impl(
 async fn closed(conn:&Connection,runtime:&SharedRuntime,id:u32,history:bool)
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
-    if runtime.close(id,CloseReason::Dismissed,history)? {
+    if let Some(changed)=runtime.close_with_change(
+        id,CloseReason::Dismissed,history
+    )? {
         conn.emit_signal(None::<&str>,OBJECT_PATH,BUS_NAME,
             "NotificationClosed",&(id,CloseReason::Dismissed as u32)).await?;
-        crate::signals::invalidate(conn,"Notifications").await?;
+        if changed{crate::signals::invalidate(conn,"Notifications").await?;}
     }
     Ok(())
 }
@@ -179,11 +181,13 @@ async fn closed(conn:&Connection,runtime:&SharedRuntime,id:u32,history:bool)
 /// Keep the established per-ID signal/invalidation sequence afterward.
 fn close_selected(
     runtime:&SharedRuntime,ids:impl IntoIterator<Item=u32>,history:bool
-)->Result<Vec<u32>,String>{
+)->Result<Vec<(u32,bool)>,String>{
     let mut removed=Vec::new();
     for id in ids {
-        if runtime.close(id,CloseReason::Dismissed,history)? {
-            removed.push(id);
+        if let Some(changed)=runtime.close_with_change(
+            id,CloseReason::Dismissed,history
+        )? {
+            removed.push((id,changed));
         }
     }
     Ok(removed)
@@ -194,10 +198,10 @@ async fn closed_many(
     history:bool,
 )->Result<(),Box<dyn std::error::Error+Send+Sync>>{
     let removed=close_selected(runtime,ids,history).map_err(error)?;
-    for id in removed {
+    for (id,changed) in removed {
         conn.emit_signal(None::<&str>,OBJECT_PATH,BUS_NAME,
             "NotificationClosed",&(id,CloseReason::Dismissed as u32)).await?;
-        crate::signals::invalidate(conn,"Notifications").await?;
+        if changed{crate::signals::invalidate(conn,"Notifications").await?;}
     }
     Ok(())
 }
@@ -293,13 +297,10 @@ pub fn can_invoke_action(runtime:&SharedRuntime,id:u32,key:&str)->io::Result<boo
 /// replace the same public ID after ActionInvoked but before dismissal.
 fn prepare_invocation(
     runtime:&SharedRuntime,id:u32,key:&str,
-)->Result<Option<bool>,String>{
+)->Result<Option<(bool,bool)>,String>{
     let allowed=can_invoke_action(runtime,id,key).map_err(|e|e.to_string())?;
-    if runtime.close(id,CloseReason::Dismissed,true)? {
-        Ok(Some(allowed))
-    }else{
-        Ok(None)
-    }
+    Ok(runtime.close_with_change(id,CloseReason::Dismissed,true)?
+        .map(|changed|(allowed,changed)))
 }
 
 async fn invoke(conn:&Connection,runtime:&SharedRuntime,id:u32,key:&str,
@@ -309,7 +310,7 @@ async fn invoke(conn:&Connection,runtime:&SharedRuntime,id:u32,key:&str,
     // The notification must be removed before yielding for any signal.
     // Signal order still matches Mako: ActivationToken, ActionInvoked,
     // NotificationClosed, then the control properties invalidation.
-    let Some(allowed)=prepare_invocation(runtime,id,key).map_err(error)?
+    let Some((allowed,changed))=prepare_invocation(runtime,id,key).map_err(error)?
         else{return Ok(())};
     if allowed {
         if let Some(token)=activation_token.filter(|token|!token.is_empty()) {
@@ -321,7 +322,7 @@ async fn invoke(conn:&Connection,runtime:&SharedRuntime,id:u32,key:&str,
     }
     conn.emit_signal(None::<&str>,OBJECT_PATH,BUS_NAME,
         "NotificationClosed",&(id,CloseReason::Dismissed as u32)).await?;
-    crate::signals::invalidate(conn,"Notifications").await?;
+    if changed{crate::signals::invalidate(conn,"Notifications").await?;}
     Ok(())
 }
 
