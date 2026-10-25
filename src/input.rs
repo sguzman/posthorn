@@ -361,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn themed_hidpi_icon_aspect_changes_hotspot_and_hit_test_height(){
+    fn themed_hidpi_icon_scale_is_frozen_at_notify_for_hit_testing(){
         let dir=tempfile::tempdir().unwrap();
         // The theme directory's nominal size must equal max-icon-size to
         // select the @2 exact match under pinned Mako's icon resolver.
@@ -409,15 +409,16 @@ mod tests {
             "Wayland logical hotspot must equal the selected themed frame height");
         assert_eq!((high[0].height as u32)*2,rendered_2x_with_2x_icon.height,
             "physical 2x buffer size must not distort logical hit testing");
-        assert!(high[0].height>low[0].height,
-            "the selected 2x icon is much taller than the 1x theme asset");
+        assert_eq!(high[0].height,low[0].height,
+            "Mako creates the icon once at Notify; changing monitor scale must not reload it");
         let bottom_click=click((high[0].x+2) as f64,
             (high[0].y+high[0].height-1) as f64,273);
-        assert!(hit_test_with_icon_scale(&runtime,bottom_click,1)
-            .unwrap().is_none(),"1x height must exclude the 2x-only bottom");
+        assert_eq!(hit_test_with_icon_scale(&runtime,bottom_click,1)
+            .unwrap().unwrap().0,id,
+            "1x and 2x hit-testing must target the same retained icon height");
         assert_eq!(hit_test_with_icon_scale(&runtime,bottom_click,2)
             .unwrap().unwrap().0,id,
-            "2x hit test must use the same height as the 2x frame renderer");
+            "2x hit test must use the same retained icon as the frame renderer");
     }
 
     #[test]
