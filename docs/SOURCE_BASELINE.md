@@ -2159,3 +2159,49 @@ hidden layout remains 99%. No further atomic-task completion is
 claimed from this one fix; P2 remains 97% (0pp) and strict M0
 remains 89% (0pp). Exact hardware/event-loop scheduling,
 physical Hyprland T503 (51%) and T504 cutover (0%) remain open.
+
+## Percent-decoded NUL in Mako file-URI icon names
+
+Pinned Mako v1.11.0 `icon.c:url_decode` copies each correctly
+encoded `%xx` byte into a conventional NUL-terminated C filename.
+`resolve_icon` passes that filename to `load_image`, which uses
+`strlen(path)` and `gdk_pixbuf_new_from_file`. A `%00`
+therefore terminates the filename **at that byte**; later apparent
+URI characters are ignored. If it is the first byte, `load_image`
+rejects the resulting empty path. An ordinary raw `%nothex`
+sequence is still copied literally, and non-UTF-8 decoded bytes
+remain legal Linux filename bytes.
+
+Posthorn's earlier `src/icons.rs:url_decode` rejected the entire
+path on `%00`. Its Rust decoder now truncates to the preceding
+byte prefix, which is passed through a Linux `OsString`, and
+returns no resolved icon for an empty resulting filename. This
+does not change the already-permitted absolute/relative
+`file://` path policy or the strict unprefixed theme-name
+validation. The decoder does **not** introduce an embedded NUL
+into a Rust `Path`: it stores only the C-observable prefix.
+
+[Decoder commit baa00cc](https://github.com/sguzman/posthorn/commit/baa00ccab2ee1898f05a3381ddb6e43adddc3c45)
+and [GdkPixbuf test f999676](https://github.com/sguzman/posthorn/commit/f999676da77eb8ab3f179ef27c4cd10a0d715613)
+cover `file:///tmp/example.png%00ignored`,
+the empty-result case, non-UTF-8 suffix avoidance and a real
+temporary PNG read from its truncated file URL.
+[Private D-Bus/Cairo regression 5d35870](https://github.com/sguzman/posthorn/commit/5d35870aec87cddfa9f40e31ad992748ccae8502)
+sends `image-path=file://<fixture>.png%00not-the-real-filename`
+over the isolated service, verifies the unmodified original hint
+and detects the correctly loaded PNG's opaque red pixels in the
+rendered Cairo frame.
+
+[GitHub Actions run 40154710747](https://github.com/sguzman/posthorn/actions/runs/40154710747)
+is **green** for both required jobs at commit `5d35870`:
+305 Rust library tests and 76 isolated private D-Bus tests passed,
+as did the existing 1x, fractional, HiDPI, 9x, mixed-output and
+compositor input acceptance suite. Earlier implementation
+revisions are superseded; only the final green run is counted.
+
+**T402 remains 99% (0pp)**; passing a path-decoding test does
+not establish full text/icon compositor parity. P4 remains 99%
+(0pp), strict M0 remains 89% (0pp), T503 physical Hyprland
+acceptance remains 51% and T504 production cutover remains 0%.
+No private config, production session bus or installed Mako
+was accessed or changed.
