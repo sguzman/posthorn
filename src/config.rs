@@ -1952,8 +1952,8 @@ mod tests {
         let home=tempfile::tempdir().unwrap();
         let root=home.path().join("root.conf");
         let child=home.path().join("child.conf");
-        std::fs::write(&child,"width=453\\n").unwrap();
-        std::fs::write(&root,"include=~//child.conf\\nheight=113\\n").unwrap();
+        std::fs::write(&child,"width=453\n").unwrap();
+        std::fs::write(&root,"include=~//child.conf\nheight=113\n").unwrap();
         let output=std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact","config::tests::mako_tilde_include_extra_separator_loads_beneath_home","--nocapture"])
             .env(CHILD,"1").env(ROOT,root.as_os_str())
