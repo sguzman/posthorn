@@ -647,8 +647,14 @@ fn initialize_icon_creation_scale(runtime:&SharedRuntime)->io::Result<()>{
     // Preparing a temporary registry-only presenter avoids a race where
     // the first private D-Bus message arrives before the render loop starts.
     // No layer surface is created and the real session is never touched.
-    let presenter=LivePresenter::connect().map_err(other)?;
-    runtime.set_icon_creation_scale(presenter.maximum_output_scale());
+    let mut presenter=LivePresenter::connect().map_err(other)?;
+    // Two compositor event barriers let wl_output scale notifications
+    // settle even when the output layout changed just before process start.
+    // Do not accept Notify while the initial monitor-scale snapshot is stale.
+    presenter.poll_events().map_err(other)?;
+    let scale=presenter.maximum_output_scale();
+    eprintln!("Posthorn initial compositor maximum icon scale: {scale}");
+    runtime.set_icon_creation_scale(scale);
     Ok(())
 }
 

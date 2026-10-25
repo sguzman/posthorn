@@ -45,6 +45,18 @@ done
 swaymsg -s "$ipc" 'output HEADLESS-1 pos 0 0' >/dev/null
 swaymsg -s "$ipc" 'output HEADLESS-2 pos 1280 0' >/dev/null
 swaymsg -s "$ipc" 'output HEADLESS-2 scale 2' >/dev/null
+# This is the compositor's actual output state, not a desired config name.
+# Ensure the test itself does not race swaymsg's asynchronous output event.
+for _ in {1..50}; do
+  swaymsg -s "$ipc" -t get_outputs >"$root/output-state.json"
+  if grep -q '"scale": 2' "$root/output-state.json"; then break; fi
+  sleep 0.1
+done
+grep -q '"scale": 2' "$root/output-state.json" || {
+  echo 'Sway did not enter the requested scale-2 output state'
+  cat "$root/output-state.json"
+  exit 1
+}
 POSTHORN_HEADLESS_ICON_TEST=1 ./target/debug/examples/qa_icon_theme "$root/icons"
 cat >"$root/mixed.conf" <<EOF_CONFIG
 width=180
