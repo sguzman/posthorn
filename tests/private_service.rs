@@ -1261,6 +1261,42 @@ async fn compositor_output_changes_reselect_history_over_private_dbus()
 }
 
 #[tokio::test]
+async fn blank_output_selector_waits_for_real_compositor_enter_over_private_dbus()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Mako criteria.c refuses output= selectors if notif->surface is
+    // NULL OR its surface_output is NULL, even for the empty string.
+    let (conn,runtime)=open_private_service(Config::parse(
+        "default-timeout=0\n[output=]\ndefault-timeout=450\n"
+    )?).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let notify=|replace:u32|(
+        "blank-output-regression".to_owned(),replace,"",
+        "Notification","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    );
+    let id:u32=desktop.call("Notify",&notify(0)).await?;
+    assert!(runtime.store.lock()?.active()[0].surface_associated);
+    assert_eq!(runtime.next_deadline()?,None,
+        "a fresh unassociated note must not match output=");
+    let replaced:u32=desktop.call("Notify",&notify(id)).await?;
+    assert_eq!(replaced,id);
+    assert_eq!(runtime.next_deadline()?,None,
+        "a surface with no wl_surface.enter output must not match output=");
+    // This deliberately simulates a real compositor-enter observation,
+    // not a configured target monitor. An empty name is representable.
+    runtime.set_surface_output(Some(""))?;
+    let _:u32=desktop.call("Notify",&notify(id)).await?;
+    assert!(runtime.next_deadline()?.is_some(),
+        "output= may match an actual entered output whose name is empty");
+    runtime.set_surface_output(Some("HEADLESS-1"))?;
+    let _:u32=desktop.call("Notify",&notify(id)).await?;
+    assert_eq!(runtime.next_deadline()?,None,
+        "an entered nonempty output must never match output=");
+    Ok(())
+}
+
+#[tokio::test]
 async fn separate_notification_output_matches_do_not_bleed_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
