@@ -192,11 +192,15 @@ pub fn resolve_icon_scaled(
         for first in first_levels.flatten(){
             if !first.path().is_dir(){continue;}
             let first_name=first.file_name().to_string_lossy().into_owned();
+            // Mako uses glob(root/*/*/name.*, GLOB_NOSORT), without
+            // GLOB_PERIOD: wildcard directory components exclude dotnames.
+            if first_name.starts_with('.') {continue;}
             let Ok(second_levels)=fs::read_dir(first.path()) else{continue};
             for second in second_levels.flatten(){
                 let path=second.path();
                 if !path.is_dir(){continue;}
                 let second_name=second.file_name().to_string_lossy().into_owned();
+                if second_name.starts_with('.') {continue;}
                 for file in icon_files(&path,name){
                     let Some(file_name)=file.file_name() else{continue};
                     let file_name=file_name.to_string_lossy();
@@ -535,6 +539,29 @@ mod tests {
             Some(expected.clone()),"first exact match wins without sorting");
         assert_eq!(resolve_icon_scaled("posthorn",root.path().to_str().unwrap(),128,1),
             Some(expected),"equal-size fallback must keep the first match");
+    }
+
+    #[test]
+    fn theme_glob_does_not_enter_hidden_wildcard_directories(){
+        // Upstream icon.c uses glob("%s/*/*/%s.*", GLOB_NOSORT).
+        // Without GLOB_PERIOD, neither wildcard matches a dot-prefixed
+        // directory, even if it contains an exact-sized icon.
+        let root=tempfile::tempdir().unwrap();
+        let name="posthorn-dotglob-fixture";
+        for relative in [
+            ".private/64x64",
+            "64x64/.private",
+        ] {
+            let folder=root.path().join(relative);
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join(format!("{name}.png")),b"hidden").unwrap();
+        }
+        let visible=root.path().join("48x48/apps");
+        fs::create_dir_all(&visible).unwrap();
+        fs::write(visible.join(format!("{name}.png")),b"visible").unwrap();
+        assert_eq!(resolve_icon_scaled(name,root.path().to_str().unwrap(),64,1),
+            Some(visible.join(format!("{name}.png"))),
+            "Mako must skip hidden glob directories and use a visible fallback");
     }
 
     #[test]
