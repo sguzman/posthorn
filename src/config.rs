@@ -102,6 +102,44 @@ fn decode_mako_file_bytes(bytes:&[u8],source:&str)->Result<String,ConfigError>{
     Ok(text)
 }
 
+/// A conservative source-syntax guard for C-locale glibc POSIX ERE
+/// hyphen ranges. In a *simple* ASCII alphanumeric/dash class,
+/// repeated '--' AFTER the optional initial hyphen run means an
+/// invalid range end: [a--z], [a-z--], [-a--]. A leading run up to
+/// three hyphens may instead encode valid literal/range atoms,
+/// e.g. [--a] and [---a]; [----] alone is also valid.
+/// Brackets with other operators/escapes/POSIX elements are left to
+/// their dedicated normalization passes and regex compilation.
+fn mako_posix_reject_simple_invalid_dash_ranges(pattern:&str)->Result<(),String>{
+    let mut chars=pattern.chars().peekable();
+    while let Some(ch)=chars.next(){
+        match ch {
+            '\\' => { chars.next(); }
+            '[' => {
+                let mut contents=String::new();
+                let mut closed=false;
+                for part in chars.by_ref(){
+                    if part==']'{closed=true;break;}
+                    contents.push(part);
+                }
+                if !closed { continue; } // Other POSIX syntax checks this.
+                let class=contents.strip_prefix('^').unwrap_or(&contents);
+                if class.is_empty() || !class.chars().all(|c|
+                    c.is_ascii_alphanumeric() || c=='-'){
+                    continue;
+                }
+                let head=class.bytes().take_while(|byte|*byte==b'-').count();
+                let rest=&class[head..];
+                if (head>=4 && !rest.is_empty()) || rest.contains("--"){
+                    return Err("invalid glibc POSIX repeated-hyphen range".into());
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// C-locale glibc accepts a POSIX bracket made entirely of one to four
 /// hyphens, all meaning literal '-'. Five or more are REG_ERANGE. Rust
 /// regex's class subtraction syntax gives some of these a different
@@ -894,6 +932,7 @@ impl Selector {
             if has_rust_only_posix_class(value) {
                 return Err("glibc POSIX ERE does not recognize this bracket class".into());
             }
+            mako_posix_reject_simple_invalid_dash_ranges(value)?;
             let backslashes=mako_posix_c_class_backslashes(value);
             // This pass recognizes the escaped initial '-' emitted by the
             // C-class-backslash normalizer. Running it earlier would make
@@ -2241,6 +2280,41 @@ mod tests {
         assert_eq!(config.style_for(&fields)["width"],"463");
         fields.summary="a(";
         assert_eq!(config.style_for(&fields)["width"],"300");
+    }
+
+    #[test]
+    fn glibc_invalid_repeated_dash_ranges_reject_simple_brackets(){
+        // Probed against native glibc C-locale REG_EXTENDED|REG_NOSUB.
+        // Reject source-invalid range endpoints even if Rust regex's
+        // character-class set algebra could otherwise interpret them.
+        for source in [
+            "[a--z]", "[a-z--]", "[-a--]", "[----a]",
+            "[^----a]", "[ab--c]", "[0--9]", "[a---]",
+            "[--a--]",
+        ]{
+            assert!(mako_posix_reject_simple_invalid_dash_ranges(source).is_err(),
+                "glibc rejects source bracket {source:?}");
+            assert!(Selector::new("summary~",source).is_err());
+            assert!(Config::parse(&format!(
+                "[body~={source}]\nwidth=469\n")).is_err());
+        }
+        for source in [
+            "[--a]", "[---a]", "[^---a]", "[--a-]",
+            "[-a-]", "[----]", "[^----]", "[a-z-]",
+            "[a-b]", "[abc]", "[-ab]", "[[:digit:]]",
+            r"[\--a]", // complex source class: other passes decide
+        ] {
+            assert!(mako_posix_reject_simple_invalid_dash_ranges(source).is_ok(),
+                "don't over-reject valid or complex source {source:?}");
+        }
+        let mut note=note("normal",&["default"]);
+        let bracket=Selector::new("summary~","^[---a]$").unwrap();
+        note.summary="-";
+        assert!(bracket.matches(&note));
+        note.summary="a";
+        assert!(bracket.matches(&note));
+        note.summary="z";
+        assert!(!bracket.matches(&note));
     }
 
     #[test]
