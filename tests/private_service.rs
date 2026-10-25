@@ -406,7 +406,7 @@ async fn icon_visibility_modes_keep_initial_icon_absence_and_retained_file_pixel
     let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
     let notify=|summary:&str|(
         "mode-icon-fixture",0u32,png.to_str().unwrap(),
-        summary,"",Vec::<String>::new(),
+        summary.to_owned(),"",Vec::<String>::new(),
         HashMap::<String,OwnedValue>::new(),-1i32
     );
 
