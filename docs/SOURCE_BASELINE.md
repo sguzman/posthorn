@@ -2604,3 +2604,68 @@ but displays as **89% (+0 whole-number pp)**.
 Physical Hyprland remains **51% (+0 pp)** and production
 cutover **0% (+0 pp)**. Real Mako, Wayland compositor and
 notification bus were not accessed.
+
+## Mako notification closure: history-gated Notifications property invalidation (2026-10-25)
+
+Pinned Mako v1.11.0 `notification.c:close_notification` invokes
+`notify_notification_closed(notif, reason)` **before** checking
+whether the active notification's resolved `style.history` is disabled
+or `config.max_history <= 0`. When either is disabled, it calls
+`destroy_notification` and **returns early**, bypassing
+`emit_notifications_changed(state)` at the bottom of that function.
+That last call emits `PropertiesChanged` invalidating the Mako control
+interface's `Notifications` property. The ordinary freedesktop
+`NotificationClosed` signal nevertheless **always fires** for the
+actual close. By contrast, an explicit `dismiss --no-history` with
+`history=1` and positive `max-history` still reaches the invalidation
+path: `add_to_history=false` suppresses archiving, not the signal.
+
+Posthorn previously invalidated `Notifications` unconditionally on
+every closed notification, including `history=0` and
+`max-history=0`. It now reports both the closure and the
+source-dependent invalidation decision, with the same policy applied
+consistently to:
+
+- the freedesktop `CloseNotification` D-Bus method;
+- Mako control `DismissNotifications` (single, group, all,
+  and `history=false`);
+- touch/pointer/action and `on-notify` binding dismissal; and
+- timer-driven `NotificationClosed` expiration.
+
+The runtime keeps existing backward-compatible `close()` and
+`expire()` APIs; new `close_with_change()` and
+`expire_with_changes()` expose the D-Bus invalidation decision
+without allowing D-Bus signal emission inside a synchronous
+notification-store lock. No signals are emitted for a second close
+of an inactive ID. The change does **not** suppress ordinary
+`NotificationClosed` or change history eligibility, grouping,
+timeouts, or visible raster output.
+
+Acceptance includes unit tests for `history=0`,
+`max-history=0`, regular history-enabled close, explicit
+no-history dismissal, positive and negative expiration cases,
+and a real **private** D-Bus signal subscription proving:
+
+1. `Notify` emits the normal initial `Notifications` invalidation.
+2. `history=0` `CloseNotification` emits `NotificationClosed`
+   with reason 3 but no second `Notifications` invalidation.
+3. A category-scoped `history=1` close emits both.
+4. A control dismissal using `history=false` still invalidates but
+   does not archive that notification.
+
+- [Pinned source: notification.c close_notification](https://github.com/emersion/mako/blob/v1.11.0/notification.c#L109-L147)
+- [Pinned source: control property invalidation](https://github.com/emersion/mako/blob/v1.11.0/dbus/mako.c#L479-L495)
+- [Runtime implementation acd1d16](https://github.com/sguzman/posthorn/commit/acd1d166b9f0a450bc78e27de12b6ff120a63249)
+- [Private D-Bus regression c82e4cb](https://github.com/sguzman/posthorn/commit/c82e4cb5d55539833f6d2b283c2ff5355cb6c362)
+- [Complete accepted CI 40213713610](https://github.com/sguzman/posthorn/actions/runs/40213713610):
+  **320 Rust library tests**, **85 isolated private D-Bus tests**,
+  and **full isolated headless Wayland acceptance**, all passing.
+
+Accepted progress: **T302 98% → 99% (+1 pp)**,
+**P3 94% → 95% (+1 pp)**. The 24-task strict MVP average
+changes from **89.208% to 89.250%**; its rounded display
+remains **89% (+0 whole-number pp)**. Physical Hyprland
+acceptance remains **51%** and production cutover remains
+**0%**. All D-Bus and compositor tests were isolated; installed
+Mako, the desktop notification bus, and Hyprland settings
+were never touched.
