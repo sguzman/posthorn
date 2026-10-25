@@ -2883,3 +2883,64 @@ formatting, actions, physical Hyprland, or opt-in cutover
 acceptance. T503 remains **51%** and T504 **0%**.
 No installed Mako, production D-Bus notification owner
 or personal Hyprland configuration was accessed.
+
+## Conditional Mako rounded-corner popup height (2026-10-25)
+
+Pinned Mako v1.11.0 `render.c:199-213` computes the current
+notification height from the clamped Pango text height, actual
+rendered icon, border widths and signed vertical padding.
+It then evaluates **two sequential conditionals**:
+
+1. **Only if** the current height is **strictly less** than
+   `radius_top_left + radius_bottom_left`, set it to that
+   pair's radius sum **plus twice the configured border width**.
+2. **Only if** the current (possibly already expanded) height is
+   **strictly less** than `radius_top_right + radius_bottom_right`,
+   set it to that pair's sum plus both border widths.
+
+Posthorn previously used an unconditional
+`max(measured_height, max(corner_pair_sums) + 2*border)`.
+This is **not equivalent**. For `border-size=4`,
+`border-radius=7`, empty text and vertical `padding=3`,
+the Pango-measured height is exactly **14 px**, equal to the
+corner sum. Mako leaves the result at **14 px** while the
+old Posthorn logic made it **22 px**. The incorrect extra height
+changes popup layout, grouping offsets, background shape and
+pointer hitbox geometry. The conditionals also have meaningful
+order with unequal pairs: with left radius sum 10, right sum 18,
+border 4 and base height 8, Mako first expands to 18 and the
+second check does nothing, rather than automatically expanding
+to 26.
+
+Posthorn now uses
+`CornerRadii::adjust_height(current_height, border)` with both
+source-order strict-comparison branches. The old unconditional
+`required_height` calculation was removed. No safety cap,
+source border-painting, notification behavior or compositor
+configuration was changed.
+
+The regression suite tests every integer boundary around the
+radius sum (base heights 8, 12, 13, 14, 15, 16, 21, 22, 25),
+both unequal-pair ordering cases, and end-to-end raster
+measurement **and** rendering for empty notifications at
+vertical padding 2, 3, 4, 6 and 7. This demonstrates the
+visible geometry discrepancy, not just a helper-method
+assertion.
+
+- [Pinned Mako source: `render.c:199-213`](https://github.com/emersion/mako/blob/v1.11.0/render.c#L199-L213)
+- [Conditional geometry implementation 2fe078f](https://github.com/sguzman/posthorn/commit/2fe078f603ebffe13e9d230c7c1c6d67559c59b4)
+- [Asymmetric boundary and rendered height regressions cc7bc19](https://github.com/sguzman/posthorn/commit/cc7bc19b4bee224c380161dabb9fc592062acd7e)
+- [Full green CI 40221519045](https://github.com/sguzman/posthorn/actions/runs/40221519045):
+  **323 Rust library tests, 89 isolated private D-Bus tests,
+  and the complete headless Wayland suite passed**.
+
+**Accepted progress:** T105 **87% → 88% (+1 pp)**,
+P1 raw average **91.600% → 91.800%**
+(displayed **92% → 92%**), strict 24-task M0 average
+**89.333% → 89.375% (+0.042 pp raw)**,
+displayed **89% → 89%**. Physical Hyprland
+T503 remains **51%**, and T504 production cutover
+**0%**, neither credited from isolated CI.
+The real Mako daemon, production notification bus and
+Hyprland configuration remained untouched.
+
