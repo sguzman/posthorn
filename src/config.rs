@@ -1725,7 +1725,7 @@ mod tests {
             (r"^a*+$",vec!["","a","aa","aaaa"],vec!["b","ab"]),
             (r"^a{2}{3}$",vec!["aaaaaa"],vec!["","aa","aaaa","aaaaa"]),
             (r"^a{2}??$",vec!["","aa"],vec!["a","aaa"]),
-            (r"^a{,2}+$",vec!["a","aa","aaa"],vec!["","b","ab"]),
+            (r"^a{,2}+$",vec!["","a","aa","aaa"],vec!["b","ab"]),
         ]{
             let matcher=Selector::new("summary~",pattern)
                 .unwrap_or_else(|e|panic!("glibc accepts {pattern:?}: {e}"));
