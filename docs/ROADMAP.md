@@ -23,11 +23,11 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 📂 T104 — Include files with Mako-compatible path behavior — `█████████░ 88%`
 - 📐 T105 — Type/layout/style parity for all Mako config settings — `█████████░ 86%`
 
-### 📨 P2 — Notification lifecycle and formatting — `██████████ 96%`
+### 📨 P2 — Notification lifecycle and formatting — `██████████ 97%`
 
 - 🆔 T201 — Allocate nonzero IDs, replacement by ID and app-scoped tag — `██████████ 100%`
 - 🗃️ T202 — Bounded in-memory history, close and restore — `██████████ 100%`
-- ⏳ T203 — Timeout selection and timer/event scheduling — `██████████ 98%`
+- ⏳ T203 — Timeout selection and timer/event scheduling — `██████████ 99%`
 - 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `██████████ 99%`
 - 🔤 T205 — Pango markup/escaping, format specifiers and actions — `█████████░ 85%`
 

@@ -1990,3 +1990,62 @@ P1 remains 90% (delta 0pp), strict M0 remains 89%
 remains 84% (delta 0pp); T503 physical Hyprland remains 51%
 and T504 production cutover remains 0%. This does not
 establish full byte-oriented Mako config parity.
+
+## Equal-deadline Mako timer selection and expiry order
+
+Mako v1.11.0 `event-loop.c:update_event_loop_timer` selects the
+earliest deadline using the **strict**
+`timespec_less(&timer->at, &loop->next_timer->at)` comparison.
+It *retains* the previously selected timer when a newly added
+timer has the same absolute deadline. `add_event_loop_timer`
+prepends new entries to the `wl_list`, so only after the chosen
+timer is removed does the remaining scan pick the most recently
+armed timer among those with the same deadline. `destroy_timer`
+invalidates the selected pointer on removal. Sorting tied
+deadlines by notification ID (original Posthorn) is not equivalent.
+
+Posthorn's `src/timers.rs` now keeps a selected timer ID as well
+as a bounded-by-process-life monotonic `u128` arm sequence.
+Insertion with a strictly earlier deadline preempts; an equal
+deadline does not. Cancelling the selected timer or expiring it
+reselects the newest of the remaining minimum-deadline timers.
+Rearming an existing notification destroys the old timer before
+creating a new one. The scheduler retains the existing cancellation,
+expiry and deadline APIs, with the same deterministic behavior
+independently of `HashMap` iteration order.
+
+Unit tests cover equal-deadline selection (first armed, then newest
+remaining), ID independence, cancellation, rearming, earlier-deadline
+preemption, and deadline rollover through notification history. A
+`SharedRuntime` integration regression establishes the *visible*
+ordering of expired notification IDs and history storage, not just
+the scheduler's internal ordering.
+
+Intermediate [run 40146120591](https://github.com/sguzman/posthorn/actions/runs/40146120591)
+was GREEN but tested an overly simple newest-first model that
+failed to account for retention of an already selected timer.
+Subsequent source inspection exposed the discrepancy and the
+intermediate [runs 40146199861](https://github.com/sguzman/posthorn/actions/runs/40146199861)
+and [40146207945](https://github.com/sguzman/posthorn/actions/runs/40146207945)
+were RED in Rust tests while expectations were being corrected.
+Neither is accepted as evidence of correctness.
+
+[Corrected scheduler commit 4fb0bb1](https://github.com/sguzman/posthorn/commit/4fb0bb162c58c0c5310e50f8286bf1f1260bfb49)
+passed both mandatory CI jobs in
+[run 40146219104](https://github.com/sguzman/posthorn/actions/runs/40146219104).
+[Runtime integration commit 9e58623](https://github.com/sguzman/posthorn/commit/9e5862301add3784a4f4c67de5bb7b33222739c4)
+passed both mandatory CI jobs in
+[run 40146392300](https://github.com/sguzman/posthorn/actions/runs/40146392300):
+300 Rust library tests and 73 private D-Bus integration tests passed,
+as did the existing isolated Sway 1x, 1.25x, 2x and 9x compositor,
+multi-output, mixed-DPI, input region and redraw acceptance steps.
+
+**T203 98% -> 99% (+1 percentage point); P2 96% -> 97%
+(+1 percentage point); strict M0 remains 89% (0pp).**
+This is source-backed timer parity, not a claim that every possible
+timer/event-loop interleaving has been accepted: the Rust
+`take_expired` operation gathers due expirations in one pass,
+whereas Mako invokes each timer callback between selections.
+Physical Hyprland T503 remains 51%, and T504 remains 0%.
+No production bus, running Mako, workstation input, or personal
+configuration was accessed.
