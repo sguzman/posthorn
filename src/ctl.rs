@@ -384,12 +384,14 @@ fn selected_action_key(
         .map(|(key,_)|key.clone())
 }
 
-/// Mako's getline() reads the first line as bytes and discards only a
-/// terminal LF. It ignores later stdout, even if that data is not UTF-8.
-/// std::str::lines() would incorrectly remove CR before LF.
+/// Mako's getline() reads the first line as bytes and discards only
+/// a terminal LF. The later strcmp(title,selected_title) stops at the
+/// first embedded NUL; bytes after it are invisible, including invalid
+/// UTF-8. std::str::lines() would also incorrectly remove CR before LF.
 fn mako_menu_selected_line(output:&[u8])->Option<&[u8]>{
     if output.is_empty(){return None;}
-    Some(output.split(|byte|*byte==b'\n').next().unwrap_or(output))
+    let line=output.split(|byte|*byte==b'\n').next().unwrap_or(output);
+    Some(line.split(|byte|*byte==0).next().unwrap_or(line))
 }
 
 /// Pass labels via stdin and read a selection from a user-configured menu
@@ -642,6 +644,10 @@ mod tests {
         assert_eq!(mako_menu_selected_line(b""),None);
         assert_eq!(mako_menu_selected_line(b"\n"),Some(&b""[..]));
         assert_eq!(mako_menu_selected_line(b"Open\n\xff\xfe"),Some(&b"Open"[..]));
+        assert_eq!(mako_menu_selected_line(b"Open\0\xff\xfe\n"),Some(&b"Open"[..]));
+        assert_eq!(mako_menu_selected_line(b"Open\0hidden"),Some(&b"Open"[..]));
+        assert_eq!(mako_menu_selected_line(b"\0garbage\n"),Some(&b""[..]));
+        assert_eq!(mako_menu_selected_line(b"Open\r\0hidden\n"),Some(&b"Open\r"[..]));
         let actions=vec![("chosen".into(),"Open".into())];
         assert!(selected_action_key(&actions,
             std::str::from_utf8(mako_menu_selected_line(b"Open\r\n").unwrap()).unwrap()
@@ -659,6 +665,18 @@ mod tests {
             "printf 'Open\\n\\377\\n'".to_string(),
         ];
         assert_eq!(choose_from_menu(&cmd,&actions).unwrap(),"selected");
+        // Mako's strcmp() sees only the C string preceding NUL,
+        // even if getline() read undecodable bytes after it.
+        let nul_suffix=vec![
+            "sh".to_owned(),"-c".to_owned(),
+            "printf 'Open\\000\\377\\n'".to_owned(),
+        ];
+        assert_eq!(choose_from_menu(&nul_suffix,&actions).unwrap(),"selected");
+        let nul_at_start=vec![
+            "sh".to_owned(),"-c".to_owned(),
+            "printf '\\000Open\\n'".to_owned(),
+        ];
+        assert!(choose_from_menu(&nul_at_start,&actions).is_err());
         // An invalid selected line itself cannot match a UTF-8 action label.
         let invalid=vec![
             "sh".to_string(),"-c".to_string(),
