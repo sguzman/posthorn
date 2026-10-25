@@ -72,14 +72,6 @@ impl CornerRadii {
             bl:f64::from(margins.left.max(0)),
         }
     }
-    fn inset(self,border:f64)->Self{
-        Self{
-            tl:(self.tl-border).max(0.0),
-            tr:(self.tr-border).max(0.0),
-            br:(self.br-border).max(0.0),
-            bl:(self.bl-border).max(0.0),
-        }
-    }
     fn required_height(self,border:u32)->u32{
         let corner=self.tl+self.bl;
         let other=self.tr+self.br;
