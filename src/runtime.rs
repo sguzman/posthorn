@@ -389,6 +389,12 @@ impl SharedRuntime {
             }))
         }else{None};
         if let Some(snapshot)=capture{
+            if std::env::var_os("POSTHORN_QA_ICON_TRACE").is_some(){
+                let color=snapshot.as_ref().and_then(|icon|icon.pixels.bgra.get(..4));
+                eprintln!("Posthorn QA initial icon: scale={} max-size={} pixel={color:?}",
+                    self.icon_creation_scale(),
+                    snapshot.as_ref().map(|icon|icon.max_size).unwrap_or(0));
+            }
             store.capture_icon(id,snapshot)?;
         }
         self.timers.lock().map_err(|_| "expiration scheduler lock poisoned")?

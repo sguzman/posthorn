@@ -72,7 +72,7 @@ default-timeout=30000
 output=HEADLESS-1
 background-color=#E5923C
 EOF_CONFIG
-./target/debug/posthorn --experimental-private-multi-desktop "$root/mixed.conf" \
+POSTHORN_QA_ICON_TRACE=1 ./target/debug/posthorn --experimental-private-multi-desktop "$root/mixed.conf" \
   >"$root/posthorn.log" 2>&1 &
 posthorn_pid=$!
 ready=0
