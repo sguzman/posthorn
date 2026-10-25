@@ -758,7 +758,7 @@ mod tests {
             app_name:"fixture",app_icon:"",category:"success",
             desktop_entry:"",summary:"Text visible",body:"Line 2",
             urgency:"normal",anchor:"top-right",output:"",
-            modes:&["default"],requested_timeout_ms:-1,actionable:false,
+            surface_associated:true,output_known:true,modes:&["default"],requested_timeout_ms:-1,actionable:false,
             group_index:-1,hidden:false,
         };
         let config=crate::config::Config::parse(

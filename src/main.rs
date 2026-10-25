@@ -195,7 +195,7 @@ async fn main() -> ExitCode {
                 category: &note.category, desktop_entry: &note.desktop_entry,
                 summary: &note.summary, body: &note.body,
                 urgency: "normal", anchor: "top-right", output: "",
-                modes: &modes, requested_timeout_ms: note.requested_timeout_ms,
+                surface_associated:true,output_known:true,modes: &modes, requested_timeout_ms: note.requested_timeout_ms,
                 actionable: false, group_index: -1, hidden: false,
             };
             let style = config.style_for(&traits);
