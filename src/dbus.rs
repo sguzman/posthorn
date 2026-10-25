@@ -44,12 +44,13 @@ impl<'de> Deserialize<'de> for OrderedNotifyHints{
     }
 }
 
-/// Mako v1.11 dbus/xdg.c copies exactly image_len sender bytes before
-/// accepting a Notify: (height-1)*rowstride + width*ceil(channels*bits/8).
-/// A short array makes sd_bus_message_read("y") fail and aborts Notify,
-/// even if a subsequent alias carries a well-formed image-data payload.
-/// This is wire validation, NOT GdkPixbuf's RGB/RGBA decode validation:
-/// unsupported-but-complete pixel layouts may still be accepted with no icon.
+/// Mako v1.11 dbus/xdg.c attempts to copy image_len sender bytes:
+/// (height-1)*rowstride + width*ceil(channels*bits/8). Its loop checks
+/// only ret < 0, but sd_bus_message_read_basic may return ZERO at the end
+/// of an array, leaving tmp uninitialized. Do not emulate that unsafe read:
+/// reject short payloads before accepting a Notify or replacing an ID.
+/// This is a documented *safety hardening*, not verified strict Mako parity.
+/// A complete payload still passes even if GdkPixbuf rejects its pixel layout.
 fn image_hint_has_complete_payload(
     data:&(i32,i32,i32,bool,i32,i32,Vec<u8>)
 )->bool{
@@ -583,13 +584,14 @@ mod tests {
             OwnedValue::try_from(Value::from(tuple)).unwrap()
         };
         // Required 8 + 2*4 = 16 bytes; only 15 arrived. Mako's
-        // per-byte D-Bus read fails before its normal Notify reply.
+        // C loop may read uninitialized tmp after an sd-bus zero return;
+        // Posthorn intentionally rejects instead of reproducing that bug.
         for alias in ["image-data","image_data","icon_data"] {
             let hints=HashMap::from([(alias.to_owned(),bad(vec![0;15],8,4))]);
             assert!(matches!(service.apply_notify(
                 "sender",initial,"","Replacement","",Vec::new(),hints,-1
             ),Err(zbus::fdo::Error::InvalidArgs(_))),
-                "truncated {alias} must abort the entire Notify");
+                "Posthorn must reject unsafe truncated {alias} Notify");
             let store=service.store.lock().unwrap();
             assert_eq!(store.active().len(),1);
             assert_eq!(store.active()[0].id,initial);
