@@ -1297,10 +1297,15 @@ impl Config {
             return Err(err(path.display().to_string(), "recursive include"));
         }
         let result = (|| {
-            let bytes = fs::read(&canonical)
-                .map_err(|e| err(path.display().to_string(), e.to_string()))?;
-            let text=decode_mako_file_bytes(&bytes,&canonical.display().to_string())?;
-            self.append(&text, &canonical.display().to_string(), Some(&canonical), seen)
+            // Mako config.c:load_config_file() uses fopen(path), and reports
+            // the original path's basename. The canonical name is ONLY our
+            // recursion-guard key: don't use it for reading or diagnostics,
+            // or symlinked aliases lose their actual source identity.
+            let source=path.display().to_string();
+            let bytes = fs::read(path)
+                .map_err(|e| err(&source, e.to_string()))?;
+            let text=decode_mako_file_bytes(&bytes,&source)?;
+            self.append(&text, &source, Some(path), seen)
         })();
         seen.remove(&canonical);
         result
@@ -1905,6 +1910,35 @@ mod tests {
         assert!(Config::parse("width =320\n").is_err());
         assert!(Config::parse("width=320 garbage\n").is_err());
         assert!(Config::parse("max-history=4 garbage\n").is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn mako_symlink_config_alias_remains_source_for_nested_rules_and_errors(){
+        use std::os::unix::fs::symlink;
+        // Mako's load_config_file() opens the supplied filename and keeps
+        // basename(path) for diagnostics, even if the file is a symlink.
+        let temporary=tempfile::tempdir().unwrap();
+        let target=temporary.path().join("actual.conf");
+        let alias=temporary.path().join("alias.conf");
+        let root=temporary.path().join("root.conf");
+        std::fs::write(&target,"width=451\n[category=success]\nheight=115\n").unwrap();
+        symlink(&target,&alias).unwrap();
+        std::fs::write(&root,format!("include={}\n",alias.display())).unwrap();
+        for source in [&alias,&root]{
+            let config=Config::from_path(source).unwrap();
+            assert_eq!(config.global["width"],"451");
+            assert_eq!(config.rules.len(),1);
+            assert_eq!(config.rules[0].source,format!("{}:2",alias.display()),
+                "a file alias must not report its canonical target as origin");
+        }
+        std::fs::write(&target,"width=0\n").unwrap();
+        let err=Config::from_path(&alias).unwrap_err();
+        assert_eq!(err.location,format!("{}:1",alias.display()));
+        std::fs::write(&target,b"width=\xff\n").unwrap();
+        let err=Config::from_path(&alias).unwrap_err();
+        assert_eq!(err.location,format!("{}:1",alias.display()),
+            "non-UTF-8 active lines must attribute the caller's symlink alias");
     }
 
     #[test]
