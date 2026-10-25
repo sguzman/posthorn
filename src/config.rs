@@ -277,12 +277,12 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
                 in_class = false;
                 normalized.push(ch);
             }
-            // glibc REG_EXTENDED treats '&' and '~' as ordinary bracket
-            // characters, even when repeated: [a&&b] matches a, &, b.
-            // Rust regex reserves && and ~~ for set intersection and
-            // symmetric difference. Escape every unescaped occurrence
-            // inside the class to preserve the source POSIX semantics.
-            '&' | '~' if in_class => {
+            // glibc REG_EXTENDED treats '&', '~' and '|' as ordinary
+            // bracket characters: [a&&b], [a~~b], [a||b] include their
+            // punctuation. Rust regex reserves &&, ~~ and || for set
+            // intersection, symmetric difference and union respectively.
+            // Escape unescaped punctuation in bracket classes for parity.
+            '&' | '~' | '|' if in_class => {
                 normalized.push('\\');
                 normalized.push(ch);
             }
@@ -1639,6 +1639,8 @@ mod tests {
             (r"^[a~~b]+$",vec!["a","b","~","a~b"],vec!["c","&"]),
             (r"^[a&&[:digit:]]+$",vec!["a","&","7","a7&"],vec!["b","~"]),
             (r"^[a~~[:digit:]]+$",vec!["a","~","7","a7~"],vec!["b","&"]),
+            (r"^[a||b]+$",vec!["a","b","|","a|b"],vec!["c","&"]),
+            (r"^[||]+$",vec!["|","||"],vec!["&","a"]),
             (r"^[&&]+$",vec!["&","&&"],vec!["~","a"]),
             (r"^[~~]+$",vec!["~","~~"],vec!["&","a"]),
             (r"^[a&~b]+$",vec!["&","~","a","b"],vec!["c","1"]),
