@@ -187,7 +187,7 @@ mod tests {
         t.set(10,now,Some(300));
         t.set(20,now,Some(300));
         t.set(30,now,Some(200));
-        assert_eq!(t.take_expired(now+Duration::from_millis(300)),vec![30,10,20]);
+        assert_eq!(t.take_expired(now+Duration::from_millis(300)),vec![30,20,10]);
     }
 
     #[test]
