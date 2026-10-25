@@ -3273,3 +3273,59 @@ displayed 90%. Real Hyprland T503 remains 51%,
 and explicitly authorized reversible cutover T504 remains
 0%. No live daemon, notification bus or desktop config
 was accessed or changed.
+
+## Glibc all-hyphen POSIX bracket classes and following interval validation (2026-10-25)
+
+Pinned Mako v1.11.0 compiles `summary~` and `body~`
+using C-locale glibc `regcomp(REG_EXTENDED | REG_NOSUB)`.
+Native probes establish that `[-]`, `[--]`, `[---]`,
+and `[----]` are all legal bracket expressions matching
+only literal `-`, and their leading-`^` variants match
+every single-byte character **except** `-`. Five or
+more hyphens alone are rejected with an invalid-range
+error (`REG_ERANGE`). Rust regex reserves `--` for
+class subtraction; the raw POSIX class is not equivalent.
+
+Posthorn's dedicated source-compatible pass canonicalizes
+only complete one-to-four-hyphen classes into a Rust
+escaped literal hyphen, including negated classes.
+It runs **after** glibc C-bracket-backslash lowering:
+running it earlier would make an inserted Rust escape
+look like an original source backslash and change
+meaning. Real nested POSIX bracket elements and escaped
+opening brackets are preserved. Classes of five or more
+hyphens are rejected before attempting Rust compilation.
+
+A related error in the existing glibc interval validator
+was also closed: an escaped **first** bracket member
+(such as normalized `[\-]` or `[\]]`) must consume the
+first class slot. Otherwise a following closing `]`
+could be mistaken for a literal leading member, hiding
+an out-of-range `{32768}` repetition behind a false
+in-class state. The validator now closes that class
+correctly and applies `RE_DUP_MAX` to the next interval.
+
+Direct C-locale positive/negative regression fixtures
+cover one to four literal hyphens with both negations,
+source-invalid five/six/ten-hyphen classes, the
+post-class repetition-limit cases (including escaped
+leading `]`), valid counted hyphen classes, and full
+`Config::parse` `body~` matching. Existing tests remained
+green. Unrelated POSIX bracket grammar cases are not
+claimed complete.
+
+- [Pinned Mako regex compilation](https://github.com/emersion/mako/blob/v1.11.0/criteria.c#L332-L349)
+- [Initial implementation 2ab9ca4](https://github.com/sguzman/posthorn/commit/2ab9ca46def0989455f43b4d2f1a18976134820e)
+- [Pass-order correction 663524e](https://github.com/sguzman/posthorn/commit/663524e65b2eee9b36ff0537dc5c5eb53fbbf6ce)
+- [Escaped-first-member validator regression 86429c5](https://github.com/sguzman/posthorn/commit/86429c5435bcb971ccca3ad6c0f01836e5174185)
+- [Fully green isolated CI 40232019541](https://github.com/sguzman/posthorn/actions/runs/40232019541):
+  **330 Rust library tests, 90 isolated private D-Bus tests,
+  complete headless Wayland compositor suite passed**.
+
+**Accepted progress:** T103 **91% → 92% (+1 pp)**;
+P1 raw **93.2% → 93.4% (+0.2 pp)**, displayed 93%;
+strict 24-task M0 raw **89.667% → 89.708% (+0.042 pp)**,
+displayed 90%. Actual Hyprland T503 is still **51%**
+and explicitly authorized reversible cutover T504 is
+**0%**. The production daemon, notification name,
+and real compositor configuration were not touched.
