@@ -138,6 +138,10 @@ impl FreedesktopNotifications {
         &self.store
     }
 
+    // Keep the existing in-memory test API while exposing whether Mako's
+    // insert_notification() path was taken. Only that path emits an initial
+    // Notifications property invalidation; ID/tag replacements do not.
+    #[cfg(test)]
     fn apply_notify(
         &self,
         app_name: &str,
@@ -149,6 +153,22 @@ impl FreedesktopNotifications {
         hints: HashMap<String, OwnedValue>,
         expire_timeout: i32,
     ) -> zbus::fdo::Result<u32> {
+        self.apply_notify_with_inserted(
+            app_name,replaces_id,app_icon,summary,body,actions,hints,expire_timeout
+        ).map(|(id,_)|id)
+    }
+
+    fn apply_notify_with_inserted(
+        &self,
+        app_name: &str,
+        replaces_id: u32,
+        app_icon: &str,
+        summary: &str,
+        body: &str,
+        actions: Vec<String>,
+        hints: HashMap<String, OwnedValue>,
+        expire_timeout: i32,
+    ) -> zbus::fdo::Result<(u32,bool)> {
         // Freedesktop actions are alternating key/label pairs.
         if actions.len() % 2 != 0 {
             return Err(zbus::fdo::Error::InvalidArgs(
@@ -236,13 +256,19 @@ impl FreedesktopNotifications {
             .store
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("notification state lock poisoned".into()))?;
+        // Mako dbus/xdg.c inserts only if Notify did not reuse an existing
+        // active notification (either explicit replaces_id or stack tag).
+        // Comparing active cardinality under the same store lock preserves
+        // both replacement paths without reimplementing matching logic.
+        let old_count=state.active().len();
         let id = state.push(request);
+        let inserted=state.active().len()>old_count;
         drop(state);
         if let Some(runtime) = &self.runtime {
             runtime.schedule(id, Instant::now())
                 .map_err(|e| zbus::fdo::Error::Failed(e.into()))?;
         }
-        Ok(id)
+        Ok((id,inserted))
     }
 }
 
@@ -307,9 +333,16 @@ impl FreedesktopNotifications {
         #[zbus(connection)] conn: &zbus::Connection,
     ) -> zbus::fdo::Result<u32> {
         let hints=hints.into_effective_map()?;
-        let id = self.apply_notify(
+        let (id,inserted)=self.apply_notify_with_inserted(
             app_name, replaces_id, app_icon, summary, body, actions, hints, expire_timeout,
         )?;
+        // Upstream Mako notification.c:insert_notification emits this
+        // PropertiesChanged invalidation at insertion, BEFORE the Notify
+        // binding executes. No new insertion occurs on ID/tag replacement.
+        if inserted {
+            crate::signals::invalidate(conn, "Notifications").await
+                .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        }
         if let Some(runtime)=&self.runtime {
             let binding=runtime.on_notify_binding(id)
                 .map_err(|e|zbus::fdo::Error::Failed(e.into()))?;
@@ -329,8 +362,6 @@ impl FreedesktopNotifications {
                 ).await.map_err(|e|zbus::fdo::Error::Failed(e.to_string()))?,
             }
         }
-        crate::signals::invalidate(conn, "Notifications").await
-            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         Ok(id)
     }
 
