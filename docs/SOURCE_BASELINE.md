@@ -2494,3 +2494,50 @@ P3 **94% (+0 pp)**, M0 **89% (+0 pp)**, physical Hyprland
 acceptance **51% (+0 pp)**, and production cutover **0% (+0 pp)**.
 Live Mako, the real freedesktop notification bus and workstation
 settings are unchanged.
+
+## POSIX ERE bracket classes versus Rust regex set syntax (2026-10-25)
+
+Pinned Mako v1.11.0 `criteria.c:apply_criteria_field` compiles
+`summary~` / `body~` using
+`regcomp(REG_EXTENDED | REG_NOSUB)`. Under the daemon's initial C
+locale this is the glibc POSIX ERE grammar, not Rust `regex::bytes`'s
+additional bracket-set algebra. Native glibc `regcomp` / `regexec`
+probes confirmed two sender-visible selector differences:
+
+1. `[a&&b]` matches `a`, `&` and `b`; `[a~~b]` matches
+   `a`, `~` and `b`. glibc treats both repeated punctuation
+   characters as literals in a class, whereas unescaped Rust
+   `regex` uses `&&` and `~~` for intersection/symmetric difference.
+   Posthorn now escapes literal `&` and `~` within bracket classes
+   during the existing POSIX-to-Rust translation. Collating/equivalence
+   elements and escaped punctuation still preserve their intended meaning.
+2. A closing bracket as the **first** class character, or the first
+   character after negating `^`, is itself a POSIX class member.
+   For example `[]\\w]` in a C-locale glibc ERE matches `]` or
+   the letter `w`, not an arbitrary word character. Likewise
+   `[^]\\w]` excludes both `]` and `w`.
+   A preprocessing pass now escapes that literal leading bracket
+   *before* other POSIX bracket-element and backslash transformations.
+
+Regression cases cover positive and negative glibc results for plain,
+negated, repeated-punctuation, named-class-composite, and escaped
+variants, plus full `Config::parse` and scoped `summary~` and
+`body~` matching. Those fixtures were verified against the pinned
+source contract, not inferred from Rust regular-expression behavior.
+
+- [Literal ampersand/tilde patch 2758499](https://github.com/sguzman/posthorn/commit/2758499a640aa18ccb93cc6851c17862df4222ff)
+- [Escaped-punctuation fixture 7ee844a](https://github.com/sguzman/posthorn/commit/7ee844a6fa2f2c625909c83fe09b01660719ee58)
+- [Literal leading bracket patch 2a17079](https://github.com/sguzman/posthorn/commit/2a17079e585d4d27451d61aeacdc55aba5799048)
+- [Green mandatory CI 40208648385](https://github.com/sguzman/posthorn/actions/runs/40208648385):
+  **316 library tests, 84 private D-Bus tests, complete isolated
+  headless Wayland suite**; no failures.
+
+This accepts two previously divergent POSIX regex behaviors:
+**T103 79% → 81% (+2 pp)**. The P1 phase arithmetic mean is now
+**91% (+0 pp)** and 24-task strict M0 arithmetic mean **89.083%**,
+still reported as **89% (+0 pp)**. Other POSIX grammar differences,
+including full glibc bracket range handling/backreferences, are
+not accepted here; this does not certify complete regex parity.
+Physical Hyprland remains **51% (+0 pp)**, and explicit production
+cutover remains **0% (+0 pp)**. The installed Mako and real D-Bus
+name were never accessed.
