@@ -3494,3 +3494,48 @@ displayed 90%. Real Hyprland T503 remains **51%**
 and authorized production cutover T504 remains **0%**.
 The installed Mako, real bus name, and live Hyprland
 configuration remain untouched.
+
+## Original path identity for symlinked config includes (2026-10-25)
+
+Pinned Mako v1.11.0 `config.c:780-801` opens the
+exact supplied filename with `fopen(path, "r")` and
+derives its diagnostic basename from that **same path**.
+A symlink alias (e.g. `alias.conf` pointing to
+`actual.conf`) is therefore identified as `alias.conf`,
+including when used by an `include=` from another file.
+
+Posthorn previously canonicalized each config filename
+to detect recursive includes and then also used the
+canonical target for file reads, rules' `source` fields,
+and error locations. This lost the caller's symlink alias
+in rule origins and failed-line diagnostics.
+
+Posthorn now retains canonical paths **only** in the
+recursive-include guard. File reads, decoded line origins,
+stored rule source paths, and errors use the original
+supplied path. Existing recursion protection remains.
+The Rust diagnostic contains the full original path
+instead of only Mako's basename; the significant
+source-compatible alias identity is preserved.
+
+A new Linux/Unix regression uses a disposable symlinked
+config both directly and through a parent `include=`.
+It verifies effective root settings, nested criteria
+source identity, invalid numeric option locations,
+and non-UTF-8 active-line error locations, all attributed
+to the requested alias rather than the target. No
+production config or HOME files were read or changed.
+
+- [Pinned Mako config source](https://github.com/emersion/mako/blob/v1.11.0/config.c#L780-L801)
+- [Original-path fix and regression 95d29f5](https://github.com/sguzman/posthorn/commit/95d29f5ec9820544f0cd6e9a429479b55d32c43a)
+- [Full green CI run 40239514396](https://github.com/sguzman/posthorn/actions/runs/40239514396):
+  **335 Rust library tests, 90 isolated private D-Bus tests,
+  and complete headless Wayland acceptance passed**.
+
+**Accepted progress:** T104 **89% → 90% (+1 pp)**;
+P1 raw **94.0% → 94.2% (+0.2 pp)**, displayed 94%;
+strict 24-task M0 raw **89.833% → 89.875% (+0.042 pp)**,
+displayed 90%. Physical Hyprland T503 remains **51%**
+and opt-in production cutover T504 remains **0%**.
+The real notification name, installed Mako and personal
+Hyprland config remain untouched.
