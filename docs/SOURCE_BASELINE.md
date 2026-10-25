@@ -2762,3 +2762,74 @@ and personal compositor configuration were never accessed.
 signal interleavings or physical Hyprland behavior. Mako's
 synchronous close/order semantics and the eventual opt-in
 production cutover are separate acceptance gates.
+
+## Source parity: rounded Cairo background, progress and SOURCE border (2026-10-25)
+
+Pinned Mako v1.11.0 `render.c:render_notification` draws notification
+borders in this precise Cairo order, not as two nested filled rounded
+rectangles:
+
+1. It builds a **single** rounded rectangle with
+   `x = style.border_size/2`,
+   `width = notification.width - style.border_size`, and the
+   **original** corner radii, then fills it with the notification
+   background using `cairo_fill_preserve`.
+2. It copies that same path, saves the context, and clips progress
+   rendering against it. Progress is a rectangle starting at
+   `x = style.border_size`, with integer width
+   `(notification.width - 2*style.border_size) * value / 100`
+   (clamped as in source), and height
+   `notification.height - style.border_size`.
+   The progress-color operator may be `OVER` or `SOURCE`.
+3. It restores the saved context, appends the copied original
+   rounded path, sets `CAIRO_OPERATOR_SOURCE`, and strokes that
+   path using the configured border color and line width.
+   This is specifically required so translucent borders **replace**
+   underlying colored pixels rather than alpha-mix with them.
+
+Posthorn previously approximated that sequence by first filling
+an outer border, then filling an inset radius-reduced background,
+and clipping progress to the reduced rounded rectangle.
+Even though opaque straight-edged borders could look correct,
+the corner curvature, semi-transparent source alpha and clipped
+progress edge did not necessarily match upstream Cairo.
+
+Posthorn now paints in the pinned source order with the **original
+unmodified corner radii** and shared path. The stale
+`CornerRadii::inset` method was removed. Bounds checking,
+layout size caps, public D-Bus behavior, and user workstation state
+were not altered.
+
+An independent raster regression constructs a reference Cairo
+image following `render.c`'s background-fill / progress-clip /
+SOURCE-stroke sequence for a notification with
+`border-size=4`, `border-radius=17`, partially translucent
+background and border colors, and `source` progress blending.
+It compares **all output bytes**, and separately validates
+premultiplied border alpha. The **321 library tests and 89 private
+D-Bus tests** pass, and the isolated headless Wayland suite
+accepts the rendered popup at all tested scales.
+
+- [Pinned upstream `render.c:215-272`](https://github.com/emersion/mako/blob/v1.11.0/render.c#L215-L272)
+- [Mako Cairo path implementation f07dc9b](https://github.com/sguzman/posthorn/commit/f07dc9b042988b49112e374b2990b3d9baea6ea3)
+- [Independent full-pixel reference regression c188dcd](https://github.com/sguzman/posthorn/commit/c188dcdc499b5414409e0f4708c6e58053fb7e58)
+- [Accepted green CI 40218894027](https://github.com/sguzman/posthorn/actions/runs/40218894027):
+  **321 Rust library tests, 89 private D-Bus tests, all isolated
+  headless Wayland compositor tests passed**
+- [Remove obsolete inset-radii helper 4034087](https://github.com/sguzman/posthorn/commit/4034087abd9e58980b32b90d67b45e658e2c6708)
+
+A proposed offset to centered Pango text was **reverted**:
+`render.c:102` defines the local `border_size` used by
+the centering calculation as `2 * style.border_size`. The
+later `move_to` adds `style.border_size`, so those terms cancel;
+Posthorn's original full-notification centering already agreed with
+Mako. That invalid candidate received **zero acceptance credit**.
+
+No machine-readable task percentage is raised solely for this
+Cairo correction: P2's existing T205 measures Pango format and
+action compatibility, whereas physical workstation renderer
+acceptance belongs to T503 and remains unperformed. This
+implementation and isolated reference regression contribute real
+renderer parity evidence, but **T503 remains 51%** until actual
+Hyprland work is authorized and performed. M0 stays
+**89.292% raw (89% displayed)**; session ledger delta is **0 pp**.
