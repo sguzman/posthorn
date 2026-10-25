@@ -1429,13 +1429,31 @@ fn validate_rule(rule: &Rule) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_include(value: &str) -> Result<PathBuf, String> {
+/// Mako v1.11 config.c:expand_config_path() concatenates HOME, a slash,
+/// and everything AFTER "~/". PathBuf::join is not equivalent when the
+/// suffix begins with '/' (as in "~//child.conf"): Rust would discard HOME.
+fn resolve_include_with_home(value: &str, home: Option<&Path>)
+    -> Result<PathBuf, String>
+{
     if value.starts_with('/') { return Ok(PathBuf::from(value)); }
     if let Some(relative) = value.strip_prefix("~/") {
-        return std::env::var_os("HOME").map(|h| PathBuf::from(h).join(relative))
-            .ok_or_else(|| "HOME is not set".into());
+        let home=home.ok_or_else(||"HOME is not set".to_owned())?;
+        // C's "%s/%s" preserves the home prefix even if the suffix
+        // starts with another slash. Removing extra leading separators
+        // keeps the same Linux filesystem target.
+        let suffix=relative.trim_start_matches('/');
+        if home.as_os_str().is_empty() {
+            // getenv("HOME") returning "" is *not* missing in Mako;
+            // its C string interpolation produces "/<suffix>".
+            return Ok(PathBuf::from("/").join(suffix));
+        }
+        return Ok(home.join(suffix));
     }
     Err("Mako include must be absolute or start with ~/".into())
+}
+fn resolve_include(value: &str) -> Result<PathBuf, String> {
+    let home=std::env::var_os("HOME");
+    resolve_include_with_home(value,home.as_deref().map(Path::new))
 }
 
 fn parse_selectors(text: &str) -> Result<Vec<Selector>, String> {
@@ -1887,6 +1905,62 @@ mod tests {
         assert!(Config::parse("width =320\n").is_err());
         assert!(Config::parse("width=320 garbage\n").is_err());
         assert!(Config::parse("max-history=4 garbage\n").is_err());
+    }
+
+    #[test]
+    fn mako_tilde_include_repeated_slashes_never_discard_home_prefix(){
+        // Pinned config.c:expand_config_path() uses
+        // mako_asprintf("%s/%s", home, path+2) rather than path join.
+        let home=Path::new("/some/private/home");
+        for (source,expected) in [
+            ("~/nested.conf","/some/private/home/nested.conf"),
+            ("~//nested.conf","/some/private/home/nested.conf"),
+            ("~///nested.conf","/some/private/home/nested.conf"),
+            ("~////sub/nested.conf","/some/private/home/sub/nested.conf"),
+            ("~/","/some/private/home"),
+            ("~//","/some/private/home"),
+        ]{
+            assert_eq!(resolve_include_with_home(source,Some(home)),
+                Ok(PathBuf::from(expected)),"include source {source:?}");
+        }
+        assert_eq!(resolve_include_with_home("~//nested.conf",Some(Path::new(""))),
+            Ok(PathBuf::from("/nested.conf")),
+            "empty but defined HOME expands to root, unlike missing HOME");
+        assert!(resolve_include_with_home("~//nested.conf",None).is_err());
+        assert_eq!(resolve_include_with_home("/tmp/config",None),
+            Ok(PathBuf::from("/tmp/config")),
+            "absolute includes must never require HOME");
+        assert!(resolve_include_with_home("child.conf",Some(home)).is_err());
+        assert!(resolve_include_with_home("~child.conf",Some(home)).is_err());
+    }
+
+    #[test]
+    fn mako_tilde_include_extra_separator_loads_beneath_home(){
+        // Run a single isolated test process with HOME redirected to
+        // a disposable directory. Do not change the parent test runner's
+        // environment or read/write the real user's home directory.
+        const CHILD:&str="POSTHORN_TILDE_INCLUDE_CHILD";
+        const ROOT:&str="POSTHORN_TILDE_INCLUDE_ROOT";
+        if std::env::var_os(CHILD).is_some(){
+            let file=std::env::var_os(ROOT).expect("child config fixture");
+            let config=Config::from_path(Path::new(&file))
+                .expect("Mako tilde include in private HOME");
+            assert_eq!(config.global["width"],"453");
+            assert_eq!(config.global["height"],"113");
+            return;
+        }
+        let home=tempfile::tempdir().unwrap();
+        let root=home.path().join("root.conf");
+        let child=home.path().join("child.conf");
+        std::fs::write(&child,"width=453\\n").unwrap();
+        std::fs::write(&root,"include=~//child.conf\\nheight=113\\n").unwrap();
+        let output=std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact","config::tests::mako_tilde_include_extra_separator_loads_beneath_home","--nocapture"])
+            .env(CHILD,"1").env(ROOT,root.as_os_str())
+            .env("HOME",home.path())
+            .output().unwrap();
+        assert!(output.status.success(),
+            "isolated Mako path resolution failed: {output:?}");
     }
 
     #[test]
