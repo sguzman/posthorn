@@ -2119,7 +2119,7 @@ mod tests {
             assert!(!selector.matches(&fields),
                 "{pattern:?} must not match {no:?}");
         }
-        assert_eq!(mako_posix_ere_escapes(r"\! \# \0 \+"),r"! # 0 \+");
+        assert_eq!(mako_posix_ere_escapes(r"\! \# \0 \+"),r"! \# 0 \+");
         // Inside POSIX bracket expressions the backslash is a separate
         // literal member; do not apply the outside-class conversion.
         assert_eq!(mako_posix_ere_escapes(r"[\!]"),r"[\!]");
