@@ -102,6 +102,72 @@ fn decode_mako_file_bytes(bytes:&[u8],source:&str)->Result<String,ConfigError>{
     Ok(text)
 }
 
+/// glibc's C-locale REG_EXTENDED treats '\' INSIDE a bracket class as
+/// an ordinary literal character, not as an escape for the next byte.
+/// Rust regex treats it as a metacharacter. Turn each source backslash
+/// inside a class into a Rust literal-backslash token, without consuming
+/// the following character: that next character may be a range endpoint,
+/// an unescaped '-' operator, or even the class-closing ']'.
+/// Outside bracket classes the GNU POSIX backslash operators retain
+/// their separate semantics and remain untouched.
+fn mako_posix_c_class_backslashes(pattern:&str)->String{
+    let mut normalized=String::with_capacity(pattern.len());
+    let mut chars=pattern.chars().peekable();
+    let mut in_class=false;
+    let mut first=false;
+    let mut can_negate=false;
+    while let Some(ch)=chars.next(){
+        if !in_class {
+            match ch {
+                '\\' => {
+                    normalized.push('\\');
+                    if let Some(next)=chars.next(){normalized.push(next);}
+                }
+                '[' => {
+                    in_class=true;
+                    first=true;
+                    can_negate=true;
+                    normalized.push('[');
+                }
+                _ => normalized.push(ch),
+            }
+            continue;
+        }
+        if first && ch=='^' && can_negate {
+            normalized.push('^');
+            can_negate=false;
+            continue;
+        }
+        if first && ch==']' {
+            normalized.push(']');
+            first=false;
+            continue;
+        }
+        first=false;
+        if ch=='[' {
+            normalized.push('[');
+            // POSIX bracket elements have nested closing brackets, which
+            // must not terminate the enclosing class's state machine.
+            if let Some(delimiter @ (':'|'.'|'='))=chars.peek().copied(){
+                normalized.push(chars.next().expect("peeked delimiter"));
+                let mut previous='\0';
+                for next in chars.by_ref(){
+                    normalized.push(next);
+                    if previous==delimiter && next==']'{break;}
+                    previous=next;
+                }
+            }
+        }else if ch=='\\'{
+            normalized.push('\\');
+            normalized.push('\\');
+        }else{
+            if ch==']'{in_class=false;}
+            normalized.push(ch);
+        }
+    }
+    normalized
+}
+
 /// In POSIX bracket syntax the very first ']' (or first after '^')
 /// is a LITERAL class member. Rust regex requires it escaped. Normalize
 /// before every other POSIX class pass so later scanners do not mistake
@@ -446,7 +512,8 @@ impl Selector {
             if has_rust_only_posix_class(value) {
                 return Err("glibc POSIX ERE does not recognize this bracket class".into());
             }
-            let leading=mako_posix_ere_literal_leading_closer(value);
+            let backslashes=mako_posix_c_class_backslashes(value);
+            let leading=mako_posix_ere_literal_leading_closer(&backslashes);
             let collated=mako_posix_c_collating_elements(&leading)?;
             let pattern = mako_posix_ere_empty_min_repetitions(
                 &mako_posix_ere_escapes(&collated));
@@ -1469,6 +1536,55 @@ mod tests {
         assert_eq!(quiet["background-color"],"#305747");
         assert_eq!(quiet["on-notify"],"none");
     }
+    #[test]
+    fn glibc_c_locale_class_backslashes_are_literal_range_endpoints(){
+        // Compared with native C-locale glibc regcomp(REG_EXTENDED) and
+        // regexec. These results differ from Rust regex escaped characters.
+        for (pattern,yes,no) in [
+            (r"^[a\-b]$", vec!["a","b","\\","]","^","_"],vec!["-","c","&"]),
+            (r"^[a\^b]$", vec!["a","b","^","\\"],vec!["-","&"]),
+            (r"^[a\&b]$", vec!["a","b","&","\\"],vec!["-","c"]),
+            (r"^[a\~b]$", vec!["a","b","~","\\"],vec!["-","c"]),
+            (r"^[\w]$", vec!["w","\\"],vec!["s","1","-"]),
+            (r"^[\d]$", vec!["d","\\"],vec!["1","w"]),
+            (r"^[\-]$", vec!["\\","-"],vec!["a","b"]),
+            (r"^[\^]$", vec!["\\","^"],vec!["a","b"]),
+            (r"^[a\-z]$", vec!["a","b","z","\\","]","^","_"],vec!["-","&"]),
+            (r"^[a\d-z]$", vec!["a","\\","d","z","x"],vec!["b","-","]"]),
+            (r"^[a\[:digit:]]$", vec!["a","\\","1"],vec!["&","x","-"]),
+        ]{
+            let sel=Selector::new("summary~",pattern).unwrap_or_else(|e|
+                panic!("glibc accepted {pattern:?}: {e}"));
+            let mut fields=note("normal",&["default"]);
+            for value in yes{
+                fields.summary=value;
+                assert!(sel.matches(&fields),
+                    "{pattern:?} should match {value:?} with glibc");
+            }
+            for value in no{
+                fields.summary=value;
+                assert!(!sel.matches(&fields),
+                    "{pattern:?} should reject {value:?} with glibc");
+            }
+        }
+        assert_eq!(mako_posix_c_class_backslashes(r"^[\w]$"),
+            r"^[\\w]$");
+        assert_eq!(mako_posix_c_class_backslashes(r"^[a\-b]$"),
+            r"^[a\\-b]$");
+        assert_eq!(mako_posix_c_class_backslashes(r"\w"),
+            r"\w","GNU word character outside a class stays special");
+        // Full configuration and body selector; a backslash in the
+        // received D-Bus body must not be stripped by the rule parser.
+        let cfg=Config::parse("[body~=\"^[\\\\w]+$\"]\nwidth=461\n").unwrap();
+        let mut fields=note("normal",&["default"]);
+        fields.body="\\";
+        assert_eq!(cfg.style_for(&fields)["width"],"461");
+        fields.body="w";
+        assert_eq!(cfg.style_for(&fields)["width"],"461");
+        fields.body="x";
+        assert_eq!(cfg.style_for(&fields)["width"],"300");
+    }
+
     #[test]
     fn glibc_leading_right_bracket_is_a_literal_not_a_class_terminator(){
         // Checked directly with glibc regcomp/regexec in the C locale.
