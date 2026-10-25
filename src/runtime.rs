@@ -1504,6 +1504,54 @@ mod tests {
     }
 
     #[test]
+    fn mako_history_policy_controls_property_change_on_close_but_not_close_signal(){
+        let now=Instant::now();
+        for (config,expected) in [
+            ("history=1\nmax-history=5\n",true),
+            ("history=0\nmax-history=5\n",false),
+            ("history=1\nmax-history=0\n",false),
+            ("history=0\nmax-history=0\n",false),
+        ] {
+            let runtime=SharedRuntime::new(Config::parse(config).unwrap());
+            let id=runtime.store.lock().unwrap().push(Request::default());
+            runtime.schedule_without_hook(id,now).unwrap();
+            assert_eq!(runtime.close_with_change(id,CloseReason::Dismissed,true).unwrap(),
+                Some(expected),"wrong Mako notification change for {config:?}");
+            assert_eq!(runtime.close_with_change(id,CloseReason::Dismissed,true).unwrap(),
+                None,"duplicate close must not emit a second signal");
+        }
+        // Mako's add_to_history=false goes through the same end-of-close
+        // signal path when style.history=1 and max_history>0.
+        let runtime=SharedRuntime::new(Config::default());
+        let id=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(id,now).unwrap();
+        assert_eq!(runtime.close_with_change(id,CloseReason::Dismissed,false).unwrap(),
+            Some(true),"--no-history must not suppress property invalidation");
+        assert!(runtime.store.lock().unwrap().history().is_empty());
+    }
+
+    #[test]
+    fn mako_expiration_property_change_differs_from_expired_close_signal(){
+        let now=Instant::now();
+        for (config,changed) in [
+            ("history=1\nmax-history=5\n",true),
+            ("history=0\nmax-history=5\n",false),
+            ("history=1\nmax-history=0\n",false),
+        ]{
+            let config=format!("default-timeout=20\n{config}");
+            let runtime=SharedRuntime::new(Config::parse(&config).unwrap());
+            let id=runtime.store.lock().unwrap().push(Request::default());
+            runtime.schedule_without_hook(id,now).unwrap();
+            assert!(runtime.expire_with_changes(now+Duration::from_millis(19))
+                .unwrap().is_empty());
+            assert_eq!(runtime.expire_with_changes(now+Duration::from_millis(20))
+                .unwrap(),vec![(id,changed)]);
+            assert!(runtime.expire_with_changes(now+Duration::from_millis(30))
+                .unwrap().is_empty());
+        }
+    }
+
+    #[test]
     fn sender_timeout_applies_without_ignore_timeout() {
         let runtime = SharedRuntime::new(Config::parse("default-timeout=5000\n").unwrap());
         let now = Instant::now();
