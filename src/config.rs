@@ -453,7 +453,7 @@ fn mako_posix_ere_stacked_quantifiers(pattern:&str)->String{
                     if next=='\\'{
                         if let Some(escaped)=chars.next(){out.push(escaped);}
                         first=false;
-                    }else if next=='[' && matches!(chars.peek(),Some(':'|'.'|'=')){
+                    }else if next=='[' && matches!(chars.peek().copied(),Some(':'|'.'|'=')){
                         let delimiter=chars.next().expect("peeked delimiter");
                         out.push(delimiter);
                         let mut prev='\0';
