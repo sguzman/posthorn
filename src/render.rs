@@ -750,6 +750,68 @@ mod tests {
     }
 
     #[test]
+    fn source_unclipped_pango_overhang_raster_matches_italic_right_aligned_text(){
+        // Mako render.c:318-325 calls pango_cairo_show_layout() with NO
+        // Cairo rectangle clip; clipping to text layout bounds can erase
+        // italic glyphs whose ink extends beyond Pango's logical extents.
+        // Test both the exact reference sequence and a deliberately clipped
+        // old-version reference to prove this is a discriminating fixture.
+        let style=crate::config::Config::parse(
+            "width=200\nheight=130\nborder-size=0\npadding=10\n             background-color=#00000000\ntext-color=#FFFFFFFF\n             font=DejaVu Sans Oblique 44\ntext-alignment=right\nformat=%s\n"
+        ).unwrap().global;
+        let mut discriminating=false;
+        for value in ["f","ff","f/",")","/","j","jj","fj","W","Q","T","y","\u{0178}","ffi"] {
+            let mut note=fixture();
+            note.summary=value.into();
+            note.body.clear();
+            let frame=render_notification(&note,&style).unwrap();
+            let render_reference=|with_old_clip:bool|{
+                let reference=cairo::ImageSurface::create(cairo::Format::ARgb32,
+                    frame.width as i32,frame.height as i32).unwrap();
+                let context=cairo::Context::new(&reference).unwrap();
+                let layout=pangocairo::functions::create_layout(&context);
+                layout.set_font_description(Some(
+                    &pango::FontDescription::from_string("DejaVu Sans Oblique 44")
+                ));
+                let avail_w=(frame.width as i32-20).max(1);
+                let avail_h=(frame.height as i32-20).max(1);
+                layout.set_width(avail_w.saturating_mul(pango::SCALE));
+                layout.set_height(avail_h.saturating_mul(pango::SCALE));
+                layout.set_wrap(pango::WrapMode::WordChar);
+                layout.set_ellipsize(pango::EllipsizeMode::End);
+                layout.set_alignment(pango::Alignment::Right);
+                set_mako_formatted_text(&layout,value);
+                let text_height=if layout.character_count()>0{
+                    layout.pixel_size().1
+                }else{0};
+                let text_y=(f64::from(frame.height)-f64::from(text_height))/2.0;
+                if with_old_clip{
+                    context.rectangle(10.0,text_y,f64::from(avail_w),f64::from(avail_h));
+                    context.clip();
+                }
+                context.move_to(10.0,text_y);
+                set_color(&context,Color::parse_mako("#FFFFFFFF").unwrap());
+                pangocairo::functions::show_layout(&context,&layout);
+                drop(context);
+                reference.flush();
+                let mut data=Vec::new();
+                reference.with_data(|bytes|data.extend_from_slice(bytes)).unwrap();
+                data
+            };
+            let expected=render_reference(false);
+            assert_eq!(frame.pixels,expected,
+                "Mako Pango raster mismatch for {value:?}");
+            let old_clipped=render_reference(true);
+            if expected!=old_clipped{
+                discriminating=true;
+                break;
+            }
+        }
+        assert!(discriminating,
+            "fixture must exercise genuine Pango glyph ink outside layout clipping");
+    }
+
+    #[test]
     fn pinned_mako_signed_vertical_padding_reduces_shrinkwrapped_height(){
         // v1.11.0 render.c adds padding.top+padding.bottom directly
         // to the measured Pango text height, even when those are negative.
