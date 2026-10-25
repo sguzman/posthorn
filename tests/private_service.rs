@@ -862,9 +862,15 @@ async fn group_by_hidden_is_valid_and_groups_regular_notifications_over_private_
     let records:Vec<HashMap<String,OwnedValue>>=
         ctl.call("ListNotifications",&()).await?;
     assert_eq!(records.len(),3);
-    // A grouped cluster consumes a single max-visible slot; no
-    // renderer-only hidden object should enter the D-Bus list.
-    assert_eq!(posthorn::desktop::visible_notifications(&runtime)?.len(),3);
+    // Mako config.c's built-in [grouped] rule hides secondary
+    // members, and [group-index=0] restores the leader's visibility.
+    // All three remain active for D-Bus/group operations, but only
+    // the group's leader occupies the one max-visible slot.
+    let visible=posthorn::desktop::visible_notifications(&runtime)?;
+    assert_eq!(visible.len(),1);
+    assert_eq!(visible[0].id,c);
+    // No renderer-only hidden object should enter the D-Bus list.
+    assert_eq!(runtime.store.lock().unwrap().active().len(),3);
     Ok(())
 }
 
