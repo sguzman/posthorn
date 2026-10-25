@@ -72,10 +72,17 @@ impl CornerRadii {
             bl:f64::from(margins.left.max(0)),
         }
     }
-    fn required_height(self,border:u32)->u32{
-        let corner=self.tl+self.bl;
-        let other=self.tr+self.br;
-        (corner.max(other) as u32).saturating_add(border.saturating_mul(2))
+    /// Pinned Mako render.c:208-213 checks each radius pair against the
+    /// CURRENT measured height, and adds both border widths only if that
+    /// pair requires expansion. A global max(radius sums + 2*border)
+    /// wrongly makes already-tall-enough notifications taller.
+    fn adjust_height(self,mut height:i64,border:u32)->i64{
+        let borders=i64::from(border)*2;
+        for pair in [self.tl+self.bl,self.tr+self.br]{
+            let corners=pair as i64;
+            if height<corners{height=corners+borders;}
+        }
+        height
     }
 }
 fn rounded(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, radius: CornerRadii) {
@@ -245,9 +252,8 @@ fn measure_height_with_icon(
     // Mako uses signed padding both inside its Pango layout and when
     // adding the notification's surrounding insets. Keep the arithmetic
     // signed until after checking the safe physical popup bounds.
-    let actual=(content+height_padding)
-        .max(i64::from(CornerRadii::parse(style).required_height(border)))
-        .max(1);
+    let actual=CornerRadii::parse(style)
+        .adjust_height(content+height_padding,border).max(1);
     if actual>4096{return Err("notification exceeds safe height".into());}
     Ok(actual as u32)
 }
@@ -965,7 +971,7 @@ mod tests {
         assert_eq!(CornerRadii::parse(&style),CornerRadii{
             tl:4.0,tr:8.0,br:12.0,bl:16.0
         });
-        assert!(CornerRadii::parse(&style).required_height(2)>=24);
+        assert_eq!(CornerRadii::parse(&style).adjust_height(0,2),24);
     }
 
     #[test]
