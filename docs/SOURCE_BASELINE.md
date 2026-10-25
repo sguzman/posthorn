@@ -3442,3 +3442,55 @@ displayed 90%. Real Hyprland T503 remains **51%**,
 production cutover T504 remains **0%**.
 No live Mako, real notification bus, or personal
 Hyprland configuration was accessed or changed.
+
+## Mako tilde include paths with repeated separators (2026-10-25)
+
+Pinned Mako v1.11.0's `config.c:505-522` resolves
+`include=~/...` with `mako_asprintf("%s/%s",
+home, path + 2)`, where `home` is the raw `getenv("HOME")`.
+This retains the HOME prefix even if the part after `~/`
+begins with one or several additional slashes.
+
+Posthorn previously used `PathBuf::from(home).join(relative)`.
+For a config line `include=~//child.conf`, `relative`
+begins with `/`; Rust's absolute-path join discards the
+parent HOME entirely. That could read the wrong file or
+reject a valid source-compatible include.
+
+Posthorn's resolver now normalizes extra leading suffix
+separators **before** joining the HOME prefix, retaining
+the same Linux filesystem target as Mako. The implementation
+also preserves Mako's distinction between a missing HOME
+(error) and a defined but empty HOME (`/child.conf`).
+Already-absolute includes continue to work without HOME.
+Unrelated include precedence and recursion-safety guards
+are unchanged.
+
+Unit tests cover one-to-four tilde separators, an empty
+or absent HOME, absolute and invalid relative source paths.
+An end-to-end `Config::from_path` regression sets HOME
+only in an isolated child test process and uses a
+disposable directory with `include=~//child.conf`, verifying
+both inherited child width and following root height.
+No real user home or configuration files are modified.
+
+The first implementation CI run (`40238694529`) caught
+a **test-fixture encoding mistake**: the fixture had literal
+backslash-`n` strings instead of line endings. The direct
+resolver test had already passed. Fixture commit `a1ad782`
+corrected the newlines; the fully green re-run
+`40239005622` passed **334 Rust library tests, 90
+isolated D-Bus tests, and complete headless Wayland QA**.
+
+- [Pinned Mako expand_config_path](https://github.com/emersion/mako/blob/v1.11.0/config.c#L505-L522)
+- [Include resolver fix de1f750](https://github.com/sguzman/posthorn/commit/de1f7502c81260c1b92706ace25492851e392032)
+- [Fixture correction a1ad782](https://github.com/sguzman/posthorn/commit/a1ad7825ec06e10ed4c1ed4d706df400e1b236c8)
+- [Full green acceptance CI 40239005622](https://github.com/sguzman/posthorn/actions/runs/40239005622)
+
+**Accepted progress:** T104 **88% → 89% (+1 pp)**;
+P1 raw **93.8% → 94.0% (+0.2 pp)**, displayed 94%;
+strict 24-task M0 raw **89.792% → 89.833% (+0.042 pp)**,
+displayed 90%. Real Hyprland T503 remains **51%**
+and authorized production cutover T504 remains **0%**.
+The installed Mako, real bus name, and live Hyprland
+configuration remain untouched.
