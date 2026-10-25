@@ -143,7 +143,14 @@ fn mako_posix_c_class_backslashes(pattern:&str)->String{
             first=false;
             continue;
         }
+        // C-locale glibc treats a leading '--' as a range whose
+        // lower endpoint is literal '-': [--a] spans '-' through 'a'.
+        // Rust regex reserves '--' for class subtraction. Quote only
+        // the *first* '-' so the second remains a range operator.
+        // [--] instead contains literal '-' at both endpoints.
+        let leading_dash_range=first && ch=='-' && chars.peek()==Some(&'-');
         first=false;
+        if leading_dash_range { normalized.push('\\'); }
         if ch=='[' {
             normalized.push('[');
             // POSIX bracket elements have nested closing brackets, which
@@ -2148,6 +2155,44 @@ mod tests {
         assert_eq!(config.style_for(&fields)["width"],"463");
         fields.summary="a(";
         assert_eq!(config.style_for(&fields)["width"],"300");
+    }
+
+    #[test]
+    fn glibc_leading_double_hyphen_is_range_not_rust_class_subtraction(){
+        // Native glibc C-locale REG_EXTENDED | REG_NOSUB probes:
+        // [--a] is the ASCII range 0x2d..=0x61; [--] is literal '-'.
+        // Rust regex otherwise reserves '--' for set subtraction.
+        assert_eq!(mako_posix_c_class_backslashes("^[--a]$"),
+            r"^[\--a]$");
+        assert_eq!(mako_posix_c_class_backslashes("^[--]$"),
+            r"^[\--]$");
+        assert_eq!(mako_posix_c_class_backslashes("^[^--a]$"),
+            r"^[^\--a]$");
+        let mut fields=note("normal",&["default"]);
+        for (pattern,yes,no) in [
+            ("^[--a]$",vec!["-",".","/","9","A","a"],vec!["b","z"]),
+            ("^[--]$",vec!["-"],vec!["a","9"]),
+            ("^[^--a]$",vec!["b","z"],vec!["-","9","a"]),
+            ("^[^--]$",vec!["a","9","z"],vec!["-"]),
+        ]{
+            let selector=Selector::new("summary~",pattern).unwrap_or_else(|e|
+                panic!("glibc accepts leading dash class {pattern:?}: {e}"));
+            for word in yes{
+                fields.summary=word;
+                assert!(selector.matches(&fields),
+                    "{pattern:?} must match {word:?} in glibc C locale");
+            }
+            for word in no{
+                fields.summary=word;
+                assert!(!selector.matches(&fields),
+                    "{pattern:?} must reject {word:?} in glibc C locale");
+            }
+        }
+        let cfg=Config::parse("[body~=^[--a]$]\nwidth=466\n").unwrap();
+        fields.body="9";
+        assert_eq!(cfg.style_for(&fields)["width"],"466");
+        fields.body="z";
+        assert_eq!(cfg.style_for(&fields)["width"],"300");
     }
 
     #[test]
