@@ -219,7 +219,8 @@ fn mako_posix_ere_literal_leading_closer(pattern:&str)->String{
 
 /// In glibc's POSIX REG_EXTENDED, escaped ASCII letters are literals
 /// except the GNU word/whitespace operators \b, \B, \w, \W, \s, \S.
-/// Within bracket expressions *all* escaped ASCII letters are literals.
+/// Within bracket expressions glibc treats the *backslash itself*
+/// as a literal class member, separately normalized by the preceding pass.
 /// Rust regex assigns extra semantics to \A, \d, \x, \u, \z, etc. Apply
 /// the source-tested glibc rule before passing the expression to Rust regex.
 /// Other POSIX-versus-Rust regex differences remain an MVP parity gap.
