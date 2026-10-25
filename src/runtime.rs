@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path,PathBuf};
-use std::sync::atomic::{AtomicU64,Ordering};
+use std::sync::atomic::{AtomicU32,AtomicU64,Ordering};
 use std::sync::{Arc, Mutex,RwLock};
 use std::time::Instant;
 
@@ -31,6 +31,8 @@ pub struct SharedRuntime {
     /// This records only that matching identity. A true multi-surface
     /// renderer with independent entered outputs remains future work.
     known_surface_specs: Arc<Mutex<Vec<(String,String,String)>>>,
+    /// Scale observed by the Wayland presenter for the NEXT Notify icon.
+    icon_creation_scale: Arc<AtomicU32>,
     source_path: Option<Arc<PathBuf>>,
     /// Original Mako CLI style args are replayed after each disk reload.
     cli_overrides: Arc<Vec<(String,String)>>,
@@ -50,6 +52,7 @@ impl SharedRuntime {
             config: Arc::new(RwLock::new(Arc::new(config))),
             surface_output: Arc::new(RwLock::new(None)),
             known_surface_specs: Arc::new(Mutex::new(Vec::new())),
+            icon_creation_scale: Arc::new(AtomicU32::new(1)),
             source_path: None,
             cli_overrides: Arc::new(Vec::new()),
             revision: Arc::new(AtomicU64::new(0)),
@@ -65,6 +68,16 @@ impl SharedRuntime {
 
     pub fn revision(&self)->u64{
         self.revision.load(Ordering::Acquire)
+    }
+
+    /// New arrivals use the maximum observed compositor scale; existing
+    /// icons are immutable, as with upstream Mako's create_icon.
+    pub fn set_icon_creation_scale(&self,scale:u32){
+        if scale>0 {self.icon_creation_scale.store(scale,Ordering::Release);}
+    }
+
+    pub fn icon_creation_scale(&self)->u32{
+        self.icon_creation_scale.load(Ordering::Acquire)
     }
 
     /// Output selectors in Mako match wl_surface.enter's actual monitor.
@@ -362,6 +375,24 @@ impl SharedRuntime {
         let ignore_sender = style.get("ignore-timeout")
             .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
         let timeout = note.timeout_ms(default_ms, ignore_sender);
+        // Pinned Mako calls create_icon after initial style matching, ONCE.
+        // Direct-ID and tag replacements reset the cached snapshot, while
+        // history restoration and mode/reload retain the original payload.
+        let capture=if note.icon_snapshot.is_none(){
+            let pixels=crate::icons::load_note_icon_scaled(
+                note,&style,self.icon_creation_scale());
+            let max_size=style.get("max-icon-size")
+                .and_then(|s|crate::config::parse_nonnegative_mako(s))
+                .unwrap_or(64);
+            Some(pixels.map(|pixels|crate::notification::IconSnapshot{
+                pixels,max_size
+            }))
+        }else{None};
+        if let Some(snapshot)=capture{
+            if let Some(target)=store.active.iter_mut().find(|note|note.id==id){
+                target.icon_snapshot=Some(snapshot);
+            }
+        }
         self.timers.lock().map_err(|_| "expiration scheduler lock poisoned")?
             .set(id, now, timeout);
         let history=style.get("history")

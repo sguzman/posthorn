@@ -53,12 +53,22 @@ pub struct Action {
     pub label: String,
 }
 
+/// Icon decoded and fitted once when Mako accepts Notify.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IconSnapshot {
+    pub pixels: crate::icons::IconPixels,
+    pub max_size: u32,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Notification {
     pub id: u32,
     pub app_name: String,
     pub app_icon: String,
     pub image_data: Option<crate::icons::IconPixels>,
+    /// None for unscheduled fixtures; Some(None) means initial icon lookup
+    /// failed/was disabled. Some(Some(icon)) is the retained Mako icon.
+    pub icon_snapshot: Option<Option<IconSnapshot>>,
     pub summary: String,
     pub body: String,
     pub category: String,
@@ -118,7 +128,8 @@ impl Default for Request {
 impl Notification {
     fn from_request(id: u32, request: Request) -> Self {
         Self { id, app_name: request.app_name, app_icon: request.app_icon,
-            image_data: request.image_data, summary: request.summary, body: request.body, category: request.category,
+            image_data: request.image_data, icon_snapshot:None,
+            summary: request.summary, body: request.body, category: request.category,
             desktop_entry: request.desktop_entry, tag: request.tag, urgency: request.urgency,
             progress: request.progress, requested_timeout_ms: request.requested_timeout_ms,
             actions: request.actions,

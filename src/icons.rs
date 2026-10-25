@@ -268,7 +268,12 @@ pub fn load_note_icon_scaled(
     if style.get("icons").is_some_and(|v|v=="0"||v.eq_ignore_ascii_case("false")){
         return None;
     }
-    // image-data has higher precedence than image-path and app_icon.
+    // create_icon runs once on Notify. Keep an absent/disabled icon absent
+    // even if its file appears later. Direct unscheduled fixtures still
+    // load lazily to support independent renderer/unit test callers.
+    if let Some(saved)=&note.icon_snapshot{
+        return saved.as_ref().map(|icon|icon.pixels.clone());
+    }
     if let Some(image)=&note.image_data {return Some(image.clone());}
     if note.app_icon.is_empty(){return None;}
     let max_size=max_icon_size(style);

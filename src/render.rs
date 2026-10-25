@@ -186,6 +186,12 @@ pub fn measure_notification_height_group_with_icon_scale(
     measure_height_with_icon(note,style,icon.as_ref(),group_count)
 }
 
+fn icon_fit_limit(note:&Notification,style:&Options)->u32{
+    note.icon_snapshot.as_ref().and_then(Option::as_ref)
+        .map(|icon|icon.max_size)
+        .unwrap_or_else(||integer_option(style,"max-icon-size",64))
+}
+
 fn measure_height_with_icon(
     note:&Notification,style:&Options,icon:Option<&IconPixels>,group_count:usize,
 ) -> Result<u32,String> {
@@ -200,7 +206,7 @@ fn measure_height_with_icon(
     let height_padding=i64::from(border)*2+i64::from(padding.top)+i64::from(padding.bottom);
     let icon_location=style.get("icon-location").map(String::as_str).unwrap_or("left");
     let vertical=icon_location=="top"||icon_location=="bottom";
-    let max_size=integer_option(style,"max-icon-size",64);
+    let max_size=icon_fit_limit(note,style);
     let icon_size=icon.as_ref().map(|img|{
         let ratio=1.0f64.min(f64::from(max_size)/f64::from(img.width.max(img.height)));
         ((f64::from(img.width)*ratio) as u32,
@@ -382,7 +388,7 @@ pub fn render_notification_group_with_icon_scale(
 
     if let Some(icon)=icon.as_ref() {
         let location=style.get("icon-location").map(String::as_str).unwrap_or("left");
-        let max_size=f64::from(integer_option(style,"max-icon-size",64));
+        let max_size=f64::from(icon_fit_limit(note,style));
         let w=f64::from(icon.width);
         let h=f64::from(icon.height);
         // Mako icon.c scales ONLY against max-icon-size, then truncates

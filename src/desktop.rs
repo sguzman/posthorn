@@ -457,6 +457,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
         }
         let scale=viewer.output_scale(selected_output);
         let icon_scale=viewer.maximum_output_scale();
+        runtime.set_icon_creation_scale(icon_scale);
         let revision=runtime.revision();
         if notes!=previous || modes!=previous_modes ||
             revision!=previous_revision || scale!=previous_scale ||
@@ -578,6 +579,7 @@ fn render_loop_multi(
             }
             let scale=viewer.output_scale(&key.0);
             let icon_scale=viewer.maximum_output_scale();
+            runtime.set_icon_creation_scale(icon_scale);
             let revision=runtime.revision();
             let current_notes=all_notes.iter()
                 .filter(|note|note.surface_spec.as_ref()==Some(&key))
