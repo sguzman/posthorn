@@ -442,10 +442,43 @@ fn mako_posix_c_collating_elements(pattern:&str)->Result<String,String>{
     Ok(out)
 }
 
-/// glibc's GNU POSIX ERE accepts omitted lower repetition bounds:
-/// a{,2} is a{0,2}, and a{,} is a{0,}. Rust regex's default parser
-/// rejects those spellings. Rewrite only real unescaped repeat tokens,
-/// never escaped literal braces or bracket-class members.
+/// Glibc accepts any number of *leading zero digits* in a repetition
+/// bound. Only its numeric value is limited to RE_DUP_MAX=32767. Parsing
+/// directly as u32 would reject an otherwise valid count after ten digits.
+/// Inspect significant digits first so even thousands of zeros are safe.
+fn mako_posix_repetition_count(text:&str)->Option<u32>{
+    if text.is_empty() || !text.bytes().all(|byte|byte.is_ascii_digit()) {
+        return None;
+    }
+    let significant=text.trim_start_matches('0');
+    if significant.is_empty(){return Some(0);}
+    if significant.len()>5{return None;}
+    let value=significant.parse::<u32>().ok()?;
+    (value<=32767).then_some(value)
+}
+
+/// Validate a glibc repetition and create its small canonical Rust form.
+/// The source scanner ensures only unescaped intervals outside classes are
+/// passed here. Omitted GNU lower bounds are zero, unlike empty {}.
+fn mako_posix_canonical_interval(contents:&str)->Option<String>{
+    if let Some((low,high))=contents.split_once(','){
+        let lower=if low.is_empty(){0}else{mako_posix_repetition_count(low)?};
+        let upper=if high.is_empty(){None}else{Some(mako_posix_repetition_count(high)?)};
+        if upper.is_some_and(|n|n<lower){return None;}
+        Some(match upper {
+            Some(upper)=>format!("{{{lower},{upper}}}"),
+            None=>format!("{{{lower},}}"),
+        })
+    }else{
+        let count=mako_posix_repetition_count(contents)?;
+        Some(format!("{{{count}}}"))
+    }
+}
+
+/// GNU glibc accepts omitted lower bounds (a{,2}) and arbitrary leading
+/// zeros (a{0000000002}), both normalized to compact Rust syntax. Never
+/// interpret escaped literal braces or members of bracket expressions.
+/// The source interval validator runs before this conversion.
 fn mako_posix_ere_empty_min_repetitions(pattern:&str)->String{
     let mut out=String::with_capacity(pattern.len());
     let mut chars=pattern.chars().peekable();
@@ -462,8 +495,6 @@ fn mako_posix_ere_empty_min_repetitions(pattern:&str)->String{
             }
             '[' if in_class => {
                 out.push(ch);
-                // A POSIX class/collating/equivalence element owns its
-                // nested closing bracket; do not close the outer class.
                 if let Some(delimiter @ (':'|'.'|'='))=chars.peek().copied(){
                     chars.next();
                     out.push(delimiter);
@@ -481,14 +512,23 @@ fn mako_posix_ere_empty_min_repetitions(pattern:&str)->String{
             }
             '{' if !in_class => {
                 let mut look=chars.clone();
-                let omitted_min=if look.next()==Some(','){
-                    while look.peek().is_some_and(char::is_ascii_digit){
-                        look.next();
+                let mut contents=String::new();
+                let mut terminated=false;
+                for next in look.by_ref(){
+                    if next=='}'{terminated=true;break;}
+                    contents.push(next);
+                }
+                if terminated {
+                    if let Some(canonical)=mako_posix_canonical_interval(&contents){
+                        for _ in 0..=contents.chars().count(){chars.next();}
+                        out.push_str(&canonical);
+                        continue;
                     }
-                    look.peek()==Some(&'}')
-                }else{false};
-                if omitted_min {out.push_str("{0");}
-                else{out.push('{');}
+                }
+                // Leave invalid intervals and Rust-only \b{start} assertions
+                // intact. The separate source validator already rejects
+                // malformed glibc intervals before this stage.
+                out.push('{');
             }
             _ => out.push(ch),
         }
@@ -496,16 +536,12 @@ fn mako_posix_ere_empty_min_repetitions(pattern:&str)->String{
     out
 }
 
-/// glibc POSIX REG_EXTENDED treats every unescaped '{' outside a bracket
-/// expression as a counted repetition opener, not a literal fallback.
-/// Its numeric bounds must fit RE_DUP_MAX (32767) and descending ranges,
-/// signs, alphabetic contents and missing '}' are compile errors. Rust
-/// regex can instead treat malformed braces as literals, or compile a
-/// repetition larger than glibc permits. Validate without allocating the
-/// potentially enormous expanded automaton. Escaped braces and bracket
-/// characters remain literal, including nested [:class:] expressions.
+/// glibc REG_EXTENDED requires balanced unescaped interval braces and bounds
+/// <=32767 (RE_DUP_MAX). A length cap on the spelling would be wrong:
+/// a{000...0002} remains valid even with thousands of leading zeroes.
+/// Escaped and bracket-contained braces are literals. Source validation runs
+/// before GNU boundary expansions introduce Rust-only {start}/{end}.
 fn mako_posix_ere_validate_intervals(pattern:&str)->Result<(),String>{
-    const RE_DUP_MAX:u32=32767;
     let mut chars=pattern.chars().peekable();
     let mut in_class=false;
     let mut first_in_class=false;
@@ -526,8 +562,6 @@ fn mako_posix_ere_validate_intervals(pattern:&str)->Result<(),String>{
                 continue;
             }
             if ch==']' && !first_in_class{in_class=false;}
-            // A leading ] after [ or [^ is literal in glibc. The
-            // preceding normalizer has already backslash-escaped it.
             first_in_class=false;
             continue;
         }
@@ -542,31 +576,11 @@ fn mako_posix_ere_validate_intervals(pattern:&str)->Result<(),String>{
         for next in chars.by_ref(){
             if next=='}'{closed=true;break;}
             contents.push(next);
-            // Numeric repetitions above 32767 are invalid anyway. Avoid
-            // building an unbounded allocation from adversarial config.
-            if contents.len()>32{
-                return Err("invalid or oversized POSIX repetition interval".into());
-            }
         }
         if !closed{return Err("unmatched POSIX repetition '{'".into());}
-        let (lower,upper)=if let Some((low,high))=contents.split_once(','){
-            // GNU glibc accepts omitted lower and upper bounds, even {,}.
-            (if low.is_empty(){Some(0)}else{low.parse::<u32>().ok()},
-             if high.is_empty(){None}else{Some(high.parse::<u32>()
-                 .map_err(|_|"invalid POSIX repetition upper bound".to_string())?)})
-        }else{
-            let parsed=contents.parse::<u32>().ok();
-            (parsed,parsed)
-        };
-        let Some(lower)=lower else {
-            return Err("invalid POSIX repetition lower bound".into());
-        };
-        if lower>RE_DUP_MAX || upper.is_some_and(|upper|
-            upper>RE_DUP_MAX || upper<lower){
-            return Err("POSIX repetition exceeds glibc bound or descends".into());
+        if mako_posix_canonical_interval(&contents).is_none(){
+            return Err("invalid, oversized or descending POSIX repetition interval".into());
         }
-        // {,} already normalized to {0,}, so an empty upper means
-        // infinity, not an error; a bare {} has no lower and fails above.
     }
     Ok(())
 }
@@ -1857,6 +1871,64 @@ mod tests {
         fields.body="a";
         assert_eq!(cfg.style_for(&fields)["width"],"472");
         fields.body="z";
+        assert_eq!(cfg.style_for(&fields)["width"],"300");
+    }
+
+    #[test]
+    fn glibc_long_zero_padded_repetition_counts_remain_valid_and_canonical(){
+        // Checked against native glibc C-locale regcomp(REG_EXTENDED |
+        // REG_NOSUB): the number of written zeroes does NOT count toward
+        // RE_DUP_MAX. The numerical value alone decides validity.
+        let zeroes="0".repeat(256);
+        let exact=format!("^a{{{zeroes}2}}$");
+        let bounded=format!("^a{{{zeroes}2,{zeroes}3}}$");
+        let omitted=format!("^a{{,{zeroes}2}}$");
+        let unlimited=format!("^a{{{zeroes}2,}}$");
+        let stacked=format!("^a{{{zeroes}2}}{{{zeroes}2}}$");
+        for (source,canonical) in [
+            (exact.as_str(),"^a{2}$"),
+            (bounded.as_str(),"^a{2,3}$"),
+            (omitted.as_str(),"^a{0,2}$"),
+            (unlimited.as_str(),"^a{2,}$"),
+            (stacked.as_str(),"^a{2}{2}$"),
+        ]{
+            assert!(mako_posix_ere_validate_intervals(source).is_ok(),
+                "glibc accepts long zero-padded source: {source:?}");
+            assert_eq!(mako_posix_ere_empty_min_repetitions(source),canonical);
+            let selector=Selector::new("summary~",source).unwrap_or_else(|e|
+                panic!("glibc-accepted interval rejected: {e}"));
+            let mut fields=note("normal",&["default"]);
+            fields.summary=if source==stacked {"aaaa"} else {"aa"};
+            assert!(selector.matches(&fields),"correctly counted source must match");
+            fields.summary="b";
+            assert!(!selector.matches(&fields),"counted expression must reject b");
+        }
+        // Even a zero-padded numerical 32768 remains invalid, and
+        // decreasing zero-padded endpoints remain invalid.
+        for source in [
+            format!("a{{{zeroes}32768}}"),
+            format!("a{{{zeroes}3,{zeroes}2}}"),
+            format!("a{{,{zeroes}32768}}"),
+            format!("a{{{zeroes}2,{zeroes}32768}}"),
+        ]{
+            assert!(mako_posix_ere_validate_intervals(&source).is_err());
+            assert!(Selector::new("body~",&source).is_err());
+        }
+        // Keep escaped and bracket-contained counted-looking strings
+        // unchanged, not accidentally quantified.
+        for source in [
+            format!(r"^\{{{zeroes}2\}}$"),
+            format!("^[{{{zeroes}2}}]$"),
+        ]{
+            assert_eq!(mako_posix_ere_empty_min_repetitions(&source),source);
+        }
+        let cfg=Config::parse(&format!(
+            "[body~=\"^a{{{zeroes}2,{zeroes}3}}$\"]\nwidth=464\n"
+        )).unwrap();
+        let mut fields=note("normal",&["default"]);
+        fields.body="aaa";
+        assert_eq!(cfg.style_for(&fields)["width"],"464");
+        fields.body="aaaa";
         assert_eq!(cfg.style_for(&fields)["width"],"300");
     }
 
