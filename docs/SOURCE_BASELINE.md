@@ -2257,32 +2257,81 @@ compositor acceptance matrix. This strengthens evidence for the
 `group-by=hidden` implementation. Phase P1 is still 91%,
 strict MVP 89%.
 
-## Remaining source-backed icon lifetime discrepancy — NOT accepted
+## Mako icon lifetime, retained fit and initial compositor scale — accepted
 
-Pinned Mako v1.11.0 `dbus/xdg.c:handle_notify` (lines
-401-413) calls `create_icon` once on Notify after determining the
-notification's initial style. `icon.c:create_icon` (lines
-253-288) holds a decoded Cairo icon and its scale chosen with
-the **initial** `max-icon-size` and largest currently attached
-output scale. Mako's `dbus/mako.c:reapply_config` (lines
-302-334) destroys/rebuilds surfaces and reapplies styles but
-does not call `destroy_icon`/`create_icon` again. In
-`render.c`, each frame uses the retained `notif->icon` if
-the current style still enables icons.
+Pinned Mako v1.11.0 `dbus/xdg.c:handle_notify` (lines 401-413)
+calls `create_icon` **once** after applying the new notification's
+style. `icon.c:create_icon` (lines 253-288) caches a decoded
+pixel surface with initial `max-icon-size` fit and the theme asset
+selected at the maximum currently attached output scale.
+`dbus/mako.c:reapply_config` (lines 302-334) changes styles and
+reassigns surfaces without recreating the cached icon. A history
+entry retains its icon; only a genuine replacement `Notify`
+creates a new one. `render.c` uses `notif->icon` if the current
+style still enables icons.
 
-Posthorn currently uses `load_note_icon_scaled` from
-`src/render.rs` for each measurement/render and the *current*
-style to select, decode and size a file icon. A themed/absolute
-icon changed on disk, an icon created later on disk, or mode
-changes to `max-icon-size`/`icon-path` can therefore affect
-an already-active Posthorn notification but not an equivalent
-already-active Mako notification. This is **a known source
-mismatch**, not a passing acceptance item. A future correction
-must retain the per-notification icon payload and initial
-scale across redraws, mode changes and reloads, reset it only
-when Mako creates a replacement icon, and account for the
-compositor's multi-output maximum scale *at arrival*.
-It needs isolated D-Bus + Cairo regression with a temporary
-PNG overwritten after Notify plus mixed-output DPI checks.
-Do not close T402 (99%), T503 (51%) or the MVP gate on
-the basis of today's tests.
+Posthorn previously loaded icon files and theme assets again on
+every frame. Now `Notification::icon_snapshot` represents
+**uncaptured**, **captured but absent** and **captured pixels plus
+original fit size**, preventing both retroactive icon changes and
+late-appearing files from altering a prior notification.
+`SharedRuntime::schedule_impl` captures exactly once at
+notification arrival after initial criteria style selection.
+Direct-ID and matching stack-tag replacements reconstruct the
+notification and capture a fresh icon; mode changes, file reload,
+history close and history restore keep the original snapshot.
+The size cap is retained during Pango measurement AND Cairo paint.
+Direct unscheduled in-memory renderer fixtures still allow
+on-demand decoding without pretending they went through Notify.
+
+Mako also knows its outputs before accepting notifications.
+Posthorn now performs a registry-only Wayland scale probe before
+registering the private D-Bus name, and its multi-surface renderer
+keeps an independent output observer even when there are zero
+notifications. The evolving maximum monitor scale applies only
+to **new** icon captures, never to previous notifications.
+A QA-only `POSTHORN_QA_ICON_TRACE` diagnostic prints only
+the scale, max-size and a captured pixel; it is not enabled
+in normal operation and never logs notification text, icon paths
+or user-supplied identifiers.
+
+Source implementation across commits:
+[dd5914f](https://github.com/sguzman/posthorn/commit/dd5914fef33dccc4f84853d245f02c4e7c9355c2),
+[4b7de16](https://github.com/sguzman/posthorn/commit/4b7de165a6d7d4a3b8651c81e084be655dda4b87),
+[7bfc194](https://github.com/sguzman/posthorn/commit/7bfc194ddb7b2aa0dc0afe682972e594bf6a599f),
+[d1c3b43](https://github.com/sguzman/posthorn/commit/d1c3b436a3571e5d399fb950c7ee77867583fff2).
+
+Acceptance includes:
+- Private D-Bus Notify with a real PNG that changes on disk;
+  the old frame stays identical, then direct replacement refreshes
+  it. A missing PNG is not retried until a new Notify arrives.
+- `SetMode` changes `max-icon-size` but does not resize the
+  existing icon, while subsequent Notify captures the new fit.
+- Private `Reload`, `CloseNotification` and
+  `RestoreNotification` after removal of the PNG retain the
+  original pixels and fitted dimensions.
+- Unit and private D-Bus tests select 1x versus 2x themed PNGs
+  at **arrival** and confirm later lookup/output-scale changes
+  cannot change an existing notification's asset.
+- Real isolated Sway mixed-DPI QA keeps the older icon on an
+  output scale change, then verifies subsequent new notifications
+  on 1x and 2x with screenshot color/height checks and real
+  virtual-pointer dismissal at the bottom of the icon.
+
+Intermediate CI runs were red while updating compile fixtures and
+replacing the **incorrect old test** that expected redraw-time
+icon switching. The final source implementation passed both jobs
+at [run 40200454039](https://github.com/sguzman/posthorn/actions/runs/40200454039):
+309 Rust library tests, 81 isolated private D-Bus integration
+tests and the full compositor acceptance suite (1x, fractional
+1.25x, 2x, 9x, multi-output, mixed-DPI and input).
+No live Mako installation, production D-Bus bus or user
+Hyprland configuration was touched.
+
+This closes the identified icon lifetime/source-parity discrepancy,
+but **does not establish every icon, SVG/Pango or Wayland behavior
+as 100%**. T402 is still 99% (0pp), T401 is still 99% (0pp).
+Documented and tested startup/output-scale knowledge plus reload
+retention advances **T303 84% -> 86% (+2pp)** and
+**P3 93% -> 94% (+1pp)**. Strict M0 remains **89% (0pp)**;
+physical Hyprland T503 remains 51% and cutover T504 remains 0%.
