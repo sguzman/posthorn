@@ -579,7 +579,7 @@ mod tests {
         let initial=service.apply_notify(
             "sender",0,"","Original","",Vec::new(),HashMap::new(),-1
         ).unwrap();
-        let bad=|(bytes:Vec<u8>,bits:i32,channels:i32)|{
+        let bad=|bytes:Vec<u8>,bits:i32,channels:i32|{
             let tuple=(2i32,2i32,8i32,true,bits,channels,bytes);
             OwnedValue::try_from(Value::from(tuple)).unwrap()
         };
