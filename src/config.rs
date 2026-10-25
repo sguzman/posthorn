@@ -247,6 +247,17 @@ fn mako_posix_ere_escapes(pattern: &str) -> String {
                 Some('>') => normalized.push('>'),
                 Some('`') => normalized.push('`'),
                 Some('\'') => normalized.push('\''),
+                // glibc accepts backslashes before ordinary punctuation
+                // (e.g. \#, \!, \@, \_, \/) and before the digit zero
+                // as literal characters. Rust regex rejects some of
+                // those escapes or gives them a different meaning.
+                // Preserve Rust metacharacter escaping, but do not
+                // consume \1..\9: glibc uses those for backreferences.
+                Some(other) if !in_class && !other.is_ascii_alphabetic()
+                    && !matches!(other, '1'..='9') =>
+                {
+                    normalized.push_str(&regex::escape(&other.to_string()));
+                }
                 Some(other) => {
                     normalized.push('\\');
                     normalized.push(other);
@@ -2073,6 +2084,52 @@ mod tests {
         assert!(rule.rules[0].selectors[0].matches(&fields));
         fields.summary = "123";
         assert!(!rule.rules[0].selectors[0].matches(&fields));
+    }
+
+    #[test]
+    fn glibc_posix_escaped_punctuation_and_zero_remain_literal() {
+        // Native glibc regcomp(REG_EXTENDED | REG_NOSUB), C locale:
+        // escaped ordinary punctuation is a literal, even when Rust's
+        // regex parser rejects the escape. GNU \0 is also literal '0',
+        // unlike a NUL-byte escape in other regex dialects.
+        let mut fields=note("normal",&["default"]);
+        for (pattern,yes,no) in [
+            (r"^\!$","!","?"),
+            (r"^\#$","#","x"),
+            (r"^\@$","@","x"),
+            (r"^\_$","_","x"),
+            (r"^\=$","=","x"),
+            (r"^\,$",",","x"),
+            (r"^\/$","/","x"),
+            (r"^\:$",":","x"),
+            (r"^\ $"," ","x"),
+            (r"^\0$","0","\0"),
+            (r"^\.$",".","x"),
+            (r"^\+$","+","x"),
+            (r"^\($","(","x"),
+            (r"^\{$","{","x"),
+            (r"^a\#b$","a#b","a\\#b"),
+        ]{
+            let selector=Selector::new("summary~",pattern).unwrap_or_else(|e|
+                panic!("glibc accepts escaped literal {pattern:?}: {e}"));
+            fields.summary=yes;
+            assert!(selector.matches(&fields),
+                "{pattern:?} must match escaped ordinary literal {yes:?}");
+            fields.summary=no;
+            assert!(!selector.matches(&fields),
+                "{pattern:?} must not match {no:?}");
+        }
+        assert_eq!(mako_posix_ere_escapes(r"\! \# \0 \+"),r"! # 0 \+");
+        // Inside POSIX bracket expressions the backslash is a separate
+        // literal member; do not apply the outside-class conversion.
+        assert_eq!(mako_posix_ere_escapes(r"[\!]"),r"[\!]");
+        // A parsed Mako file uses the same regex path, including its
+        // one layer of criteria backslash decoding.
+        let cfg=Config::parse("[body~=^a\\\\#b$]\nwidth=419\n").unwrap();
+        fields.body="a#b";
+        assert_eq!(cfg.style_for(&fields)["width"],"419");
+        fields.body="a\\#b";
+        assert_eq!(cfg.style_for(&fields)["width"],"300");
     }
 
     #[test]
