@@ -432,13 +432,18 @@ impl SharedRuntime {
             .remove(&id).ok_or("no staged on-notify binding for ID")
     }
 
-    pub fn close(&self, id: u32, reason: CloseReason, save_history: bool)
-        -> Result<bool, &'static str>
+    /// Whether Mako notification.c:close_notification reaches
+    /// emit_notifications_changed(): it returns early whenever style.history
+    /// is disabled or max_history <= 0, despite always emitting
+    /// NotificationClosed. Preserve that source-visible distinction.
+    pub fn close_with_change(&self,id:u32,reason:CloseReason,save_history:bool)
+        -> Result<Option<bool>,&'static str>
     {
         let mut store = self.store.lock().map_err(|_| "notification store lock poisoned")?;
         let mut policies=self.history_policies.lock()
             .map_err(|_| "history policy lock poisoned")?;
         let history_enabled=policies.get(&id).copied().unwrap_or(true);
+        let emits_change=history_enabled && self.config().max_history>0;
         let removed=store.close(id, reason, save_history, history_enabled);
         if let Some(note)=removed.as_ref(){
             let modes=self.modes.lock()
@@ -466,11 +471,18 @@ impl SharedRuntime {
             self.reapply_active_history_policies()
                 .map_err(|_|"group history style reapplication failed")?;
         }
-        Ok(closed)
+        Ok(removed.map(|_|emits_change))
+    }
+
+    pub fn close(&self,id:u32,reason:CloseReason,save_history:bool)
+        -> Result<bool,&'static str>{
+        Ok(self.close_with_change(id,reason,save_history)?.is_some())
     }
 
     /// Returns IDs actually expired (already-dismissed timer IDs are ignored).
-    pub fn expire(&self, now: Instant) -> Result<Vec<u32>, &'static str> {
+    pub fn expire_with_changes(&self,now:Instant)
+        -> Result<Vec<(u32,bool)>,&'static str>{
+
         let mut store = self.store.lock().map_err(|_| "notification store lock poisoned")?;
         let expired=self.timers.lock()
             .map_err(|_| "expiration scheduler lock poisoned")?
@@ -480,6 +492,7 @@ impl SharedRuntime {
         let mut closed=Vec::new();
         for id in expired {
             let allow_history=policies.remove(&id).unwrap_or(true);
+            let emits_change=allow_history && self.config().max_history>0;
             if let Some(note)=store.close(id,CloseReason::Expired,true,allow_history) {
                 let modes=self.modes.lock()
                     .map_err(|_|"mode state lock poisoned")?.clone();
@@ -488,7 +501,7 @@ impl SharedRuntime {
                     style.get("group-by").map(String::as_str).unwrap_or("none")
                 ).map_err(|_|"invalid group-by style")?;
                 store.regroup_after_close(&note,&spec);
-                closed.push(id);
+                closed.push((id,emits_change));
             }
         }
         drop(policies);
@@ -497,12 +510,16 @@ impl SharedRuntime {
             {
                 let mut pending=self.pending_notify_bindings.lock()
                     .map_err(|_|"on-notify binding state lock poisoned")?;
-                for id in &closed {pending.remove(id);}
+                for (id,_) in &closed {pending.remove(id);}
             }
             self.reapply_active_history_policies()
                 .map_err(|_|"group history style reapplication failed")?;
         }
         Ok(closed)
+    }
+
+    pub fn expire(&self,now:Instant)->Result<Vec<u32>,&'static str>{
+        Ok(self.expire_with_changes(now)?.into_iter().map(|(id,_)|id).collect())
     }
 
     pub fn next_deadline(&self) -> Result<Option<Instant>, &'static str> {
