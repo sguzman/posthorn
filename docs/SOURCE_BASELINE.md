@@ -3230,3 +3230,46 @@ strict 24-task M0 raw **89.583% → 89.625% (+0.042 pp)**,
 displayed 90%. Physical Hyprland T503 remains **51%**,
 opt-in production cutover T504 remains **0%**.
 No change to live Mako, its D-Bus ownership, or desktop config.
+
+## Glibc leading double-hyphen POSIX bracket range (2026-10-25)
+
+Mako v1.11.0 compiles `summary~` and `body~` with glibc
+`regcomp(REG_EXTENDED | REG_NOSUB)` (`criteria.c:332-349`).
+Native C-locale probes confirmed that **a leading `--`**
+inside a POSIX bracket expression represents a range
+from literal `-` to the following endpoint: `[--a]`
+matches `-`, `.`, `/`, `9`, `A`, and `a`, but not `b`.
+`[--]` matches literal `-`; `[^--a]` and `[^--]`
+apply corresponding negation. Rust regex instead treats
+unescaped `--` as a reserved set-subtraction operator.
+
+Posthorn's *first* bracket normalization pass now
+backslash-escapes only the first hyphen of a class-starting
+`--` sequence (including after leading `^`). The second
+hyphen remains the source range operator; subsequent
+POSIX bracket and escaped-character passes preserve the
+range. Unrelated class members and real nested POSIX
+elements are not transformed.
+
+A new Rust regression exercises four native-glibc-
+confirmed expressions, with positive/negative selector
+matches, asserts the exact intermediate normalized syntax,
+and checks a complete `Config::parse` `body~` rule.
+The full existing regression and isolated compositor suites
+passed. This is **not** evidence for universal hyphen-range
+validation; source-invalid cases such as `[a-z--]` remain
+within the unclosed overall regex-parity audit.
+
+- [Pinned Mako `criteria.c`](https://github.com/emersion/mako/blob/v1.11.0/criteria.c#L332-L349)
+- [Targeted implementation and regression 379a984](https://github.com/sguzman/posthorn/commit/379a984d2c4560c7a6b6fbd271fe03b725dc3470)
+- [Fully green isolated CI 40231268590](https://github.com/sguzman/posthorn/actions/runs/40231268590):
+  **329 Rust library tests, 90 isolated D-Bus tests, and
+  complete headless Wayland acceptance passed**.
+
+**Accepted progress:** T103 **90% → 91% (+1 pp)**;
+P1 raw **93.0% → 93.2% (+0.2 pp)**, displayed 93%;
+24-task strict M0 raw **89.625% → 89.667% (+0.042 pp)**,
+displayed 90%. Real Hyprland T503 remains 51%,
+and explicitly authorized reversible cutover T504 remains
+0%. No live daemon, notification bus or desktop config
+was accessed or changed.
