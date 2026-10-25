@@ -3145,3 +3145,43 @@ still **90%** displayed. Actual Hyprland T503 **51%**
 and explicitly authorized reversible cutover T504 **0%**
 are unchanged. No live Mako, notification bus or desktop
 configuration was modified.
+
+## Glibc unmatched closing regex delimiters are literal atoms (2026-10-25)
+
+Pinned Mako v1.11.0 compiles `summary~` and `body~`
+with glibc `regcomp(REG_EXTENDED | REG_NOSUB)`.
+Native glibc C-locale checks confirm that a closing `)`, `]`,
+or `}` with no corresponding opening delimiter is a **literal**
+character, not a syntax error. For example, `^)$` matches `)`,
+`^]$` matches `]`, `^}$` matches `}`, and `^(a))$`
+matches `a)`. Those literal atoms also admit postfix repetition:
+`^a)*$` accepts `a)))`, and `^a{2}}*$` accepts `aa}}`.
+
+Posthorn now escapes only **unmatched** closing delimiters
+before passing the expression to Rust regex. The source-level
+normalizer tracks balanced group nesting, POSIX bracket elements,
+escaped characters, and already-validated glibc repetition
+intervals. It runs before GNU word-boundary rewrites add
+Rust-only `\b{start}` and `\b{end}` braces, which must not
+be mistaken for glibc interval closers.
+
+Regression coverage includes 12 native-glibc-confirmed
+positive/negative anchored selector fixtures, direct checks that
+balanced captures and real intervals survive, and a full
+`Config::parse` notification style matching case. These tests
+demonstrate the specific closing-delimiter contract, not all
+remaining POSIX backreference or collation semantics.
+
+- [Pinned Mako criteria source](https://github.com/emersion/mako/blob/v1.11.0/criteria.c#L332-L349)
+- [Implementation and regressions fdac24e](https://github.com/sguzman/posthorn/commit/fdac24e38d4274dc3a7ab827c827964fcffd723d)
+- [Fully green isolated CI 40228577605](https://github.com/sguzman/posthorn/actions/runs/40228577605):
+  **327 Rust library tests, 90 isolated private D-Bus tests,
+  and full headless Wayland compositor acceptance passed**.
+
+**Accepted progress:** T103 **88% → 89% (+1 pp)**,
+P1 raw **92.6% → 92.8% (+0.2 pp)** (display 93%),
+strict 24-task M0 **89.542% → 89.583% (+0.042 pp)**
+(display 90%). Actual physical Hyprland T503 remains 51%,
+and opt-in reversible Mako cutover T504 remains 0%.
+No installed daemon, production notification bus or live
+Hyprland config was modified.
