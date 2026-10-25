@@ -121,6 +121,62 @@ async fn history_disabled_close_suppresses_only_mako_control_property_invalidati
 }
 
 #[tokio::test]
+async fn successful_or_failed_reload_does_not_invalidate_mako_notifications_property()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use futures_util::StreamExt;
+    use posthorn::service::open_private_service_from_path;
+    // Pinned dbus/mako.c:handle_reload and reapply_config adjust existing
+    // render state without inserting/removing notifications, and never emit
+    // Notifications property changes. An invalid reload is also silent.
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("config");
+    std::fs::write(&path,"width=180\nheight=70\ndefault-timeout=0\n")?;
+    let (conn,runtime)=open_private_service_from_path(&path).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let props=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,
+        "org.freedesktop.DBus.Properties").await?;
+    let mut changes=props.receive_signal("PropertiesChanged").await?;
+
+    let id:u32=desktop.call("Notify",&(
+        "reload-signal-test",0u32,"","Before reload","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    tokio::time::timeout(Duration::from_secs(3),changes.next()).await?
+        .ok_or("new insertion must invalidate Notifications")?;
+    let before=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_eq!(runtime.config().global["width"],"180");
+
+    std::fs::write(&path,"width=320\nheight=70\ndefault-timeout=0\n")?;
+    let _:()=ctl.call("Reload",&()).await?;
+    assert_eq!(runtime.config().global["width"],"320");
+    let after=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_ne!(before.width,after.width,"Reload must apply actual changed width");
+    assert_eq!(runtime.store.lock().unwrap().active().front().map(|n|n.id),
+        Some(id));
+    assert!(tokio::time::timeout(Duration::from_millis(150),changes.next())
+        .await.is_err(),"successful Mako Reload must not invalidate Notifications");
+
+    std::fs::write(&path,"width=0\n")?;
+    let rejected:zbus::Result<()>=ctl.call("Reload",&()).await;
+    assert!(rejected.is_err());
+    assert_eq!(runtime.config().global["width"],"320",
+        "failed Reload must preserve the last accepted config");
+    assert!(tokio::time::timeout(Duration::from_millis(150),changes.next())
+        .await.is_err(),"failed Mako Reload must not invalidate Notifications");
+
+    let next:u32=desktop.call("Notify",&(
+        "reload-signal-test",0u32,"","After reload","",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_ne!(next,id);
+    tokio::time::timeout(Duration::from_secs(3),changes.next()).await?
+        .ok_or("ordinary post-Reload Notify must still emit a change")?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn notify_only_invalidates_mako_control_on_real_insertion_not_id_or_tag_replace()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
