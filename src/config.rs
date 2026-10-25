@@ -176,6 +176,23 @@ fn mako_posix_ere_dash_only_brackets(pattern:&str)->Result<String,String>{
                     }
                 }
                 while probe.peek()==Some(&'-'){count+=1;probe.next();}
+                // Native glibc: [---a] is the two-member class
+                // {'-', 'a'}, while [--a] is the range '-' through 'a'.
+                // The first normalization quotes a leading '--' as
+                // \\---a; consume the *three* original hyphens and
+                // retain one literal escaped '-' for Rust regex.
+                // Subsequent atoms (including a-z) keep their syntax.
+                if quoted_first && count==3
+                    && probe.peek().is_some_and(|next|*next!='-'&&*next!=']')
+                {
+                    for _ in 0..(usize::from(negated)+4){chars.next();}
+                    result.push('[');
+                    if negated{result.push('^');}
+                    result.push_str(r"\-");
+                    in_class=true;
+                    first=false;
+                    continue;
+                }
                 if count>0 && probe.peek()==Some(&']'){
                     if count>4{
                         return Err("invalid glibc POSIX all-hyphen bracket range".into());
@@ -2306,6 +2323,30 @@ mod tests {
         ] {
             assert!(mako_posix_reject_simple_invalid_dash_ranges(source).is_ok(),
                 "don't over-reject valid or complex source {source:?}");
+        }
+        // Preserve the distinction between a two-hyphen range
+        // and a three-hyphen literal member set in native glibc.
+        assert_eq!(mako_posix_ere_dash_only_brackets(
+            &mako_posix_c_class_backslashes("[---a]")).unwrap(),r"[\-a]");
+        assert_eq!(mako_posix_ere_dash_only_brackets(
+            &mako_posix_c_class_backslashes("[^---a-z]")).unwrap(),
+            r"[^\-a-z]");
+        for (pattern,yes,no) in [
+            ("^[--a]$",vec!["-","0","a"],vec!["b"]),
+            ("^[---a]$",vec!["-","a"],vec![".","0","b"]),
+            ("^[---a-z]$",vec!["-","a","q","z"],vec![".","0"]),
+            ("^[^---a]$",vec![".","0","b"],vec!["-","a"]),
+        ]{
+            let rule=Selector::new("summary~",pattern).unwrap();
+            let mut note=note("normal",&["default"]);
+            for summary in yes{
+                note.summary=summary;
+                assert!(rule.matches(&note),"{pattern:?} should match {summary:?}");
+            }
+            for summary in no{
+                note.summary=summary;
+                assert!(!rule.matches(&note),"{pattern:?} should reject {summary:?}");
+            }
         }
         let mut note=note("normal",&["default"]);
         let bracket=Selector::new("summary~","^[---a]$").unwrap();
