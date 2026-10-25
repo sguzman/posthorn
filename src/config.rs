@@ -124,8 +124,16 @@ fn mako_posix_reject_simple_invalid_dash_ranges(pattern:&str)->Result<(),String>
                 }
                 if !closed { continue; } // Other POSIX syntax checks this.
                 let class=contents.strip_prefix('^').unwrap_or(&contents);
+                // A repeated hyphen after a C-locale ASCII literal
+                // *greater than* '-' (0x2d) is an invalid range end.
+                // Include that ordinary punctuation here, but NOT '+',
+                // '!', '&', etc: glibc accepts e.g. [+--z] because
+                // '+'..'-' is a valid two-character range.
+                // Leave bracket syntax (nested POSIX elements, escapes
+                // and other operators) to the dedicated passes.
                 if class.is_empty() || !class.chars().all(|c|
-                    c.is_ascii_alphanumeric() || c=='-'){
+                    c.is_ascii_alphanumeric() || c=='-' ||
+                    matches!(c,'.'|'/'|':'|';'|'<'|'='|'>'|'?'|'@'|'_'|'~')){
                     continue;
                 }
                 let head=class.bytes().take_while(|byte|*byte==b'-').count();
@@ -2308,6 +2316,12 @@ mod tests {
             "[a--z]", "[a-z--]", "[-a--]", "[----a]",
             "[^----a]", "[ab--c]", "[0--9]", "[a---]",
             "[--a--]",
+            // Native glibc C-locale regcomp: ASCII members above '-'
+            // preceding a second '-' are descending invalid ranges.
+            "[a.--z]", "[.--z]", "[a/--z]", "[a:--z]",
+            "[a;--z]", "[a<--z]", "[a=--z]", "[a>--z]",
+            "[a?--z]", "[a@--z]", "[a_--z]", "[a~--z]",
+            "[_--z]", "[@--z]", "[.-z--]",
         ]{
             assert!(mako_posix_reject_simple_invalid_dash_ranges(source).is_err(),
                 "glibc rejects source bracket {source:?}");
@@ -2319,6 +2333,11 @@ mod tests {
             "[--a]", "[---a]", "[^---a]", "[--a-]",
             "[-a-]", "[----]", "[^----]", "[a-z-]",
             "[a-b]", "[abc]", "[-ab]", "[[:digit:]]",
+            // These adjacent '--' forms are accepted by glibc because
+            // punctuation earlier than '-' begins an ascending range.
+            // They are guard-only controls, not full matcher claims.
+            "[!--z]", "[+--z]", "[a+--z]", "[a&--z]",
+            "[a%--z]", "[a, --z]",
             r"[\--a]", // complex source class: other passes decide
         ] {
             assert!(mako_posix_reject_simple_invalid_dash_ranges(source).is_ok(),
