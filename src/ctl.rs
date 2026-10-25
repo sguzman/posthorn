@@ -84,6 +84,14 @@ fn parse_mako_id(raw:&str)->Result<u32,&'static str>{
 }
 
 pub fn parse_command(args: &[String]) -> Result<Command, String> {
+    // GNU getopt switches from permutation to stop-at-first-positional
+    // whenever POSIXLY_CORRECT is defined (including the empty string).
+    parse_command_with_order(args, std::env::var_os("POSIXLY_CORRECT").is_none())
+}
+
+/// Explicit ordering policy keeps getopt conformance tests deterministic
+/// without mutating process-wide environment variables in parallel tests.
+fn parse_command_with_order(args: &[String], permute: bool) -> Result<Command, String> {
     let Some((command, rest)) = args.split_first() else {
         // makoctl with no command prints usage on stderr and exits nonzero.
         return Err(USAGE.into());
@@ -108,6 +116,8 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                         return Err("usage: posthornctl list|history [-j]".into());
                     }
                     json=true;
+                } else if !permute {
+                    options=false;
                 }
             }
             Ok(Command::List {history:command=="history",json})
@@ -133,6 +143,7 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                     return Err(format!("unknown menu option {arg}"));
                 } else {
                     program.push(rest[i].clone());
+                    if !permute { options=false; }
                 }
                 i+=1;
             }
@@ -180,6 +191,10 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                             _=>return Err(format!("unknown dismiss option -{option}")),
                         }
                     }
+                }else if options && !permute{
+                    // With POSIXLY_CORRECT, even an ignored positional
+                    // argument stops getopt before subsequent options.
+                    options=false;
                 }
                 // GNU getopt ignores extra non-option arguments here.
                 i+=1;
@@ -208,8 +223,9 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                     id=parse_mako_id(&arg[2..])?;
                 } else if options && arg.starts_with('-') && arg.len()>1 {
                     return Err(format!("unknown invoke option {arg}"));
-                } else if action.is_none() {
-                    action=Some(arg.to_owned());
+                } else {
+                    if action.is_none() { action=Some(arg.to_owned()); }
+                    if !permute { options=false; }
                 }
                 i+=1;
             }
@@ -255,7 +271,17 @@ pub fn parse_command(args: &[String]) -> Result<Command, String> {
                         }
                         i+=1;
                     },
-                    value=>{positional.push(value.to_owned());i+=1;}
+                    value=>{
+                        positional.push(value.to_owned());
+                        i+=1;
+                        if !permute {
+                            // getopt stops immediately at the first
+                            // positional; the remaining argv are verbatim
+                            // modes, even when they begin with '-' or '--'.
+                            positional.extend(rest[i..].iter().cloned());
+                            break;
+                        }
+                    }
                 }
             }
             if set && !edits.is_empty() {
@@ -634,6 +660,39 @@ mod tests {
             Command::Modes{edit:vec![('s',"".into()),('S',"-".into())]});
         assert!(parse_command(&v(&["mode","-"])).is_err(),
             "bare positional mode still requires -s");
+    }
+
+
+    #[test]
+    fn posixly_correct_getopt_stops_at_first_positional(){
+        // Pinned Mako v1.11.0 calls glibc getopt/getopt_long without
+        // a leading '+' in its option string. POSIXLY_CORRECT switches
+        // all five subcommands from permutation to require-order.
+        let parse=|args:&[&str],permute|parse_command_with_order(&v(args),permute);
+        assert!(parse(&["mode","-s","quiet","-a","urgent"],true).is_err());
+        assert_eq!(parse(&["mode","-s","quiet","-a","urgent"],false).unwrap(),
+            Command::Modes{edit:vec![
+                ('s',String::new()),('S',"quiet".into()),
+                ('S',"-a".into()),('S',"urgent".into())
+            ]});
+        assert_eq!(parse(&["menu","picker","-n7"],true).unwrap(),
+            Command::Menu{id:7,program:vec!["picker".into()]});
+        assert_eq!(parse(&["menu","picker","-n7"],false).unwrap(),
+            Command::Menu{id:0,program:vec!["picker".into(),"-n7".into()]});
+        assert_eq!(parse(&["invoke","open","-n7"],true).unwrap(),
+            Command::Invoke{id:7,action:"open".into()});
+        assert_eq!(parse(&["invoke","open","-n7"],false).unwrap(),
+            Command::Invoke{id:0,action:"open".into()});
+        assert_eq!(parse(&["dismiss","ignored","-a"],true).unwrap(),
+            Command::Dismiss{id:0,all:true,group:false,history:true});
+        assert_eq!(parse(&["dismiss","ignored","-a"],false).unwrap(),
+            Command::Dismiss{id:0,all:false,group:false,history:true});
+        assert_eq!(parse(&["list","ignored","-j"],true).unwrap(),
+            Command::List{history:false,json:true});
+        assert_eq!(parse(&["list","ignored","-j"],false).unwrap(),
+            Command::List{history:false,json:false});
+        assert_eq!(parse(&["invoke","--","-n7"],false).unwrap(),
+            Command::Invoke{id:0,action:"-n7".into()});
     }
 
     #[test]
