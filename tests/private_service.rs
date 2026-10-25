@@ -177,6 +177,63 @@ async fn successful_or_failed_reload_does_not_invalidate_mako_notifications_prop
 }
 
 #[tokio::test]
+async fn glibc_invalid_regex_interval_reload_is_atomic_and_keeps_live_notifications()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::open_private_service_from_path;
+    // Mako config.c:reload_config rejects a newly parsed invalid regex
+    // without replacing its last good config or the active store.
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("config");
+    std::fs::write(&path,"width=180\nheight=65\n[body~=\"^ok$\"]\nwidth=240\n")?;
+    let (conn,runtime)=open_private_service_from_path(&path).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let control=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let initial_id:u32=desktop.call("Notify",&(
+        "mako-interval-test",0u32,"","Before invalid reload","ok",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_eq!(runtime.config().global["width"],"180");
+    assert_eq!(runtime.config().rules[0].options["width"],"240");
+
+    for invalid in ["a{foo}","a{2,+3}","a{2,1}","a{32768}"]{
+        std::fs::write(&path,format!(
+            "width=999\nheight=65\n[body~=\"{invalid}\"]\nwidth=980\n"
+        ))?;
+        let result:zbus::Result<()>=control.call("Reload",&()).await;
+        assert!(result.is_err(),
+            "Mako glibc must reject Reload with {invalid:?}");
+        let config=runtime.config();
+        assert_eq!(config.global["width"],"180",
+            "rejected glibc expression cannot partly replace global settings");
+        assert_eq!(config.rules[0].options["width"],"240",
+            "rejected glibc expression cannot replace scoped rules");
+        assert_eq!(runtime.store.lock().unwrap().active()
+            .iter().find(|n|n.id==initial_id).map(|n|n.body.as_str()),
+            Some("ok"),"rejected Reload may not dismiss or mutate active Notify");
+    }
+
+    std::fs::write(&path,
+        "width=180\nheight=65\n[body~=\"^(valid){2,3}$\"]\nwidth=360\n"
+    )?;
+    let _:()=control.call("Reload",&()).await?;
+    assert_eq!(runtime.config().rules[0].options["width"],"360");
+    let new_id:u32=desktop.call("Notify",&(
+        "mako-interval-test",0u32,"","After valid reload","validvalid",
+        Vec::<String>::new(),HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    assert_ne!(new_id,initial_id);
+    let note=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==new_id).cloned().ok_or("new Notify not active")?;
+    let modes=runtime.modes().lock().unwrap().clone();
+    let style=posthorn::desktop::style_for_note_index(
+        &runtime,&note,&modes,-1);
+    assert_eq!(style["width"],"360",
+        "valid POSIX interval must match body after successful Reload");
+    Ok(())
+}
+
+#[tokio::test]
 async fn notify_only_invalidates_mako_control_on_real_insertion_not_id_or_tag_replace()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
