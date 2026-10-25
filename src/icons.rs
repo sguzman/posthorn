@@ -73,7 +73,12 @@ fn url_decode(input:&str)->Option<Vec<u8>> {
         if bytes[i]==b'%' && i+2<bytes.len(){
             if let (Some(hi),Some(lo))=(hex(bytes[i+1]),hex(bytes[i+2])){
                 let value=(hi<<4)|lo;
-                if value==0{return None;}
+                // Mako's icon.c:url_decode writes into a NUL-terminated
+                // C filename. A decoded %00 ends that filename; the
+                // trailing URI bytes never reach gdk_pixbuf_new_from_file.
+                // Rust paths cannot contain NUL, so retain the exact
+                // prefix instead of rejecting the entire source URI.
+                if value==0 { break; }
                 decoded.push(value);
                 i+=3;
                 continue;
@@ -316,7 +321,12 @@ mod tests {
         assert!(resolve_icon("bad/file","/usr/share/icons",64).is_none());
         assert_eq!(resolve_icon("file:///tmp/hello%20world.png","",64),
             Some(PathBuf::from("/tmp/hello world.png")));
-        assert!(resolve_icon("file:///%00hidden","",64).is_none());
+        assert_eq!(resolve_icon("file:///tmp/prefix.png%00ignored","",64),
+            Some(PathBuf::from("/tmp/prefix.png")));
+        assert!(resolve_icon("file://%00hidden","",64).is_none(),
+            "empty C filename must not become a directory");
+        assert!(resolve_icon("file:///%00hidden","",64).is_some(),
+            "root slash is a nonempty truncated filename in Mako");
     }
 
     #[test]
@@ -356,8 +366,14 @@ mod tests {
         // escapes as literal '%' rather than treating them as fatal.
         let literal=resolve_icon("file://images/100%broken.png","",64).unwrap();
         assert_eq!(literal.as_os_str().as_bytes(),b"images/100%broken.png");
-        // Do not allow a C-style NUL to truncate the path in Rust.
-        assert!(resolve_icon("file://images/%00hidden.png","",64).is_none());
+        // Mako's decoded filename is a C string; a percent-encoded NUL
+        // ends it, even when more apparent filename characters follow.
+        assert_eq!(resolve_icon("file://images/name.png%00hidden.png","",64),
+            Some(PathBuf::from("images/name.png")));
+        assert_eq!(resolve_icon("file://images/%00hidden.png","",64),
+            Some(PathBuf::from("images/")));
+        assert_eq!(resolve_icon("file://assets/bad%00%FFsuffix","",64),
+            Some(PathBuf::from("assets/bad")));
     }
 
     #[test]
