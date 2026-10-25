@@ -1302,7 +1302,12 @@ impl Config {
         let home=if home.as_os_str().is_empty(){Path::new("/")}else{home};
         let legacy=home.join(".mako/config");
         let fallback=home.join(".config");
-        let modern=xdg_config_home.unwrap_or(&fallback).join("mako/config");
+        // Mako treats an unset *or empty* XDG_CONFIG_HOME alike.
+        // Callers of find_default_path may pass Some("") directly, not
+        // only through from_mako_defaults()'s environment normalization.
+        let modern=xdg_config_home
+            .filter(|candidate| !candidate.as_os_str().is_empty())
+            .unwrap_or(&fallback).join("mako/config");
         [legacy,modern]
     }
 
@@ -2243,6 +2248,10 @@ mod tests {
         assert_eq!(Config::default_config_candidates(Path::new(""),None),[
             PathBuf::from("/.mako/config"),PathBuf::from("/.config/mako/config"),
         ]);
+        assert_eq!(Config::default_config_candidates(Path::new(""),
+            Some(Path::new(""))),[
+            PathBuf::from("/.mako/config"),PathBuf::from("/.config/mako/config"),
+        ],"defined but empty XDG_CONFIG_HOME must use Mako's HOME fallback");
         assert_eq!(Config::default_config_candidates(Path::new(""),
             Some(Path::new("/isolated/xdg"))),[
             PathBuf::from("/.mako/config"),PathBuf::from("/isolated/xdg/mako/config"),
