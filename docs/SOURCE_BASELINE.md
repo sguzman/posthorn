@@ -2110,3 +2110,52 @@ No real Hyprland session or production notification service was used.
 exact physical workstation behavior nor every cross-output
 criteria/render interaction is asserted complete. T503 physical
 Hyprland stays at 51%, T504 cutover at 0%.
+
+## Hidden overflow placeholder allocation advances Mako notification IDs
+
+Pinned Mako v1.11.0 `render.c:render_surface` (lines 442-479)
+calls `create_notification(state)` whenever a surface has
+`hidden_count > 0`. It sets `hidden=true`, applies the hidden
+style and **only then** checks whether the pseudo-notification is
+`invisible`. It ultimately calls `destroy_notification` even
+when nothing is painted. `notification.c:create_notification`
+increments `state->last_id` at allocation (line 80). Consequently,
+every such redraw consumes an ID, observable as skipped IDs in
+subsequent sender-facing Freedesktop `Notify` responses.
+No pseudo-notification enters the active notification list or
+history, and no D-Bus `NotificationClosed` signal is involved.
+
+Posthorn previously rendered the hidden placeholder without
+consuming a notification ID. The renderer now calls
+`NotificationStore::reserve_hidden_render_id` once per overflow
+render, before testing the placeholder's `invisible` style. It
+reserves through the existing `allocate_id` path but does not
+register an active instance, store a payload, change history or
+emit notification signals. Pure visibility projections and input
+hit-testing do not reserve IDs. This is specifically a rendering
+side effect, not a side effect of merely *counting* overflow.
+
+[Renderer fix c8a5b20](https://github.com/sguzman/posthorn/commit/c8a5b20c6351fe6e03b2cbed4f6e0a356012425a)
+adds regressions for two consecutive overflowing redraws,
+last-good active list preservation, no allocation when overflow
+ends, and allocation even under `[hidden] invisible=1`.
+[Private D-Bus regression 6fa52d8](https://github.com/sguzman/posthorn/commit/6fa52d849f8ba2a763bd369a895d91cfba1b3153)
+sends two real `Notify` requests with IDs 1 and 2, performs
+two overflowing raster snapshots, verifies that the next
+`Notify` returns 5, and checks that `ListNotifications`
+contains only the three sender-created records.
+
+[GitHub Actions run 40153207109](https://github.com/sguzman/posthorn/actions/runs/40153207109)
+completed with both mandatory jobs **green** on `6fa52d8`.
+304 Rust library tests, 75 isolated private D-Bus integration
+tests, and the 1x / fractional / HiDPI / 9x / multi-output /
+input-routing Sway acceptance steps all passed. The live user's
+session bus, Mako instance, Hyprland environment and configuration
+were never accessed.
+
+**Desktop notification parity feature: 98% -> 99% (+1pp).**
+The T201 atomic ID task was already recorded as 100%, while T204
+hidden layout remains 99%. No further atomic-task completion is
+claimed from this one fix; P2 remains 97% (0pp) and strict M0
+remains 89% (0pp). Exact hardware/event-loop scheduling,
+physical Hyprland T503 (51%) and T504 cutover (0%) remain open.
