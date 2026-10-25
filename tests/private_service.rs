@@ -311,7 +311,7 @@ async fn mode_changes_do_not_refit_existing_notify_icon_but_new_notify_does()
     let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
     let notify=|summary:&str|(
         "icon-fit-mode",0u32,png.to_str().unwrap(),
-        summary,"",Vec::<String>::new(),
+        summary.to_owned(),"",Vec::<String>::new(),
         HashMap::<String,OwnedValue>::new(),-1i32
     );
     let old:u32=desktop.call("Notify",&notify("Retained size")).await?;
