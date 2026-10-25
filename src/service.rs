@@ -96,15 +96,15 @@ pub async fn open_standard_service(config: Config) -> zbus::Result<(Connection, 
 pub async fn tick_expirations(conn: &Connection, runtime: &SharedRuntime)
     -> Result<usize, Box<dyn std::error::Error + Send + Sync>>
 {
-    let expired = runtime.expire(std::time::Instant::now())?;
-    for id in &expired {
+    let expired = runtime.expire_with_changes(std::time::Instant::now())?;
+    for (id,changed) in &expired {
         conn.emit_signal(
             None::<&str>, OBJECT_PATH, BUS_NAME, "NotificationClosed",
             &(*id, CloseReason::Expired as u32),
         ).await?;
-    }
-    if !expired.is_empty() {
-        crate::signals::invalidate(conn, "Notifications").await?;
+        if *changed{
+            crate::signals::invalidate(conn, "Notifications").await?;
+        }
     }
     Ok(expired.len())
 }
