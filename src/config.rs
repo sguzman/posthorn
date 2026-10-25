@@ -421,6 +421,81 @@ fn mako_posix_ere_empty_min_repetitions(pattern:&str)->String{
     out
 }
 
+/// glibc POSIX REG_EXTENDED treats every unescaped '{' outside a bracket
+/// expression as a counted repetition opener, not a literal fallback.
+/// Its numeric bounds must fit RE_DUP_MAX (32767) and descending ranges,
+/// signs, alphabetic contents and missing '}' are compile errors. Rust
+/// regex can instead treat malformed braces as literals, or compile a
+/// repetition larger than glibc permits. Validate without allocating the
+/// potentially enormous expanded automaton. Escaped braces and bracket
+/// characters remain literal, including nested [:class:] expressions.
+fn mako_posix_ere_validate_intervals(pattern:&str)->Result<(),String>{
+    const RE_DUP_MAX:u32=32767;
+    let mut chars=pattern.chars().peekable();
+    let mut in_class=false;
+    let mut first_in_class=false;
+    while let Some(ch)=chars.next(){
+        if ch=='\\'{
+            chars.next();
+            continue;
+        }
+        if in_class{
+            if ch=='[' && matches!(chars.peek().copied(),Some(':'|'.'|'=')){
+                let delimiter=chars.next().expect("peeked bracket delimiter");
+                let mut previous='\0';
+                for part in chars.by_ref(){
+                    if previous==delimiter && part==']'{break;}
+                    previous=part;
+                }
+                first_in_class=false;
+                continue;
+            }
+            if ch==']' && !first_in_class{in_class=false;}
+            // A leading ] after [ or [^ is literal in glibc. The
+            // preceding normalizer has already backslash-escaped it.
+            first_in_class=false;
+            continue;
+        }
+        if ch=='['{
+            in_class=true;
+            first_in_class=true;
+            continue;
+        }
+        if ch!='{'{continue;}
+        let mut contents=String::new();
+        let mut closed=false;
+        for next in chars.by_ref(){
+            if next=='}'{closed=true;break;}
+            contents.push(next);
+            // Numeric repetitions above 32767 are invalid anyway. Avoid
+            // building an unbounded allocation from adversarial config.
+            if contents.len()>32{
+                return Err("invalid or oversized POSIX repetition interval".into());
+            }
+        }
+        if !closed{return Err("unmatched POSIX repetition '{'".into());}
+        let (lower,upper)=if let Some((low,high))=contents.split_once(','){
+            // GNU glibc accepts omitted lower and upper bounds, even {,}.
+            (if low.is_empty(){Some(0)}else{low.parse::<u32>().ok()},
+             if high.is_empty(){None}else{Some(high.parse::<u32>()
+                 .map_err(|_|"invalid POSIX repetition upper bound".to_string())?)})
+        }else{
+            let parsed=contents.parse::<u32>().ok();
+            (parsed,parsed)
+        };
+        let Some(lower)=lower else {
+            return Err("invalid POSIX repetition lower bound".into());
+        };
+        if lower>RE_DUP_MAX || upper.is_some_and(|upper|
+            upper>RE_DUP_MAX || upper<lower){
+            return Err("POSIX repetition exceeds glibc bound or descends".into());
+        }
+        // {,} already normalized to {0,}, so an empty upper means
+        // infinity, not an error; a bare {} has no lower and fails above.
+    }
+    Ok(())
+}
+
 /// GNU glibc REG_EXTENDED permits stacking postfix repetition operators:
 /// a+? means (a+)?, a{2}+ means (a{2})+, and a{2}{3} means
 /// (a{2}){3}. Rust regex interprets +?/*? as lazy quantifiers and
@@ -646,6 +721,7 @@ impl Selector {
             let collated=mako_posix_c_collating_elements(&leading)?;
             let repeat=mako_posix_ere_empty_min_repetitions(
                 &mako_posix_ere_escapes(&collated));
+            mako_posix_ere_validate_intervals(&repeat)?;
             let pattern=mako_posix_ere_stacked_quantifiers(&repeat);
             Some(Regex::new(&format!("(?s-u:{pattern})"))
                 .map_err(|e| format!("invalid regex: {e}"))?)
@@ -1702,6 +1778,69 @@ mod tests {
         fields.body="a";
         assert_eq!(cfg.style_for(&fields)["width"],"472");
         fields.body="z";
+        assert_eq!(cfg.style_for(&fields)["width"],"300");
+    }
+
+    #[test]
+    fn glibc_posix_interval_syntax_and_dup_max_are_enforced_before_regex_compilation(){
+        // C locale regcomp(REG_EXTENDED|REG_NOSUB) rejects all these
+        // spellings. Rust regex can accept malformed {..} as literal,
+        // and glibc RE_DUP_MAX is 32767 rather than Rust's large default.
+        for malformed in [
+            r"a{foo}",r"a{+2}",r"a{-2}",r"a{2,+3}",
+            r"a{2,-3}",r"a{ 2 }",r"a{2.3}",r"a{2,1}",
+            r"a{}",r"a{",r"a{2",r"a{2,3,4}",
+            r"a{32768}",r"a{0,32768}",r"a{32768,}",
+            r"a{9999999999999}",r"a{00032768}",
+            r"a{2,32768}",r"a{,32768}",
+        ]{
+            let rejected=Selector::new("summary~",malformed);
+            assert!(rejected.is_err(),
+                "glibc rejects malformed/out-of-range interval {malformed:?}");
+            assert!(Selector::new("body~",malformed).is_err(),
+                "both Mako regex criteria enforce the interval grammar");
+        }
+        // Escaped braces and class-member braces are NOT intervals.
+        let mut fields=note("normal",&["default"]);
+        let escaped=Selector::new("summary~",r"^a\{foo\}$").unwrap();
+        fields.summary="a{foo}";
+        assert!(escaped.matches(&fields));
+        fields.summary="afoo";
+        assert!(!escaped.matches(&fields));
+        let bracket=Selector::new("summary~",r"^[a{}[:digit:]]+$").unwrap();
+        for literal in ["{","}","a","1","{a}1"]{
+            fields.summary=literal;
+            assert!(bracket.matches(&fields),
+                "bracket-class braces stay literal: {literal:?}");
+        }
+        for (pattern,yes,no) in [
+            (r"^a{,2}$",vec!["","a","aa"],vec!["aaa","b"]),
+            (r"^a{,}$",vec!["","a","aaaa"],vec!["b","ab"]),
+            (r"^a{2,}$",vec!["aa","aaa","aaaa"],vec!["","a","ab"]),
+            (r"^a{02}$",vec!["aa"],vec!["","a","aaa"]),
+            (r"^a{2,3}$",vec!["aa","aaa"],vec!["","a","aaaa"]),
+        ]{
+            let rule=Selector::new("summary~",pattern).unwrap();
+            for word in yes{
+                fields.summary=word;
+                assert!(rule.matches(&fields),"{pattern:?} should match {word:?}");
+            }
+            for word in no{
+                fields.summary=word;
+                assert!(!rule.matches(&fields),"{pattern:?} must reject {word:?}");
+            }
+        }
+        // This is precisely glibc's numerical limit, without allocating
+        // the enormous automaton that compiling the top bound can require.
+        assert!(mako_posix_ere_validate_intervals("a{32767}").is_ok());
+        assert!(mako_posix_ere_validate_intervals("a{0,32767}").is_ok());
+        assert!(mako_posix_ere_validate_intervals("a{32768}").is_err());
+        let cfg=Config::parse("[body~=\"^a{foo}$\"]\nwidth=430\n");
+        assert!(cfg.is_err(),"Mako rejects malformed body~ sections");
+        let cfg=Config::parse("[body~=\"^a{2,3}$\"]\nwidth=430\n").unwrap();
+        fields.body="aaa";
+        assert_eq!(cfg.style_for(&fields)["width"],"430");
+        fields.body="aaaa";
         assert_eq!(cfg.style_for(&fields)["width"],"300");
     }
 
