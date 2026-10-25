@@ -336,6 +336,55 @@ async fn mode_changes_do_not_refit_existing_notify_icon_but_new_notify_does()
 }
 
 #[tokio::test]
+async fn icon_survives_private_reload_history_and_restore_after_file_deletion()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::open_private_service_from_path;
+    let dir=tempfile::tempdir()?;
+    let png=dir.path().join("history-icon.png");
+    let conf=dir.path().join("mako.conf");
+    std::fs::write(&conf,
+        "width=160\nheight=70\npadding=4\nborder-size=0\n         max-icon-size=12\nmax-history=5\n"
+    )?;
+    let image=gdk_pixbuf::Pixbuf::new(
+        gdk_pixbuf::Colorspace::Rgb,true,8,40,40
+    ).ok_or("cannot allocate history PNG")?;
+    image.fill(0xFF0000FF);
+    image.savev(&png,"png",&[])?;
+    let (conn,runtime)=open_private_service_from_path(&conf).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let id:u32=desktop.call("Notify",&(
+        "retained-history-test",0u32,png.to_str().unwrap(),
+        "Historical icon","",Vec::<String>::new(),
+        HashMap::<String,OwnedValue>::new(),-1i32
+    )).await?;
+    let initial=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    let initial_icon=runtime.store.lock().unwrap().active()[0]
+        .icon_snapshot.clone();
+    assert!(initial_icon.as_ref().is_some_and(Option::is_some));
+    std::fs::remove_file(&png)?;
+    std::fs::write(&conf,
+        "width=160\nheight=70\npadding=4\nborder-size=0\n         max-icon-size=32\nmax-history=5\n"
+    )?;
+    let _:()=ctl.call("Reload",&()).await?;
+    let after_reload=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_eq!(after_reload.pixels,initial.pixels,
+        "Reload must retain the icon and its original fitted size");
+    let _:()=desktop.call("CloseNotification",&(id,)).await?;
+    assert_eq!(runtime.store.lock().unwrap().history()[0].icon_snapshot,
+        initial_icon,"Mako archives the decoded icon with the notification");
+    let _:()=ctl.call("RestoreNotification",&()).await?;
+    let restored=runtime.store.lock().unwrap().active()[0].clone();
+    assert_eq!(restored.id,id);
+    assert_eq!(restored.icon_snapshot,initial_icon);
+    let after_restore=posthorn::desktop::snapshot_frame(&runtime)?.unwrap();
+    assert_eq!(after_restore.pixels,initial.pixels,
+        "RestoreNotification must not re-read removed icon files");
+    Ok(())
+}
+
+#[tokio::test]
 async fn empty_image_path_hint_clears_app_icon_through_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
