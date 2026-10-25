@@ -3017,3 +3017,87 @@ opt-in cutover **0%**. This covers the tested
 glibc quantifier grammar only, not full POSIX
 collation, every malformed repetition edge or
 unsupervised production deployment.
+
+## glibc counted interval grammar and safe Reload rejection (2026-10-25)
+
+Mako v1.11.0 compiles `[summary~]` and `[body~]` selectors
+through `criteria.c` with glibc `REG_EXTENDED|REG_NOSUB`.
+The expression's **counted repetitions** use glibc's
+`RE_DUP_MAX=32767` and reject malformed syntax. Native
+C-locale `regcomp` probes confirmed the following:
+
+- `a{foo}`, `a{+2}`, `a{-2}`, `a{2,+3}`,
+  `a{2,-3}`, `a{ 2 }`, `a{2.3}`,
+  `a{}`, `a{2,3,4}` and decreasing
+  `a{2,1}` intervals are invalid.
+- An unescaped opening interval without a closing brace
+  (`a{`, `a{2`) is invalid; 32768 and higher
+  lower or upper bounds also fail glibc compilation.
+- GNU glibc accepts omitted endpoints `a{,2}`,
+  `a{,}`, `a{2,}`, leading-zero count `a{02}`,
+  and valid `a{2,3}`. Escaped braces such as
+  `a\\{foo\\}` and braces inside a POSIX bracket
+  class remain **literal**, not interval operators.
+
+Rust `regex` does not enforce the same glibc repetition
+grammar and may interpret malformed braces as literal
+characters or accept repetitions above glibc's bound.
+Posthorn now validates the original POSIX interval structure
+**before** calling the Rust regex compiler, including
+numeric bounds, malformed content, missing closers and
+descending ranges. The scanner treats escaped metacharacters
+and POSIX bracket subexpressions as literals. This also avoids
+building oversized Rust regex automata for source-invalid
+intervals.
+
+**Important acceptance correction:** the first integration
+run failed an existing GNU word-boundary test. It revealed
+that validation had initially been placed *after*
+Posthorn translated glibc `\\<` and `\\>` into
+Rust `\\b{start}` and `\\b{end}`.
+The braces in those generated Rust assertions are **not**
+glibc repetition operators. Validation was moved to
+the earlier POSIX-source stage, before those translations.
+The final run explicitly passes the GNU word-boundary and
+interval test families together.
+
+The new library regression tests both source-accepted and
+source-rejected spellings for `summary~`, `body~`,
+literal braces, bracket class braces, and valid expression
+matches. It checks the numerical `32767` bound
+**without attempting to compile an enormous valid
+32,767-fold expression**, because the native glibc
+compilation can itself be resource-intensive.
+
+A separate private D-Bus integration test starts the
+notification service from a temporary Mako configuration,
+submits an active notification, and attempts four
+malformed regex configuration reloads through the actual
+`fr.emersion.Mako.Reload` method. Each invalid reload
+must reject atomically, retain the last good global and
+criteria styles, and leave the live notification
+unchanged. A subsequent valid repetition rule reloads
+successfully, and the next notification matches the
+updated body selector.
+
+- [Pinned upstream `criteria.c:332-349`](https://github.com/emersion/mako/blob/v1.11.0/criteria.c#L332-L349)
+- [POSIX interval grammar implementation and library regression 8862918](https://github.com/sguzman/posthorn/commit/88629188369d2beed21cd41d03c2e9d2bfd448dd)
+- [Private D-Bus Reload rejection/recovery test 93d9ffb](https://github.com/sguzman/posthorn/commit/93d9ffb63ab11a4b03e328214f846e6508f997cb)
+- [Fix source-stage validation ordering 503bed0](https://github.com/sguzman/posthorn/commit/503bed03fdfb71fafa941e9ced7b58880b5f6eae)
+- [Full green acceptance CI 40225481533](https://github.com/sguzman/posthorn/actions/runs/40225481533):
+  **325 Rust library tests, 90 isolated private D-Bus
+  tests, and the full headless Wayland compositor suite passed**
+
+**Accepted progress:** T103 **86% → 87% (+1 pp)**.
+P1 raw average **92.2% → 92.4% (+0.2 pp)**,
+still displayed **92%**. The strict 24-task MVP
+average **89.458% → 89.500% (+0.042 pp)**,
+which the authoritative generated roadmap rounds
+to **90%**, not 100%. This increment covers
+the specified interval grammar and isolated reload
+behavior only, **not complete glibc regex parity**.
+Actual Hyprland acceptance T503 remains **51%**,
+and opt-in reversible cutover T504 **0%**.
+No installed Mako process, real notification bus
+or user's Hyprland configuration was touched.
+
