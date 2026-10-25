@@ -49,10 +49,10 @@ swaymsg -s "$ipc" 'output HEADLESS-2 scale 2' >/dev/null
 # Ensure the test itself does not race swaymsg's asynchronous output event.
 for _ in {1..50}; do
   swaymsg -s "$ipc" -t get_outputs >"$root/output-state.json"
-  if grep -q '"scale": 2' "$root/output-state.json"; then break; fi
+  if grep -Eq '"scale":[[:space:]]*2(\.0+)?[,}]' "$root/output-state.json"; then break; fi
   sleep 0.1
 done
-grep -q '"scale": 2' "$root/output-state.json" || {
+grep -Eq '"scale":[[:space:]]*2(\.0+)?[,}]' "$root/output-state.json" || {
   echo 'Sway did not enter the requested scale-2 output state'
   cat "$root/output-state.json"
   exit 1
