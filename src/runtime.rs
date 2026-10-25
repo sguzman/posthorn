@@ -342,6 +342,9 @@ impl SharedRuntime {
                     .map(|value|value.as_deref().unwrap_or(""))
                     .unwrap_or(observed_output.as_deref().unwrap_or(""))
             }else{""},
+            surface_associated:note.surface_associated,
+            output_known:note.surface_associated && note.surface_output_override
+                .as_ref().map(Option::is_some).unwrap_or(observed_output.is_some()),
             modes: &mode_views,
             requested_timeout_ms: note.requested_timeout_ms,
             // Mako applies criteria to the preserved group-index on direct ID
@@ -557,6 +560,29 @@ mod tests {
         assert!(store.active().is_empty());
         assert_eq!(store.history().iter().map(|n|n.id).collect::<Vec<_>>(),
             vec![ids[1],ids[2],ids[0]]);
+    }
+
+    #[test]
+    fn blank_output_selector_must_not_schedule_a_fresh_unentered_notification(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "default-timeout=0\n[output=]\ndefault-timeout=800\n"
+        ).unwrap());
+        let now=Instant::now();
+        let first=runtime.store.lock().unwrap().push(Request::default());
+        runtime.schedule_without_hook(first,now).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),None,
+            "Mako does not apply [output=] during initial NULL-surface criteria");
+        // Even when the presenter has associated a surface, it may not
+        // yet have received wl_surface.enter. It is still not a match.
+        let note=runtime.store.lock().unwrap().active()[0].clone();
+        assert!(note.surface_associated);
+        runtime.schedule_without_hook(first,now).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),None);
+        // A compositor-enter event with an actually named output
+        // likewise cannot match [output=] if the names differ.
+        runtime.set_surface_output(Some("HEADLESS-1")).unwrap();
+        runtime.schedule_without_hook(first,now).unwrap();
+        assert_eq!(runtime.next_deadline().unwrap(),None);
     }
 
     #[test]

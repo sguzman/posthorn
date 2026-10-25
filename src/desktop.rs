@@ -85,6 +85,9 @@ pub fn style_for_note_index(
                 .map(|value|value.as_deref().unwrap_or(""))
                 .unwrap_or(observed_output.as_deref().unwrap_or(""))
         }else{""},
+        surface_associated:n.surface_associated,
+        output_known:n.surface_associated && n.surface_output_override
+            .as_ref().map(Option::is_some).unwrap_or(observed_output.is_some()),
         modes:&mode_views,
         requested_timeout_ms:n.requested_timeout_ms,
         actionable:!n.actions.is_empty(),
@@ -347,6 +350,9 @@ fn snapshot_frame_for_surface(
                 .map(|output|output.as_deref().unwrap_or(""))
                 .unwrap_or_else(||config.global.get("output")
                     .map(String::as_str).unwrap_or("")),
+            surface_associated:true,
+            output_known:surface_output.as_ref()
+                .is_some_and(Option::is_some),
             modes:&mode_views,requested_timeout_ms:-1,
             actionable:false,group_index:-1,hidden:true,
         };

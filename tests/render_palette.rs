@@ -22,7 +22,8 @@ fn four_notification_categories_produce_four_different_pixel_backgrounds() {
             app_name: &note.app_name, app_icon: &note.app_icon,
             category: &note.category, desktop_entry: &note.desktop_entry,
             summary: &note.summary, body: &note.body, urgency: "normal",
-            anchor: "top-right", output: "", modes: &modes,
+            anchor: "top-right", output: "", surface_associated:true,
+            output_known:true, modes: &modes,
             requested_timeout_ms: note.requested_timeout_ms,
             actionable: false, group_index: -1, hidden: false,
         };

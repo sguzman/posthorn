@@ -10,7 +10,7 @@ fn config_accepts_a_mako_category_theme() {
     let n = Traits {
         app_name:"fixture", app_icon:"", category:"failed", desktop_entry:"",
         summary:"Job failed", body:"", urgency:"normal", anchor:"top-right", output:"",
-        modes: &modes, requested_timeout_ms:-1, actionable:false, group_index:-1, hidden:false
+        surface_associated:true,output_known:true,modes: &modes, requested_timeout_ms:-1, actionable:false, group_index:-1, hidden:false
     };
     let style=parsed.style_for(&n);
     assert_eq!(style["background-color"],"#684148");

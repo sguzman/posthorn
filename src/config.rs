@@ -430,8 +430,17 @@ impl Selector {
             "desktop-entry" => n.desktop_entry,
             "summary" | "summary~" => n.summary,
             "body" | "body~" => n.body,
-            "anchor" => n.anchor,
-            "output" => n.output,
+            // Mako criteria.c:match_criteria never matches anchor
+            // without notif->surface, nor output without both the
+            // surface and its compositor-observed surface_output.
+            "anchor" => {
+                if !n.surface_associated { return false; }
+                n.anchor
+            },
+            "output" => {
+                if !n.surface_associated || !n.output_known { return false; }
+                n.output
+            },
             "mode" => return n.modes.contains(&self.value.as_str()),
             "actionable" => return parse_bool(&self.value) == Some(n.actionable),
             "expiring" => return parse_bool(&self.value) == Some(n.requested_timeout_ms != 0),
@@ -478,6 +487,11 @@ pub struct Traits<'a> {
     pub urgency: &'a str,
     pub anchor: &'a str,
     pub output: &'a str,
+    /// Mako's notif->surface, which is NULL before initial Notify styling.
+    pub surface_associated: bool,
+    /// Mako's notif->surface->surface_output, filled by wl_surface.enter.
+    /// An empty configured output name is not proof of an entered output.
+    pub output_known: bool,
     pub modes: &'a [&'a str],
     pub requested_timeout_ms: i32,
     pub actionable: bool,
@@ -939,7 +953,30 @@ mod tests {
     fn note<'a>(category: &'a str, modes: &'a [&'a str]) -> Traits<'a> {
         Traits { app_name: "example", app_icon:"", category, desktop_entry:"", summary:"Saved",
             body:"All changes written", urgency:"normal", anchor:"top-right", output:"",
-            modes, requested_timeout_ms:-1, actionable:false, group_index:-1, hidden:false }
+            surface_associated:true,output_known:true,modes, requested_timeout_ms:-1, actionable:false, group_index:-1, hidden:false }
+    }
+
+    #[test]
+    fn surface_selectors_require_real_surface_and_entered_output() {
+        // In source criteria.c, [output=] must not match NULL
+        // surface_output even though both strings are represented as "".
+        let config=Config::parse(
+            "[output=]\nwidth=411\n[anchor=top-right]\nheight=211\n"
+        ).unwrap();
+        let mut fields=note("ordinary",&["default"]);
+        fields.surface_associated=false;
+        fields.output_known=false;
+        assert_eq!(config.style_for(&fields)["width"],"300");
+        assert_eq!(config.style_for(&fields)["height"],"100");
+        fields.surface_associated=true;
+        // A surface may be created before the compositor sends enter.
+        assert_eq!(config.style_for(&fields)["width"],"300");
+        assert_eq!(config.style_for(&fields)["height"],"211");
+        fields.output_known=true;
+        assert_eq!(config.style_for(&fields)["width"],"411");
+        fields.output="eDP-1";
+        assert_eq!(config.style_for(&fields)["width"],"300",
+            "entered output must actually have the empty name");
     }
 
     #[test]
