@@ -2089,6 +2089,42 @@ async fn private_dbus_reload_replays_cli_precedence_without_restarting_service()
 }
 
 #[tokio::test]
+async fn reload_rejects_hidden_group_by_but_preserves_valid_hidden_selector()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::open_private_service_from_path;
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("config");
+    std::fs::write(&path,"[hidden]\nformat=%h\n")?;
+    let (conn,runtime)=open_private_service_from_path(&path).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let initial=runtime.config();
+    assert_eq!(initial.rules.len(),1);
+    assert_eq!(initial.rules[0].raw_selector,"hidden");
+    // types.c:parse_criteria_spec rejects hidden in group-by even though
+    // criteria.c:parse_criteria accepts the [hidden] selector.
+    for invalid in ["group-by=hidden\n","group-by=none,hidden\n"] {
+        std::fs::write(&path,invalid)?;
+        let result:zbus::Result<()>=ctl.call("Reload",&()).await;
+        match result {
+            Err(zbus::Error::MethodError(name,_,_))=>
+                assert_eq!(name.as_str(),"fr.emersion.Mako.InvalidConfig"),
+            other=>panic!("invalid grouping reload unexpectedly succeeded: {other:?}"),
+        }
+        assert_eq!(runtime.revision(),0);
+        assert_eq!(runtime.config().rules[0].raw_selector,"hidden");
+    }
+    // The originally valid selector must survive, and a separately valid
+    // group-by field should still apply on a later successful reload.
+    std::fs::write(&path,"group-by=app-name\n[hidden]\nformat=%h\n")?;
+    let _:()=ctl.call("Reload",&()).await?;
+    assert_eq!(runtime.revision(),1);
+    assert_eq!(runtime.config().global["group-by"],"app-name");
+    assert_eq!(runtime.config().rules[0].raw_selector,"hidden");
+    Ok(())
+}
+
+#[tokio::test]
 async fn control_reload_swaps_styles_and_preserves_last_good_file()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {

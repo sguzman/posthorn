@@ -1828,6 +1828,27 @@ mod tests {
     }
 
     #[test]
+    fn pinned_mako_group_by_whitelist_distinguishes_selectors_from_fields(){
+        // Exact types.c:parse_criteria_spec() field names (v1.11.0).
+        // A syntax-valid [hidden] or [mode=quiet] selector does NOT imply
+        // the corresponding group-by field is recognized.
+        for field in ["app-name","app-icon","actionable","expiring",
+            "urgency","category","desktop-entry","summary","body","none"]{
+            assert!(Config::parse(&format!("group-by={field}\n")).is_ok(),
+                "upstream-recognized field {field} was rejected");
+        }
+        for field in ["hidden","mode","summary~","body~",
+            "app-name,hidden","none,hidden","none,mode"]{
+            assert!(Config::parse(&format!("group-by={field}\n")).is_err(),
+                "upstream-rejected group field {field} was accepted");
+        }
+        assert!(Config::parse("[hidden]\nformat=%h\n").is_ok(),
+            "[hidden] remains a valid configuration criterion selector");
+        assert!(Config::parse("[mode=quiet]\nmarkup=0\n").is_ok(),
+            "[mode=quiet] remains a valid configuration criterion selector");
+    }
+
+    #[test]
     fn mako_restricts_surface_and_group_settings_by_selector() {
         for source in [
             "[grouped]\nanchor=bottom-right\n",

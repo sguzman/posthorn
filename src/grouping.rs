@@ -287,6 +287,22 @@ mod tests {
     }
 
     #[test]
+    fn upstream_group_by_field_whitelist_matches_types_c_parse_criteria_spec(){
+        let permitted=[
+            "app-name","app-icon","actionable","expiring","urgency",
+            "category","desktop-entry","summary","body","none",
+        ];
+        for field in permitted {
+            assert!(GroupSpec::parse(field).is_ok(),"{field}");
+        }
+        for field in ["hidden","mode","summary~","body~",
+            "app-name,hidden","none,hidden","group-index","anchor","output"]{
+            assert!(GroupSpec::parse(field).is_err(),
+                "Mako v1.11.0 parser or validator rejects group-by={field}");
+        }
+    }
+
+    #[test]
     fn upstream_rejects_hidden_group_by_even_though_hidden_is_a_selector(){
         // types.c:parse_criteria_spec recognizes neither hidden nor mode
         // as grouping fields; both are separately valid criteria selectors.
