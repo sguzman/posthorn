@@ -619,6 +619,52 @@ mod tests {
     }
 
     #[test]
+    fn themed_icon_uses_arrival_scale_and_never_reloads_when_scale_changes(){
+        let dir=tempfile::tempdir().unwrap();
+        for (folder,color) in [
+            ("16x16/apps",0xFF0000FFu32),
+            ("16x16@2/apps",0x0000FFFFu32),
+        ] {
+            let path=dir.path().join(folder).join("posthorn.png");
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let image=gdk_pixbuf::Pixbuf::new(
+                gdk_pixbuf::Colorspace::Rgb,true,8,12,12
+            ).unwrap();
+            image.fill(color);
+            image.savev(&path,"png",&[]).unwrap();
+        }
+        let config=Config::parse(&format!(
+            "icon-path={}\nmax-icon-size=16\n",dir.path().display()
+        )).unwrap();
+        let runtime=SharedRuntime::new(config);
+        let now=Instant::now();
+        let first=runtime.store.lock().unwrap().push(Request{
+            app_icon:"posthorn".into(),summary:"first".into(),
+            ..Request::default()
+        });
+        runtime.schedule_without_hook(first,now).unwrap();
+        let original=runtime.store.lock().unwrap().active().iter()
+            .find(|note|note.id==first).unwrap().clone();
+        assert_eq!(&original.icon_snapshot.as_ref().unwrap()
+            .as_ref().unwrap().pixels.bgra[..4],&[0,0,255,255]);
+        runtime.set_icon_creation_scale(2);
+        let second=runtime.store.lock().unwrap().push(Request{
+            app_icon:"posthorn".into(),summary:"second".into(),
+            ..Request::default()
+        });
+        runtime.schedule_without_hook(second,now).unwrap();
+        let store=runtime.store.lock().unwrap();
+        let older=store.active().iter().find(|n|n.id==first).unwrap();
+        let newer=store.active().iter().find(|n|n.id==second).unwrap();
+        assert_eq!(&older.icon_snapshot.as_ref().unwrap()
+            .as_ref().unwrap().pixels.bgra[..4],&[0,0,255,255],
+            "output scale changes must not re-resolve the old Mako icon");
+        assert_eq!(&newer.icon_snapshot.as_ref().unwrap()
+            .as_ref().unwrap().pixels.bgra[..4],&[255,0,0,255],
+            "new Notify must select the current maximum-output-scale asset");
+    }
+
+    #[test]
     fn category_timeout_overrides_and_replacement_reschedules() {
         let config = Config::parse(
             "default-timeout=7000\nignore-timeout=1\n[category=warning]\ndefault-timeout=2000\n"
