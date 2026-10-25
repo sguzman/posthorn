@@ -147,7 +147,7 @@ fn parse_command_with_order(args: &[String], permute: bool) -> Result<Command, S
                 }
                 i+=1;
             }
-            if program.is_empty(){return Err("missing menu command".into());}
+            if program.is_empty(){return Err("Missing menu command".into());}
             Ok(Command::Menu{id,program})
         }
         "dismiss" => {
@@ -199,8 +199,10 @@ fn parse_command_with_order(args: &[String], permute: bool) -> Result<Command, S
                 // GNU getopt ignores extra non-option arguments here.
                 i+=1;
             }
-            if (all && group) || (id != 0 && (all || group)) {
-                return Err("invalid combination of dismiss options".into());
+            if all && group {
+                return Err("-a and -g cannot be used together".into());
+            } else if id != 0 && (all || group) {
+                return Err("-n cannot be used with -a or -g".into());
             }
             Ok(Command::Dismiss { id, all, group, history })
         }
@@ -285,18 +287,18 @@ fn parse_command_with_order(args: &[String], permute: bool) -> Result<Command, S
                 }
             }
             if set && !edits.is_empty() {
-                return Err("mode -s cannot be combined with -a/-r/-t".into());
+                return Err("-a/-r/-t and -s cannot be used together".into());
             }
             if set {
                 // A marker is retained even if no positional mode follows.
                 edits.push(('s',String::new()));
                 edits.extend(positional.into_iter().map(|m|('S',m)));
             } else if !positional.is_empty() {
-                return Err("positional mode arguments require -s".into());
+                return Err("positional arguments can only be used with -s".into());
             }
             Ok(Command::Modes {edit:edits})
         }
-        other => Err(format!("unknown posthornctl command {other}")),
+        other => Err(format!("Unknown command: {other}")),
     }
 }
 
@@ -825,6 +827,31 @@ mod tests {
         assert_eq!(notification_text(&fields),"Notification 9:\n");
         fields.insert("actions".into(),OwnedValue::from(HashMap::<String,String>::new()));
         assert_eq!(notification_text(&fields),"Notification 9:\n");
+    }
+
+    #[test]
+    fn diagnostic_text_matches_pinned_makoctl_cli_conflicts(){
+        // Pinned makoctl.c:122-128, 695-697, 865-881 and 980-982.
+        // Check the error before contacting a user session D-Bus bus.
+        let cases: &[(&[&str],&str)]=&[
+            (&["dismiss","-a","-g"],"-a and -g cannot be used together"),
+            (&["dismiss","-n","8","-a"],"-n cannot be used with -a or -g"),
+            (&["dismiss","-g","-n","4"],"-n cannot be used with -a or -g"),
+            (&["menu"],"Missing menu command"),
+            (&["menu","-n","32"],"Missing menu command"),
+            (&["mode","-a","silent","-s"],"-a/-r/-t and -s cannot be used together"),
+            (&["mode","-s","-r","silent"],"-a/-r/-t and -s cannot be used together"),
+            (&["mode","silent"],"positional arguments can only be used with -s"),
+            (&["no-such-command"],"Unknown command: no-such-command"),
+        ];
+        for (args,expected) in cases {
+            let actual=parse_command_with_order(&v(args),true).unwrap_err();
+            assert_eq!(actual,*expected,"arguments: {args:?}");
+        }
+        // GNU getopt considers a parsed ID of zero a non-conflicting
+        // default; Mako checks the resulting value, not whether -n occurred.
+        assert_eq!(parse_command_with_order(&v(&["dismiss","-n0","-a"]),true),
+            Ok(Command::Dismiss{id:0,all:true,group:false,history:true}));
     }
 
     #[test]
