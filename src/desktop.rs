@@ -340,6 +340,12 @@ fn snapshot_frame_for_surface(
     }
     let visible_count=frames.len();
     if hidden>0 {
+        // Mako v1.11 render.c calls create_notification() before applying
+        // [hidden] styling, including when the pseudo-notification will
+        // itself be invisible. Each rendered surface consumes one ID
+        // per overflow redraw, without adding a sender-visible item.
+        runtime.store.lock().map_err(|_|poisoned())?
+            .reserve_hidden_render_id();
         let mode_views:Vec<&str>=modes.iter().map(String::as_str).collect();
         let traits=Traits{
             app_name:"",app_icon:"",category:"",desktop_entry:"",
@@ -755,6 +761,50 @@ mod tests {
         assert!(click_target_is_current(&runtime,&replacement,replacement_instance).unwrap());
         runtime.close(old,CloseReason::Dismissed,false).unwrap();
         assert!(!click_target_is_current(&runtime,&replacement,replacement_instance).unwrap());
+    }
+
+    #[test]
+    fn hidden_placeholder_redraw_consumes_mako_id_but_not_active_slot() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=90\nheight=30\nmax-visible=1\n"
+        ).unwrap());
+        let a=runtime.store.lock().unwrap().push(Request{
+            summary:"first".into(),..Request::default()
+        });
+        let b=runtime.store.lock().unwrap().push(Request{
+            summary:"second".into(),..Request::default()
+        });
+        assert_eq!((a,b),(1,2));
+        assert_eq!(runtime.store.lock().unwrap().active().len(),2);
+        assert!(snapshot_frame(&runtime).unwrap().is_some());
+        assert_eq!(runtime.store.lock().unwrap().active().len(),2,
+            "overflow pseudo-notification must not reach ListNotifications");
+        // Source create_notification allocates a fresh ID for each redraw.
+        assert!(snapshot_frame(&runtime).unwrap().is_some());
+        let c=runtime.store.lock().unwrap().push(Request::default());
+        assert_eq!(c,5,"two overflow redraws must consume IDs 3 and 4");
+        // With max-visible still one, another redraw consumes ID 6.
+        assert!(snapshot_frame(&runtime).unwrap().is_some());
+        runtime.close(b,CloseReason::Dismissed,false).unwrap();
+        runtime.close(c,CloseReason::Dismissed,false).unwrap();
+        // Only one notification remains: no placeholder, no synthetic ID.
+        assert!(snapshot_frame(&runtime).unwrap().is_some());
+        assert_eq!(runtime.store.lock().unwrap().push(Request::default()),7);
+    }
+
+    #[test]
+    fn invisible_overflow_placeholder_still_consumes_mako_id() {
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=90\nheight=30\nmax-visible=1\n[hidden]\ninvisible=1\n"
+        ).unwrap());
+        let first=runtime.store.lock().unwrap().push(Request::default());
+        let second=runtime.store.lock().unwrap().push(Request::default());
+        assert_eq!((first,second),(1,2));
+        assert!(snapshot_frame(&runtime).unwrap().is_some(),
+            "ordinary notification is still visible");
+        assert_eq!(runtime.store.lock().unwrap().active().len(),2);
+        assert_eq!(runtime.store.lock().unwrap().push(Request::default()),4,
+            "Mako creates a hidden notification BEFORE checking invisible");
     }
 
     #[test]

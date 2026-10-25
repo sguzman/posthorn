@@ -405,6 +405,17 @@ impl NotificationStore {
         self.active=others;
     }
 
+    /// render.c creates a short-lived notification for its `[hidden]`
+    /// overflow line on EVERY redraw that has hidden members. Its call
+    /// to create_notification increments state->last_id even though the
+    /// resulting pseudo-notification is promptly destroyed and never
+    /// appears in ListNotifications. Keep that ID side effect separate
+    /// from sender-visible requests; no active instance or history entry
+    /// may be created for the placeholder.
+    pub fn reserve_hidden_render_id(&mut self) -> u32 {
+        self.allocate_id()
+    }
+
     fn allocate_id(&mut self) -> u32 {
         // D-Bus notification IDs must never be zero; avoid collisions at wraparound.
         loop {
