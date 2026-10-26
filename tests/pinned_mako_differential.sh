@@ -2530,3 +2530,67 @@ done
 diff -u "$root/posthorn-multi-mode-sound.events" "$root/mako-multi-mode-sound.events"
 echo 'Pinned Mako/Posthorn mixed-mode category sound suppression: MATCH'
 
+# T504 preparation only: exact pinned Mako v1.11.0 is deliberately
+# FIRST owner of org.freedesktop.Notifications on this disposable bus.
+# An explicitly armed Posthorn production trial MUST reject collision
+# without queueing or displacing Mako; Mako must still handle Notify.
+# This tests the real predecessor daemon, never the user's Mako session.
+cat >"$root/mako-collision.conf" <<'EOF_COLLISION'
+width=195
+height=90
+margin=0
+border-size=0
+icons=0
+default-timeout=0
+format=%s
+markup=0
+background-color=#405972
+text-color=#F8F8F8
+EOF_COLLISION
+"$mako_binary" -c "$root/mako-collision.conf" \
+  >"$root/mako-collision.log" 2>&1 &
+mako_collision_pid=$!
+wait_for_bus org.freedesktop.Notifications
+before_owner="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+  GetNameOwner s org.freedesktop.Notifications)"
+[[ "$before_owner" == s\ \"*\" ]] || {
+  echo 'Pinned Mako did not acquire the test standard name' >&2;exit 1
+}
+trial_exit=0
+POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 \
+POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS=30 \
+POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+  timeout 8s ./target/debug/posthorn --reversible-production-trial \
+    -c "$root/mako-collision.conf" \
+    >"$root/posthorn-collision.log" 2>&1 || trial_exit=$?
+if [[ "$trial_exit" == 0 || "$trial_exit" == 124 || "$trial_exit" == 137 ]];then
+  echo "Armed Posthorn trial did not immediately reject existing Mako owner ($trial_exit)" >&2
+  cat "$root/posthorn-collision.log" >&2;exit 1
+fi
+grep -q 'Posthorn trial failed:' "$root/posthorn-collision.log" || {
+  echo 'Posthorn trial failed for another reason than D-Bus collision' >&2
+  cat "$root/posthorn-collision.log" >&2;exit 1
+}
+after_owner="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+  GetNameOwner s org.freedesktop.Notifications)"
+[[ "$after_owner" == "$before_owner" ]] || {
+  echo 'Posthorn trial displaced the pinned Mako owner' >&2;exit 1
+}
+[[ "$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+  NameHasOwner s org.posthorn.Development)" == 'b false' ]] || {
+  echo 'Failed Posthorn trial claimed private name unexpectedly' >&2;exit 1
+}
+reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.freedesktop.Notifications /org/freedesktop/Notifications \
+  org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+  'Pinned original Mako still owns bus' 0 '' 'Collision refused' '' 0 0 30000)"
+[[ "$reply" == u\ * ]] || {
+  echo 'Pinned Mako stopped handling Notify after Posthorn refusal' >&2;exit 1
+}
+kill "$mako_collision_pid";wait "$mako_collision_pid" 2>/dev/null || true
+mako_collision_pid=""
+echo 'Pinned original Mako remained public owner and handled Notify after trial collision refusal: MATCH'
+
