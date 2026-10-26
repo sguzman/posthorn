@@ -5282,3 +5282,65 @@ P1 **97.2% → 97.4%**, P3 **95.333% → 95.667%**
 Mako vs Posthorn only. Physical Hyprland T503 stays 51%;
 a production Mako replacement under T504 remains 0%
 and requires explicit authorization.
+
+## Implicit Mako HOME/XDG config precedence and runtime rediscovery (2026-10-26)
+
+Pinned `config.c:get_default_config_path` chooses the
+readable legacy `~/.mako/config` before
+`$XDG_CONFIG_HOME/mako/config` when no `-c` is provided.
+Pinned `reload_config` calls `parse_config_arguments`
+again, repeating that discovery and reapplying CLI options.
+The former Posthorn private Wayland and D-Bus entrypoints
+required an explicit path, despite the parser already
+implementing implicit path lookup.
+
+Posthorn's explicit **private-only** presenter and service now
+support startup without a path, retaining an
+`implicit-default` runtime flag. Reload rediscovers the
+current default file instead of pinning the startup path.
+Explicit `-c`/positional file paths remain fixed and
+the production notification service remains unavailable.
+
+The guarded executable fixture creates **disposable**
+`HOME` and `XDG_CONFIG_HOME` trees, writes both
+configs, starts each daemon without `-c`, verifies the
+higher-priority legacy style, deletes that file, and
+performs a live `fr.emersion.Mako.Reload`. Both original
+Mako v1.11.0 and Posthorn then adopt the XDG style
+while preserving the source-compatible CLI
+`--width=205` override.
+
+| Actual 2× Sway result | Posthorn | Pinned Mako | Pixel differences |
+| --- | --- | --- | ---: |
+| Default legacy style | `870 1279 0 127`, 3,169 text-color pixels | Identical | **0** |
+| XDG style after Reload | `870 1279 0 155` | Identical | **0** |
+
+An additional **subprocess-isolated Rust test** verifies
+priority when both files exist, re-selection when the
+legacy file disappears, CLI override preservation,
+atomic rejection when the XDG file becomes invalid,
+and fallback to built-in defaults when neither file
+exists. It never mutates HOME or XDG in the parent
+test process.
+
+[Implementation `9afe153`](https://github.com/sguzman/posthorn/commit/9afe153691d56394852b03bb43b0fa6af70ae0b3) ·
+[source-pinned screenshot fixture `1c70798`](https://github.com/sguzman/posthorn/commit/1c7079885570c57680c335915d2cde079b691aee) ·
+[isolated unit regression `9255022`](https://github.com/sguzman/posthorn/commit/9255022490dda86c67981000d33d439ccc78f45b) ·
+[green exact pinned-Mako differential 40381602201](https://github.com/sguzman/posthorn/actions/runs/40381602201) ·
+[green Rust/Wayland CI 40381602198](https://github.com/sguzman/posthorn/actions/runs/40381602198).
+
+The exact source comparison passed **355 Rust library tests,
+100 private D-Bus tests, and every previous guarded
+compositor fixture**.
+
+**Independent progress credit:** T104 **96% → 97%
+(+1 pp)** and T303 **89% → 90% (+1 pp)**;
+P1 **97.4% → 97.6%** (rounded 98%),
+P3 **95.667% → 96.000%**,
+strict 24-task M0 **91.708% → 91.792%
+(+0.083 pp)**.
+
+These results prove only isolated config selection and
+Reload equivalence, not physical Hyprland T503 (51%)
+or production cutover T504 (0%). Installed Mako,
+its public D-Bus name and user HOME are untouched.

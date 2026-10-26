@@ -15,12 +15,12 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🔐 T003 — Keep live Mako untouched, isolate public test fixtures — `██████████ 100%`
 - 🧪 T004 — Validate Rust scaffold with CI and formatting — `██████████ 97%`
 
-### 🧩 P1 — Config, criteria and types port — `██████████ 97%`
+### 🧩 P1 — Config, criteria and types port — `██████████ 98%`
 
 - 📄 T101 — Parse Mako configuration sections and ordered overrides — `██████████ 100%`
 - 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `██████████ 99%`
 - 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `█████████░ 94%`
-- 📂 T104 — Include files with Mako-compatible path behavior — `██████████ 96%`
+- 📂 T104 — Include files with Mako-compatible path behavior — `██████████ 97%`
 - 📐 T105 — Type/layout/style parity for all Mako config settings — `██████████ 98%`
 
 ### 📨 P2 — Notification lifecycle and formatting — `██████████ 99%`
@@ -35,7 +35,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 - 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `██████████ 99%`
 - 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `██████████ 99%`
-- 🔄 T303 — Correct startup, bus ownership and config reload behavior — `█████████░ 89%`
+- 🔄 T303 — Correct startup, bus ownership and config reload behavior — `█████████░ 90%`
 
 ### 🪟 P4 — Wayland protocol and rendering — `██████████ 99%`
 
