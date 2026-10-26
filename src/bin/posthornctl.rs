@@ -14,6 +14,13 @@ async fn main() -> ExitCode {
     };
     match posthorn::ctl::execute(command).await {
         Ok(()) => ExitCode::SUCCESS,
-        Err(err) => { eprintln!("posthornctl: {err}"); ExitCode::FAILURE }
+        Err(err) => {
+            if let Some(mako)=err.downcast_ref::<posthorn::ctl::MakoCtlMenuError>(){
+                eprintln!("{mako}");
+            }else{
+                eprintln!("posthornctl: {err}");
+            }
+            ExitCode::FAILURE
+        }
     }
 }
