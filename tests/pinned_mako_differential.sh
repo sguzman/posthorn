@@ -1395,6 +1395,28 @@ for impl in posthorn mako; do
   }
   echo "$impl default lookup switched to Mako built-ins on Reload: $builtin_bounds"
 
+  # T104/T303: an invalid, newly reappearing high-priority
+  # candidate must reject Reload atomically, rather than silently
+  # choosing defaults or replacing the already painted built-in style.
+  printf 'width=invalid\\n' >"$root/default-home/.mako/config"
+  if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload \
+    >"$root/$impl-default-restored-invalid.log" 2>&1; then
+    echo "$impl accepted an invalid restored default HOME candidate"
+    exit 1
+  fi
+  grep -q 'Unable to parse configuration file' \
+    "$root/$impl-default-restored-invalid.log" || {
+    echo "$impl rejected default HOME Reload with the wrong error"
+    cat "$root/$impl-default-restored-invalid.log";exit 1
+  }
+  sleep 0.25
+  grim "$root/$impl-default-restored-invalid.png"
+  ./target/debug/examples/qa_png_probe \
+    "$root/$impl-default-restored-invalid.png" '#285577' 0 identical \
+    "$root/$impl-default-builtin.png"
+  echo "$impl preserved the built-in raster after invalid legacy reappearance"
+
   # T104/T303: when a legacy config reappears after built-in fallback,
   # Reload must rediscover its higher-priority path and repaint the
   # already displayed notification. Compare with the original pre-delete
@@ -1447,9 +1469,12 @@ done
   "$root/posthorn-default-builtin.png" '#285577' 0 identical \
   "$root/mako-default-builtin.png"
 ./target/debug/examples/qa_png_probe \
+  "$root/posthorn-default-restored-invalid.png" '#285577' 0 identical \
+  "$root/mako-default-restored-invalid.png"
+./target/debug/examples/qa_png_probe \
   "$root/posthorn-default-restored.png" '#416D98' 0 identical \
   "$root/mako-default-restored.png"
-echo 'Pinned Mako/Posthorn implicit legacy/XDG/built-in/reappearing legacy config rediscovery: MATCH'
+echo 'Pinned Mako/Posthorn implicit config invalid-restore and valid-restore Reload: MATCH'
 
 
 # Pinned dbus/xdg.c:handle_notify reuses an ID while recomputing the
