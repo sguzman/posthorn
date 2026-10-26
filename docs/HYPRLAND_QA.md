@@ -12,9 +12,11 @@ anything, the harness asks the **original session bus** for its current
 `org.freedesktop.Notifications` owner. It refuses to proceed if the
 name is not owned by the existing daemon.
 
-The runner compiles only the experimental private desktop and Rust PNG
+The runner compiles the experimental private desktop and Rust PNG
 pixel probe. It starts a **new nested D-Bus session**, retains the real
-Wayland compositor socket, and runs Posthorn on its private
+Wayland compositor socket, and exercises the **same multi-surface Wayland
+rendering path used by the separately gated production trial**, while
+running Posthorn on its private
 `org.posthorn.Development` name using a disposable configuration.
 Direct `--inside` invocation is rejected unless the parent has supplied
 the original bus address and checked owner. The child also compares

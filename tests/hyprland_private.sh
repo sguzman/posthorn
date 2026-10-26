@@ -127,7 +127,9 @@ EOF
 timeout --signal=TERM --kill-after=2s 5s grim "$root/baseline.png" ||
   die 'unable to capture the original Hyprland desktop baseline'
 
-./target/debug/posthorn --experimental-private-desktop "$root/config" \
+# Use the SAME multi-surface Wayland renderer as the armed trial,
+# but only the disposable org.posthorn.Development D-Bus name.
+./target/debug/posthorn --experimental-private-multi-desktop "$root/config" \
   >"$root/private-desktop.log" 2>&1 &
 daemon_pid=$!
 ready=0
