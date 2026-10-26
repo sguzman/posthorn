@@ -451,7 +451,10 @@ fn click_target_is_current(
        && store.active().iter().any(|note|note==target))
 }
 
-fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<DesktopClick>) -> io::Result<()> {
+fn render_loop(
+    runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<DesktopClick>,
+    stop:&std::sync::atomic::AtomicBool,
+) -> io::Result<()> {
     let mut viewer=LivePresenter::connect().map_err(other)?;
     let (mut previous, mut previous_modes)=(Vec::new(),Vec::new());
     let mut previous_revision=u64::MAX;
@@ -460,6 +463,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
     let mut previous_subpixel=OutputSubpixel::Unknown;
     let mut expected_surface=false;
     loop {
+        if stop.load(std::sync::atomic::Ordering::Relaxed){return Ok(());}
         let notes: Vec<_>=runtime.store.lock().map_err(|_|poisoned())?
             .active().iter().cloned().collect();
         let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
@@ -575,6 +579,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
 fn render_loop_multi(
     runtime:SharedRuntime,
     sender:tokio::sync::mpsc::UnboundedSender<DesktopClick>,
+    stop:&std::sync::atomic::AtomicBool,
 )->io::Result<()>{
     type Key=(String,String,String);
     type FrameStamp=(Vec<Notification>,Vec<String>,u64,u32,u32,OutputSubpixel,bool);
@@ -586,6 +591,7 @@ fn render_loop_multi(
     // NEXT Notify stuck with the previous icon-search scale.
     let mut output_observer=LivePresenter::connect().map_err(other)?;
     loop{
+        if stop.load(std::sync::atomic::Ordering::Relaxed){return Ok(());}
         output_observer.poll_events().map_err(other)?;
         runtime.set_icon_creation_scale(output_observer.maximum_output_scale());
         let surfaces=surface_visibility(&runtime)?;
@@ -796,12 +802,14 @@ async fn run_private_desktop_instance_with_mode(
     production_trial:bool,
 )->Result<(),Box<dyn std::error::Error+Send+Sync>>{
     let visual_runtime=runtime.clone();
+    let stop=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let renderer_stop=stop.clone();
     let (sender,mut clicks)=tokio::sync::mpsc::unbounded_channel();
     let mut visual=tokio::task::spawn_blocking(move || {
         if multiple_surfaces{
-            render_loop_multi(visual_runtime,sender)
+            render_loop_multi(visual_runtime,sender,&renderer_stop)
         }else{
-            render_loop(visual_runtime,sender)
+            render_loop(visual_runtime,sender,&renderer_stop)
         }
     });
     let mut timer=tokio::time::interval(Duration::from_millis(25));
@@ -825,7 +833,21 @@ async fn run_private_desktop_instance_with_mode(
         tokio::select! {
             _ = &mut deadline, if production_trial => {
                 eprintln!("Posthorn reversible trial deadline reached; releasing standard notification name");
-                return Ok(());
+                stop.store(true,std::sync::atomic::Ordering::Relaxed);
+                // Tokio waits for spawn_blocking workers during runtime
+                // shutdown. A bounded timer is not a real failsafe unless
+                // its Wayland worker also stops. If the renderer hangs,
+                // force this trial-only process to exit (releasing the bus)
+                // rather than leave an orphaned public-name owner.
+                return match tokio::time::timeout(Duration::from_secs(3),&mut visual).await {
+                    Ok(Ok(Ok(())))=>Ok(()),
+                    Ok(Ok(Err(e)))=>Err(Box::new(e)),
+                    Ok(Err(e))=>Err(Box::new(e)),
+                    Err(_)=>{
+                        eprintln!("Posthorn trial renderer failed to stop on deadline; forcing trial process exit");
+                        std::process::exit(2)
+                    }
+                };
             }
             click=clicks.recv() => {
                 if let Some(event)=click {
