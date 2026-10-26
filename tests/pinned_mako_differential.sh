@@ -754,3 +754,49 @@ done
   echo 'Valid and invalid final format templates unexpectedly paint identically'
   exit 1
 }
+
+# Mako notification.c:format_notif_text substitutes %a, %i, %g, %s
+# and %b; %% is literal percent. This source-pinned case must not
+# silently pass by matching total text ink alone: check the exact
+# decoded compositor frame including its C-format substitutions,
+# escaped app/summary XML and accepted sender-body Pango markup.
+cat >"$root/substitutions.conf" <<'EOF_SUBS'
+width=240
+height=230
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%a / id=%i / group=%g / 100%%\n%s\n%b
+markup=1
+background-color=#416D98
+text-color=#E5C58B
+EOF_SUBS
+clear_color '#416D98'
+./target/debug/posthorn --experimental-private-desktop "$root/substitutions.conf" \
+  >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.posthorn.Development
+markup_notify org.posthorn.Development
+post_substitutions="$(markup_measure posthorn-substitutions org.posthorn.Development)"
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+clear_color '#416D98'
+"$mako_binary" -c "$root/substitutions.conf" >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.freedesktop.Notifications
+markup_notify org.freedesktop.Notifications
+mako_substitutions="$(markup_measure mako-substitutions org.freedesktop.Notifications)"
+echo "Posthorn real 2x format placeholders: $post_substitutions"
+echo "Pinned Mako real 2x format placeholders: $mako_substitutions"
+[[ "$post_substitutions" == "$mako_substitutions" ]] || {
+  echo 'Pinned Mako/Posthorn 2x app, id, group, percent and escaped markup geometry differs'
+  exit 1
+}
+./target/debug/examples/qa_png_probe \
+  "$root/posthorn-substitutions-markup.png" '#E5C58B' 0 identical \
+  "$root/mako-substitutions-markup.png"
+echo 'Pinned Mako/Posthorn real 2x all ordinary notification format placeholders: MATCH'
