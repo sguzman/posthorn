@@ -1298,6 +1298,7 @@ markup=0
 background-color=#2A7F9B
 text-color=#E5C58B
 EOF_DEFAULT_XDG
+cp "$root/default-xdg/mako/config" "$root/default-xdg-original.conf"
 for impl in posthorn mako; do
   cp "$root/default-home/.mako/config" "$root/default-legacy-original.conf"
   if [[ "$impl" == posthorn ]]; then
@@ -1396,6 +1397,7 @@ for impl in posthorn mako; do
   kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
   daemon_pid=""
   cp "$root/default-legacy-original.conf" "$root/default-home/.mako/config"
+  cp "$root/default-xdg-original.conf" "$root/default-xdg/mako/config"
 done
 ./target/debug/examples/qa_png_probe \
   "$root/posthorn-default-legacy-markup.png" '#E5C58B' 0 identical \
