@@ -12,6 +12,13 @@ anything, the harness asks the **original session bus** for its current
 `org.freedesktop.Notifications` owner. It refuses to proceed if the
 name is not owned by the existing daemon.
 
+The parent verifies that its explicitly pinned D-Bus address has the
+same daemon GUID as the user's original session bus. It uses that
+exact address for the original notification-owner check before and
+after private QA, and verifies the original bus GUID still matches
+afterward. Any inherited production-trial authorization or bus pin
+causes private QA to refuse immediately.
+
 Before building, the parent runs the guarded, read-only
 `tests/read_only_owner_inventory.sh` probe to verify the existing Mako
 executable/PID and classify its potential user-service supervisor

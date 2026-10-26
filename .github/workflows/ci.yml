@@ -32,6 +32,22 @@ jobs:
             exit 1
           fi
           grep -q 'Hyprland QA not authorized' "$output"
+          for variable in POSTHORN_PRODUCTION_TRIAL_AUTHORIZED \
+            POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS \
+            POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS; do
+            if env -u HYPRLAND_INSTANCE_SIGNATURE POSTHORN_HYPRLAND_QA=1 \
+                "$variable=1" bash tests/hyprland_private.sh >"$output" 2>&1; then
+              echo "Private QA accepted production-trial arming: $variable"
+              exit 1
+            fi
+            grep -q 'private Hyprland QA refuses production-trial environment' "$output"
+          done
+          if POSTHORN_HYPRLAND_QA=1 POSTHORN_PRODUCTION_TRIAL_AUTHORIZED='' \
+              bash tests/hyprland_private.sh >"$output" 2>&1; then
+            echo 'Private QA accepted an empty but present trial authorization'
+            exit 1
+          fi
+          grep -q 'private Hyprland QA refuses production-trial environment' "$output"
           if env -u HYPRLAND_INSTANCE_SIGNATURE POSTHORN_HYPRLAND_QA=1 \
               bash tests/hyprland_private.sh >"$output" 2>&1; then
             echo 'QA without a Hyprland session unexpectedly succeeded'
@@ -51,6 +67,8 @@ jobs:
             exit 1
           fi
           grep -q 'nested QA must not run on the original session bus' "$output"
+      - name: Verify pinned original user-bus GUID mismatch fails closed
+        run: bash tests/mock_hyprland_parent_bus.sh
       - name: Verify guarded read-only owner inventory defaults to refusal
         run: |
           bash -n tests/hyprland_private.sh

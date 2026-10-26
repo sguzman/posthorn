@@ -9,6 +9,12 @@ cd "$(dirname "$script_path")/.."
 [[ -v POSTHORN_HYPRLAND_QA ]] ||
   die 'explicit POSTHORN_HYPRLAND_QA=1 guard required'
 [[ "$POSTHORN_HYPRLAND_QA" == "1" ]] || die 'Hyprland QA not authorized'
+# Private QA must not inherit production-name trial arming, even if empty.
+for forbidden in POSTHORN_PRODUCTION_TRIAL_AUTHORIZED \
+  POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS \
+  POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS; do
+  [[ ! -v "$forbidden" ]] || die 'private Hyprland QA refuses production-trial environment'
+done
 if [[ "${1:-}" == '--inside' ]]; then
   [[ "${POSTHORN_QA_NESTED:-}" == "1" && -n "${POSTHORN_QA_PARENT_BUS:-}" ]] ||
     die 'nested QA entrypoint requires original-bus verification by parent'
@@ -28,18 +34,23 @@ timeout --signal=TERM --kill-after=2s 5s hyprctl monitors >/dev/null ||
   die 'real Hyprland monitor query failed or timed out'
 
 if [[ "$#" != 1 || "$1" != '--inside' ]]; then
-  # Prove the original session's existing notification daemon keeps ownership.
-  owner_before="$(busctl --user --timeout=3s call org.freedesktop.DBus \
-    /org/freedesktop/DBus org.freedesktop.DBus GetNameOwner \
-    s org.freedesktop.Notifications 2>/dev/null)" ||
-    die 'real notification service has no owner; refusing to test'
-  [[ "$owner_before" == s\ * ]] || die 'unexpected original bus owner'
+  # The original owner, inventory and private child must agree on the
+  # same bus, not silently mix the implicit user bus with a supplied URI.
   [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]] ||
     die 'original D-Bus address unavailable; refusing nested test'
   parent_bus_id="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
     org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetId)" ||
-    die 'could not inspect original D-Bus GUID'
-  [[ "$parent_bus_id" == s\ * ]] || die 'unexpected original D-Bus GUID'
+    die 'could not inspect pinned D-Bus GUID'
+  user_bus_id="$(busctl --user --timeout=3s call \
+    org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetId)" ||
+    die 'could not inspect original user D-Bus GUID'
+  [[ "$parent_bus_id" == s\ * && "$parent_bus_id" == "$user_bus_id" ]] ||
+    die 'pinned D-Bus address is not the original user bus'
+  owner_before="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
+    org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+    GetNameOwner s org.freedesktop.Notifications 2>/dev/null)" ||
+    die 'real notification service has no owner; refusing to test'
+  [[ "$owner_before" == s\ * ]] || die 'unexpected original bus owner'
   # Phase A read-only inventory is allowed by this private QA guard.
   # Its safe classification is not permission for a production cutover.
   inventory="$(bash tests/read_only_owner_inventory.sh)" ||
@@ -54,9 +65,14 @@ if [[ "$#" != 1 || "$1" != '--inside' ]]; then
     POSTHORN_QA_EXPECTED_OWNER="$owner_before" POSTHORN_QA_PARENT_ID="$parent_bus_id" \
     dbus-run-session -- bash "$script_path" --inside || child_status=$?
   # Always re-check the original owner, including when child acceptance fails.
-  owner_after="$(busctl --user --timeout=3s call org.freedesktop.DBus \
-    /org/freedesktop/DBus org.freedesktop.DBus GetNameOwner \
-    s org.freedesktop.Notifications 2>/dev/null)" ||
+  parent_bus_id_after="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
+    org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetId)" ||
+    die 'original D-Bus daemon vanished during QA'
+  [[ "$parent_bus_id_after" == "$parent_bus_id" ]] ||
+    die 'original D-Bus daemon changed during QA'
+  owner_after="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
+    org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+    GetNameOwner s org.freedesktop.Notifications 2>/dev/null)" ||
     die 'real notification owner vanished during QA'
   [[ "$owner_before" == "$owner_after" ]] ||
     die 'original notification daemon owner changed during QA'
