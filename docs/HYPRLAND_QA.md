@@ -109,6 +109,12 @@ pointer/touch input, XDG activation-induced focus, physical sound,
 monitor hotplug and scaling parity, exact Mako rendering, or permission
 to replace installed Mako.
 
+The machine-readable
+[`PHYSICAL_QA_JOB.yaml`](PHYSICAL_QA_JOB.yaml) provides a scoped
+Codex/delegated-automation job for the actual T503 workstation
+acceptance, with privacy controls, explicit PASS/FAIL/BLOCKED gate
+reporting, and no authorization for production cutover.
+
 The harness is currently **not executed on a real Hyprland session**.
 Adding it to the repository or compiling the image probe does not
 establish T503 completion. The existing private Sway CI remains the

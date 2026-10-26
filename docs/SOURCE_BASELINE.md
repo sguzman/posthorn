@@ -5789,3 +5789,53 @@ trial, but that script has **not** run on the physical system.
 **M0 stays 92.375% (delta 0.000 pp). T503 stays 51%;
 T504 stays 0%.** Do not promote safety/readiness work
 into completed physical QA or a production cutover.
+
+
+## Original-Mako full isolated trial handoff and private Hyprland expiry QA preparation (2026-10-26)
+
+The non-default authorized trial was exercised in a **complete
+disposable D-Bus ownership sequence** under isolated Sway, using
+the source-pinned original Mako v1.11.0 binary before and after
+Posthorn. Mako was the initial public notification owner; after
+its synthetic test instance was stopped, Posthorn acquired the
+standard name, accepted a Freedesktop Notify, and automatically
+released the name on its monotonic deadline. The exact original
+Mako binary with its original synthetic config then reacquired
+the public name and accepted a fresh Notify. Unique bus
+connections were checked at each transition. This is an
+executable *handoff and recovery rehearsal*, not a persistent
+fallback supervisor or a real-workstation Mako restart.
+
+[Executable original-Mako handoff 46084b5](https://github.com/sguzman/posthorn/commit/46084b5ccbcb42180da6659ac13aa95a80ded89d) ·
+[Passing pinned differential 40415745420](https://github.com/sguzman/posthorn/actions/runs/40415745420) ·
+[Passing Rust/Wayland CI 40415745488](https://github.com/sguzman/posthorn/actions/runs/40415745488).
+
+The guarded real-Hyprland *private* QA harness has additionally
+been extended to require a synthetic expiring notification to
+actually appear, then disappear without CloseNotification,
+including removal from the private active-notification API.
+Its pre-existing appearance, Reload repaint, and explicit
+dismissal checks remain intact. This real-workstation
+acceptance harness has **not run against the user's Hyprland**.
+Both CI workflows validate only source/runtime behavior on
+disposable Sway and check script syntax.
+[Timed private QA fixture d131712](https://github.com/sguzman/posthorn/commit/d1317122e070d7fc7405c8ce16c4d2e790bd7c68) ·
+[Passed Rust/Wayland CI 40415697820](https://github.com/sguzman/posthorn/actions/runs/40415697820) ·
+[Passed source-pinned Mako CI 40415697808](https://github.com/sguzman/posthorn/actions/runs/40415697808).
+
+For delegated local automation,
+[`docs/PHYSICAL_QA_JOB.yaml`](PHYSICAL_QA_JOB.yaml) defines
+safe environmental preconditions, the existing guarded
+private QA command, privacy-preserving evidence collection,
+and the remaining physical pointer, touch, XDG activation,
+multi-display, and actual audio gates. Any unsupported gate
+must be marked BLOCKED rather than credited from simulated
+Sway evidence. The repository now cancels superseded
+**push-triggered** workflows while keeping manually
+dispatched verification separate, reducing duplicate CI load.
+
+**Accepted strict M0 remains 92.375% (delta 0.000 pp);
+physical Hyprland T503 remains 51%, authorized production
+cutover T504 remains 0%.** Neither the installed Mako daemon,
+the real public notification bus, nor any Hyprland
+autostart/supervisor was changed.
