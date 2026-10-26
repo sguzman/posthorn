@@ -173,6 +173,13 @@ for _ in {1..40};do
   sleep 0.15
 done
 [[ "$removed" == 1 ]] || { echo 'Trial notification remained visible after close' >&2;exit 1; }
+# The owner must remain alive after the last notification disappears.
+# A successful screen cleanup alone cannot establish daemon lifetime.
+if ! kill -0 "$trial_pid" 2>/dev/null;then
+  echo 'Trial process exited unexpectedly after the final notification closed' >&2
+  cat "$root/trial.log" >&2
+  exit 1
+fi
 kill "$trial_pid";wait "$trial_pid" 2>/dev/null || true;trial_pid=""
 released=0
 for _ in {1..40};do
