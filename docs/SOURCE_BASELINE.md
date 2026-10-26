@@ -4797,3 +4797,64 @@ antialias on the user's Hyprland session. T503 physical Hyprland
 remains 51%, and T504 reversible production cutover remains 0%.
 Installed Mako, the public notification bus, and workstation
 configuration remain untouched.
+
+## Actual 2× Pango executable comparison and high-DPI geometry (2026-10-26)
+
+Pinned Mako v1.11.0 `render.c:152-213,318-325` does **not**
+simply stretch an existing 1× Pango layout. It sets physical layout
+limits to `logical_width * scale` and `logical_height * scale`,
+inserts `pango_attr_scale_new(scale)` into the parsed markup
+attributes, calculates physical glyph dimensions, and then divides
+their measured height by output scale (integer truncation) before
+computing the notification's logical popup height.
+
+The previous Posthorn implementation instead premeasured Pango at
+1× and enlarged Cairo's context while painting. An independent
+pinned-upstream executable comparison on the **same actual scale-2
+Sway output** established the defect:
+
+| Before correction, scale 2 | Posthorn | Original Mako |
+| --- | ---: | ---: |
+| Popup geometry (physical pixels) | 360 × 352 | 360 × 394 |
+| Exact text-color pixel count | 13,216 | 13,999 |
+
+Posthorn now uses the upstream scaling attribute and physical Pango
+limits in **both** measurement and painting, restores an identity
+Cairo matrix for physical font rendering, and uses the configured
+maximum height for Pango layout instead of the shrink-wrapped
+notification height. The measured physical text height is converted
+back to logical height using Mako's integer truncation semantics.
+
+Both live frame presentation and input-region/hit-test geometry use
+the same actual output-scale measurement. Unit regressions establish
+the source's non-linear font-size behavior at multiple scales rather
+than incorrectly requiring a 2× output to have exactly 2× the
+1× popup's logical height.
+
+The corrected direct executable comparison is now exact:
+
+| Corrected source-pinned scale-2 fixture | Posthorn | Original Mako |
+| --- | ---: | ---: |
+| Popup geometry (physical pixels) | **360 × 394** | **360 × 394** |
+| Exact text-color pixel count | **13,999** | **13,999** |
+
+[Source-pinned test introduction](https://github.com/sguzman/posthorn/commit/b9aca710d8a6fb728d4f336f90935eeb4059f543) ·
+[test harness correction](https://github.com/sguzman/posthorn/commit/f0e5892c495e2a22d9c6195d333bb75266ad41e1) ·
+[physical-scale implementation](https://github.com/sguzman/posthorn/commit/97cd33df4ff641f46bcca7c09f483d326e6306e8) ·
+[regression fixture correction](https://github.com/sguzman/posthorn/commit/523bf9b17b81ccfc23cf5054cf5126b92899cacf) ·
+[final compile fix](https://github.com/sguzman/posthorn/commit/7da6f1f3588a49a06cf5231a326e4de79a51cd12) ·
+[successful pinned-Mako comparison 40354143045](https://github.com/sguzman/posthorn/actions/runs/40354143045) ·
+[successful Rust/Wayland CI 40354142427](https://github.com/sguzman/posthorn/actions/runs/40354142427).
+
+The exact implementation passed **352 Rust library tests, 100
+private D-Bus tests, and the full isolated Sway/Wayland acceptance
+suite**, including 2× and 9× output workflows.
+**Accepted T205 89% → 91% (+2 pp), P2 97.4% → 97.8% (+0.4 pp),
+strict 24-task M0 91.125% → 91.208% (+0.083 pp).**
+
+This proves the observed 2× case and unit-scale geometry, **not**
+general font equivalence on physical RGB/BGR panels or the user's
+actual Hyprland session. T503 physical Hyprland remains 51%;
+T504 explicitly authorized reversible production cutover remains 0%.
+Original installed Mako, public notification bus, and workstation
+configuration were never modified.
