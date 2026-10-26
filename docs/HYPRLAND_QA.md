@@ -12,6 +12,13 @@ anything, the harness asks the **original session bus** for its current
 `org.freedesktop.Notifications` owner. It refuses to proceed if the
 name is not owned by the existing daemon.
 
+Before building, the parent runs the guarded, read-only
+`tests/read_only_owner_inventory.sh` probe to verify the existing Mako
+executable/PID and classify its potential user-service supervisor
+without printing personal configuration or command-line arguments.
+An unverified supervisor does not authorize any production switch.
+The parent requires the probe's rollback status to remain unverified.
+
 The runner compiles the experimental private desktop and Rust PNG
 pixel probe. It starts a **new nested D-Bus session**, retains the real
 Wayland compositor socket, and exercises the **same multi-surface Wayland
