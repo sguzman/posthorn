@@ -89,6 +89,21 @@ pub(crate) async fn open_private_runtime(
 /// displace an owned name, and all D-Bus objects are ready beforehand.
 pub(crate) async fn open_standard_trial_runtime(runtime:SharedRuntime)
     ->zbus::Result<(Connection,SharedRuntime)>{
+    // The second gate prevents bypass via a direct library helper call.
+    // A caller cannot acquire the public name merely by constructing a
+    // valid SharedRuntime; only a separately armed bus-pinned trial may.
+    let authorized=std::env::var("POSTHORN_PRODUCTION_TRIAL_AUTHORIZED")
+        .ok().as_deref()==Some("1");
+    let pinned=std::env::var("POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS")
+        .unwrap_or_default();
+    let active=std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap_or_default();
+    let private_qa=std::env::var("POSTHORN_HYPRLAND_QA")
+        .ok().as_deref()==Some("1");
+    if !authorized || pinned.is_empty() || pinned!=active || private_qa{
+        return Err(zbus::Error::Failure(
+            "public-name trial requires separate authorization and matching bus pin".into(),
+        ));
+    }
     open_named_runtime(runtime,BUS_NAME).await
 }
 
