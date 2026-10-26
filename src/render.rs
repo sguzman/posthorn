@@ -610,6 +610,15 @@ pub fn compose_mako_stack_with_visible_count(
         if margins.is_empty(){return Ok(None);}
         return Err("popup margin count mismatch".into());
     }
+    // Pinned Mako v1.11 render.c:360-361,424-430,472-484 computes
+    // max_width exclusively from real visible notifications. Its
+    // synthetic (N more) placeholder contributes height, not width.
+    // With visible_count=0, no drawable canvas exists even when the
+    // hidden-count frame was generated and consumed an internal ID.
+    if visible_count==0 {
+        if margins.len()!=frames.len(){return Err("popup margin count mismatch".into());}
+        return Ok(None);
+    }
     let sizes:Vec<_>=frames.iter().map(|f|(f.width,f.height)).collect();
     let (all_width,height,all_positions)=mako_stack_geometry(&sizes,margins,alignment)?;
     let width=if visible_count>0 && visible_count<frames.len(){
@@ -1765,6 +1774,14 @@ mod tests {
         assert!(compose_mako_stack_with_visible_count(
             &frames,&limits,StackAlignment::Right,3
         ).is_err());
+        assert!(compose_mako_stack_with_visible_count(
+            &frames,&limits,StackAlignment::Right,0
+        ).unwrap().is_none(),
+            "synthetic-only overflow cannot establish Mako canvas width");
+        assert!(compose_mako_stack_with_visible_count(
+            &frames,&limits[..1],StackAlignment::Right,0
+        ).is_err(),
+            "a zero-visible canvas still validates frame/margin counts");
     }
 
     #[test]

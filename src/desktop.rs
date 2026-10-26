@@ -396,16 +396,9 @@ fn snapshot_frame_for_surface(
                 .unwrap_or(PopupMargins::uniform(10*scale)));
         }
     }
-    // Pinned Mako v1.11 render.c:360-361,424-430,472-484 computes
-    // max_width from REAL notifications only. The synthetic hidden-count
-    // popup contributes height but never widens a zero-width surface.
-    // If max-visible=0, all active notes can be hidden: keep the hidden
-    // pseudo-notification ID consumed above, but do not render a spurious
-    // stand-alone (N more) popup with an invented canvas width.
-    if visible_count==0 && hidden>0 {return Ok(None);}
     let anchor=surface_key.map(|key|key.2.as_str()).unwrap_or_else(||
         config.global.get("anchor").map(String::as_str).unwrap_or("top-right"));
-    if visible_count>0 && visible_count<frames.len(){
+    if visible_count<frames.len(){
         compose_mako_stack_with_visible_count(
             &frames,&margins,stack_alignment(anchor),visible_count
         ).map_err(other)
