@@ -2441,3 +2441,92 @@ done
 diff -u "$root/posthorn-restore-sound.events" "$root/mako-restore-sound.events"
 echo 'Pinned Mako/Posthorn restored category sound hook suppression: MATCH'
 
+# T502: multiple active Mako modes must preserve ordered category
+# hook matching. [mode=focus] can color a warning notification
+# while [mode=quiet] independently suppresses its on-notify=exec.
+# SetModes (including duplicates), mode removal and empty mode list
+# must never replay the hook for already displayed notifications.
+# Observe disposable hook output on both original Mako and Posthorn.
+for impl in posthorn mako;do
+  marker="$root/$impl-multi-mode-sound.events"
+  config="$root/$impl-multi-mode-sound.conf"
+  cat >"$config" <<EOF_MULTI_SOUND
+width=195
+height=100
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=8
+default-timeout=0
+format=%s
+markup=0
+on-notify=none
+[category=warning]
+on-notify=exec printf 'warning:%s\n' "\$id" >> "$marker"
+[mode=focus]
+background-color=#304858
+[mode=quiet]
+on-notify=none
+EOF_MULTI_SOUND
+  if [[ "$impl" == posthorn ]];then
+    ./target/debug/posthorn --experimental-private-desktop \
+      "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  first="$(sound_notify_category "$bus" warning)"
+  sound_wait_count "$marker" 1
+  [[ "$(tail -n 1 "$marker")" == "warning:$first" ]] || exit 1
+  cp "$marker" "$root/$impl-multi-mode-before.events"
+
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetModes as 3 focus quiet focus >/dev/null
+  modes="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako ListModes)"
+  [[ "$modes" == "as 2 "* ]] || {
+    echo "$impl did not deduplicate focus quiet focus: $modes" >&2;exit 1
+  }
+  silent="$(sound_notify_category "$bus" warning)"
+  [[ "$silent" != "$first" ]] || exit 1
+  sleep 0.30
+  cmp -s "$marker" "$root/$impl-multi-mode-before.events" || {
+    echo "$impl ran sound with focus and quiet active" >&2;exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetModes as 1 focus >/dev/null
+  sleep 0.20
+  cmp -s "$marker" "$root/$impl-multi-mode-before.events" || {
+    echo "$impl replayed hooks when removing quiet" >&2;exit 1
+  }
+  resumed="$(sound_notify_category "$bus" warning)"
+  sound_wait_count "$marker" 2
+  [[ "$(tail -n 1 "$marker")" == "warning:$resumed" ]] || exit 1
+  cp "$marker" "$root/$impl-multi-mode-resumed.events"
+
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetModes as 0 >/dev/null
+  modes="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako ListModes)"
+  [[ "$modes" == "as 0" ]] || {
+    echo "$impl failed to clear active mode list: $modes" >&2;exit 1
+  }
+  sleep 0.20
+  cmp -s "$marker" "$root/$impl-multi-mode-resumed.events" || {
+    echo "$impl replayed hooks after clearing all modes" >&2;exit 1
+  }
+  fresh="$(sound_notify_category "$bus" warning)"
+  sound_wait_count "$marker" 3
+  [[ "$(tail -n 1 "$marker")" == "warning:$fresh" ]] || exit 1
+  echo "$impl mixed focus/quiet modes and sound-hook suppression: MATCH"
+  kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+diff -u "$root/posthorn-multi-mode-sound.events" "$root/mako-multi-mode-sound.events"
+echo 'Pinned Mako/Posthorn mixed-mode category sound suppression: MATCH'
+
