@@ -368,14 +368,32 @@ fn snapshot_frame_for_surface(
             modes:&mode_views,requested_timeout_ms:-1,
             actionable:false,group_index:-1,hidden:true,
         };
-        let style=config.style_for(&traits);
+        let mut style=config.style_for(&traits);
         if !style.get("invisible").is_some_and(|x|x=="1"||x=="true"){
-            // Pinned Mako render.c:442-484 lays out the synthetic hidden
-            // notification at its FULL configured width, then reports a
-            // canvas width based only on real notifications. Narrowing
-            // [hidden] before Pango layout changes wrapping and height.
-            // compose_mako_stack_with_visible_count performs the actual
-            // output clipping without mutating the hidden style width.
+            // Pinned Mako v1.11 render.c:113-115 clamps EACH notification
+            // to the layer surface's compositor-confirmed width BEFORE
+            // Pango layout, including this synthetic [hidden] note.
+            // render.c:424-430 excludes the synthetic note from the
+            // requested surface width. wayland.c:361-379 then supplies the
+            // configured width; Mako's next frame uses that bound.
+            // A wider hidden rule must wrap at that surface width instead
+            // of measuring unconstrained lines and clipping afterward.
+            if visible_count>0 {
+                let dimensions=frames.iter().map(|frame|(frame.width,frame.height))
+                    .collect::<Vec<_>>();
+                let anchor=surface_key.map(|key|key.2.as_str()).unwrap_or_else(||
+                    config.global.get("anchor").map(String::as_str).unwrap_or("top-right"));
+                let (canvas_width,_,_)=mako_stack_geometry(
+                    &dimensions,&margins,stack_alignment(anchor)
+                ).map_err(other)?;
+                let logical_width=(canvas_width/pixel_scale).max(1);
+                let configured=style.get("width")
+                    .and_then(|v|crate::config::parse_nonnegative_mako(v))
+                    .unwrap_or(300);
+                if configured>logical_width {
+                    style.insert("width".into(),logical_width.to_string());
+                }
+            }
             frames.push(render_hidden_placeholder_scaled(hidden,total,&style,pixel_scale)
                 .map_err(other)?);
             margins.push(style.get("margin")
@@ -813,11 +831,12 @@ mod tests {
     }
 
     #[test]
-    fn wider_hidden_placeholder_uses_full_pango_width_then_clips_to_real_canvas(){
-        // Source render.c:442-484 does not include the hidden synthetic
-        // notification in max_width. But render_notification() receives its
-        // ORIGINAL style width, so narrowing the style before rendering
-        // introduces extra Pango line wraps and changes canvas height.
+    fn wider_hidden_style_is_clamped_to_configured_surface_before_pango(){
+        // Source render.c:113-115 caps notif_width to surface->width
+        // BEFORE Pango sizing, even for [hidden] at render.c:472-474.
+        // wayland.c:361-379 confirms surface width from the compositor.
+        // The wider-style bitmap must be the negative control, not the
+        // acceptance reference, when visible notifications are narrower.
         let format="Overflow status: %h hidden among %t total notifications, with deliberately long text";
         let config=Config::parse(&format!(
             "width=84\nheight=200\nborder-size=0\npadding=0\nmargin=0\n\
@@ -848,24 +867,29 @@ mod tests {
         hidden_style.insert("format".into(),format.into());
         hidden_style.insert("background-color".into(),"#9371B2".into());
         let wide=render_hidden_placeholder_scaled(1,2,&hidden_style,1).unwrap();
-        let mut incorrectly_clamped=hidden_style.clone();
-        incorrectly_clamped.insert("width".into(),"84".into());
+        let mut surface_clamped=hidden_style.clone();
+        surface_clamped.insert("width".into(),"84".into());
         let narrow=render_hidden_placeholder_scaled(
-            1,2,&incorrectly_clamped,1
+            1,2,&surface_clamped,1
         ).unwrap();
         assert!(narrow.height>wide.height,
-            "negative control: premature width clamp must introduce extra wrapping");
+            "negative control: the configured surface width causes extra wrapping");
         let no_margin=PopupMargins::uniform(0);
         let reference=compose_mako_stack_with_visible_count(
+            &[visible.clone(),narrow],&[no_margin,no_margin],StackAlignment::Right,1
+        ).unwrap().unwrap();
+        let incorrectly_wide=compose_mako_stack_with_visible_count(
             &[visible,wide],&[no_margin,no_margin],StackAlignment::Right,1
         ).unwrap().unwrap();
         let actual=snapshot_frame(&runtime).unwrap().unwrap();
         assert_eq!(actual.width,84,
             "synthetic overflow cannot widen the real notification canvas");
         assert_eq!(actual.height,reference.height,
-            "hidden text must contribute height measured at its own configured width");
+            "hidden Pango height must reflect the configured layer surface width");
         assert_eq!(actual.pixels,reference.pixels,
-            "rendering must clip the original wide hidden bitmap, not relayout it");
+            "hidden bitmap must be laid out at surface width before painting");
+        assert_ne!(actual.height,incorrectly_wide.height,
+            "negative control must reject unclamped [hidden] height");
     }
 
     #[test]
