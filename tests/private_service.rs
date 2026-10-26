@@ -1736,6 +1736,83 @@ async fn category_sound_direct_replacements_follow_current_mode_without_replay()
     Ok(())
 }
 
+
+#[tokio::test]
+async fn category_sound_stack_tag_updates_honor_quiet_mode_and_app_scope()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Mako dbus/xdg.c:362-371 creates a new notification and then
+    // replaces the same-app tag's ID. It STILL executes the newly
+    // selected on-notify binding at :385-430. This differs from direct
+    // replaces_id and must respect the currently selected mode.
+    let dir=tempfile::tempdir()?;
+    let marker=dir.path().join("tag-sound-events");
+    let config=Config::parse(&format!(
+        "[category=success]\\non-notify=exec printf 'success:%s\\\\n' \"$id\" >> '{}'\\n\\
+         [category=warning]\\non-notify=exec printf 'warning:%s\\\\n' \"$id\" >> '{}'\\n\\
+         [mode=quiet]\\non-notify=none\\n",
+        marker.display(),marker.display(),
+    ))?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let notify=|app:&str,category:&str|{
+        let hints:HashMap<String,OwnedValue>=[
+            ("category".into(),
+             OwnedValue::try_from(zbus::zvariant::Value::from(category)).unwrap()),
+            ("x-dunst-stack-tag".into(),
+             OwnedValue::try_from(zbus::zvariant::Value::from("shared")).unwrap()),
+        ].into();
+        (app.to_string(),0u32,"","Tag replacement","",
+         Vec::<String>::new(),hints,-1i32)
+    };
+    let wait_for=|expected:String|{
+        let marker=marker.clone();
+        async move{
+            tokio::time::timeout(Duration::from_secs(3),async{
+                loop{
+                    if std::fs::read_to_string(&marker).unwrap_or_default()==expected {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                }
+            }).await
+        }
+    };
+    let id:u32=desktop.call("Notify",&notify("one","success")).await?;
+    let first=format!("success:{id}\\n");
+    wait_for(first.clone()).await?;
+    let same:u32=desktop.call("Notify",&notify("one","warning")).await?;
+    assert_eq!(same,id,"stack tag must preserve the same application's ID");
+    let before_quiet=format!("{first}warning:{id}\\n");
+    wait_for(before_quiet.clone()).await?;
+
+    let _:()=ctl.call("SetMode",&("quiet",)).await?;
+    let quiet:u32=desktop.call("Notify",&notify("one","success")).await?;
+    assert_eq!(quiet,id);
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,before_quiet,
+        "quiet must suppress stack-tag replacement sounds");
+    assert_eq!(runtime.store.lock().unwrap().active().len(),1);
+
+    let _:()=ctl.call("SetMode",&("default",)).await?;
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,before_quiet,
+        "leaving quiet mode alone must not replay suppressed tag sounds");
+    let resumed:u32=desktop.call("Notify",&notify("one","success")).await?;
+    assert_eq!(resumed,id);
+    let after_resumed=format!("{before_quiet}success:{id}\\n");
+    wait_for(after_resumed.clone()).await?;
+
+    // A different sender application using the identical tag must create
+    // its OWN notification; it does not replace the prior app's ID.
+    let other:u32=desktop.call("Notify",&notify("two","warning")).await?;
+    assert_ne!(other,id);
+    wait_for(format!("{after_resumed}warning:{other}\\n")).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),2);
+    Ok(())
+}
+
 #[tokio::test]
 async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
