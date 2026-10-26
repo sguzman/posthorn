@@ -1,0 +1,35 @@
+name: Pinned Mako Differential (isolated)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare-hidden-width:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install compositor and original Mako build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            sway grim libpango1.0-dev libcairo2-dev libgdk-pixbuf-2.0-dev \
+            libwayland-dev wayland-protocols libsystemd-dev meson ninja-build \
+            pkg-config git
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build private Posthorn binary and screenshot probe
+        run: cargo build --bin posthorn --example qa_png_probe
+      - name: Compile exact source-pinned Mako v1.11.0
+        run: |
+          git clone --quiet https://github.com/emersion/mako.git /tmp/posthorn-upstream-mako
+          git -C /tmp/posthorn-upstream-mako checkout --quiet 91c6b799855762ad1eb8b4498967c270a339be0c
+          test "$(git -C /tmp/posthorn-upstream-mako rev-parse HEAD)" = 91c6b799855762ad1eb8b4498967c270a339be0c
+          meson setup /tmp/posthorn-upstream-build /tmp/posthorn-upstream-mako \
+            -Dicons=disabled -Dman-pages=disabled -Dsd-bus-provider=libsystemd
+          meson compile -C /tmp/posthorn-upstream-build
+      - name: Compare against pinned Mako on isolated Sway and D-Bus
+        run: |
+          POSTHORN_PINNED_DIFFERENTIAL=1 dbus-run-session -- \
+            bash tests/pinned_mako_differential.sh /tmp/posthorn-upstream-build/mako
