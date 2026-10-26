@@ -1063,6 +1063,27 @@ for impl in posthorn mako; do
     exit 1
   }
   echo "$impl physical-2x post-Reload CLI width retention: $reload_bounds"
+  # Pinned config.c:reload_config builds a replacement config separately;
+  # when parsing fails, it returns before replacing the live configuration.
+  # Neither desktop may lose its existing CLI override, redraw an invalid
+  # style, or relinquish its private bus registration.
+  sed -i 's/^width=300$/width=invalid/' "$root/cli-desktop.conf"
+  if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload \
+    >"$root/$impl-invalid-reload.log" 2>&1; then
+    echo "$impl incorrectly accepted malformed source config on Reload"
+    exit 1
+  fi
+  grep -q 'Unable to parse configuration file' "$root/$impl-invalid-reload.log" || {
+    echo "$impl did not return Mako's InvalidConfig Reload error"
+    cat "$root/$impl-invalid-reload.log"; exit 1
+  }
+  sleep 0.25
+  grim "$root/$impl-cli-rejected.png"
+  ./target/debug/examples/qa_png_probe \
+    "$root/$impl-cli-rejected.png" '#2A7F9B' 0 identical \
+    "$root/$impl-cli-reloaded.png"
+  echo "$impl rejected bad Reload without changing the settled desktop image"
   kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
   daemon_pid=""
 done
@@ -1072,4 +1093,7 @@ done
 ./target/debug/examples/qa_png_probe \
   "$root/posthorn-cli-reloaded.png" '#2A7F9B' 0 identical \
   "$root/mako-cli-reloaded.png"
-echo 'Pinned Mako/Posthorn private Wayland CLI startup and Reload override rasters: MATCH'
+./target/debug/examples/qa_png_probe \
+  "$root/posthorn-cli-rejected.png" '#2A7F9B' 0 identical \
+  "$root/mako-cli-rejected.png"
+echo 'Pinned Mako/Posthorn private Wayland CLI startup, valid Reload, and rejected Reload rasters: MATCH'
