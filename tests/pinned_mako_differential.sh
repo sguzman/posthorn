@@ -2548,8 +2548,8 @@ background-color=#405972
 text-color=#F8F8F8
 EOF_COLLISION
 "$mako_binary" -c "$root/mako-collision.conf" \
-  >"$root/mako-collision.log" 2>&1 &
-mako_collision_pid=$!
+  >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
 wait_for_bus org.freedesktop.Notifications
 before_owner="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
@@ -2590,7 +2590,7 @@ reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
 [[ "$reply" == u\ * ]] || {
   echo 'Pinned Mako stopped handling Notify after Posthorn refusal' >&2;exit 1
 }
-kill "$mako_collision_pid";wait "$mako_collision_pid" 2>/dev/null || true
-mako_collision_pid=""
+kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
 echo 'Pinned original Mako remained public owner and handled Notify after trial collision refusal: MATCH'
 
