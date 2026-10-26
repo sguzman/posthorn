@@ -2085,3 +2085,94 @@ for stage in success warning quiet resumed;do
   echo "Pinned Mako/Posthorn source color-and-sound $stage pixels: MATCH"
 done
 
+# T502: Mako x-dunst-stack-tag matching is app-scoped. Every successful
+# tagged Notify selects a fresh on-notify binding, despite reusing a
+# sender-visible ID. A quiet criterion silences it; restoring default
+# mode does not replay it. All side effects are disposable file writes.
+sound_notify_tagged(){
+  local bus="$1" app="$2" category="$3" reply
+  reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /org/freedesktop/Notifications org.freedesktop.Notifications \
+    Notify 'susssasa{sv}i' "$app" 0 '' "Tagged $category" '' \
+    0 2 category s "$category" x-dunst-stack-tag s 'same-tag' 30000)"
+  [[ "$reply" == u\ * ]] || {
+    echo "tagged $category Notify failed: $reply" >&2;return 1
+  }
+  echo "$reply" | cut -d ' ' -f 2
+}
+for impl in posthorn mako;do
+  marker="$root/$impl-tag-sound.events"
+  config="$root/$impl-tag-sound.conf"
+  cat >"$config" <<EOF_TAG_SOUND
+width=195
+height=100
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=8
+default-timeout=0
+format=%s
+markup=0
+on-notify=none
+[category=success]
+background-color=#305747
+on-notify=exec printf 'success:%s\n' "\$id" >> "$marker"
+[category=warning]
+background-color=#715536
+on-notify=exec printf 'warning:%s\n' "\$id" >> "$marker"
+[mode=quiet]
+on-notify=none
+EOF_TAG_SOUND
+  if [[ "$impl" == posthorn ]];then
+    ./target/debug/posthorn --experimental-private-desktop \
+      "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  first="$(sound_notify_tagged "$bus" 'Pinned Sound Alpha' success)"
+  sound_wait_count "$marker" 1
+  [[ "$(tail -n 1 "$marker")" == "success:$first" ]] || exit 1
+  same="$(sound_notify_tagged "$bus" 'Pinned Sound Alpha' warning)"
+  [[ "$same" == "$first" ]] || {
+    echo "$impl lost same-app tagged replacement ID" >&2;exit 1
+  }
+  sound_wait_count "$marker" 2
+  [[ "$(tail -n 1 "$marker")" == "warning:$first" ]] || exit 1
+  cp "$marker" "$root/$impl-tag-sound-before-quiet.events"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetMode s quiet >/dev/null
+  quiet="$(sound_notify_tagged "$bus" 'Pinned Sound Alpha' success)"
+  [[ "$quiet" == "$first" ]] || exit 1
+  sleep 0.35
+  cmp -s "$marker" "$root/$impl-tag-sound-before-quiet.events" || {
+    echo "$impl sounded a tag replacement in quiet" >&2;exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetMode s default >/dev/null
+  sleep 0.20
+  cmp -s "$marker" "$root/$impl-tag-sound-before-quiet.events" || {
+    echo "$impl replayed a suppressed tag hook while leaving quiet" >&2;exit 1
+  }
+  resumed="$(sound_notify_tagged "$bus" 'Pinned Sound Alpha' success)"
+  [[ "$resumed" == "$first" ]] || exit 1
+  sound_wait_count "$marker" 3
+  [[ "$(tail -n 1 "$marker")" == "success:$first" ]] || exit 1
+  other="$(sound_notify_tagged "$bus" 'Pinned Sound Beta' warning)"
+  [[ "$other" != "$first" ]] || {
+    echo "$impl replaced a different app sharing a tag" >&2;exit 1
+  }
+  sound_wait_count "$marker" 4
+  [[ "$(tail -n 1 "$marker")" == "warning:$other" ]] || exit 1
+  echo "$impl app-scoped tagged category sound with quiet lifecycle: MATCH"
+  kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+diff -u "$root/posthorn-tag-sound.events" "$root/mako-tag-sound.events"
+echo 'Pinned Mako/Posthorn app-scoped tagged category sound lifecycle: MATCH'
+
