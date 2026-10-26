@@ -4611,3 +4611,37 @@ in [CI 40330397284](https://github.com/sguzman/posthorn/actions/runs/40330397284
 the separate Rust job was still at dependency installation at the
 time of this source-accounting correction, so complete exact-SHA
 CI success is **not claimed** here.
+
+## Private Sway validates compositor-constrained hidden-label Pango height (2026-10-26)
+
+Pinned Mako v1.11.0 `render.c:113-115,139-159` clamps each
+notification's width to `surface->width` *before* Pango layout;
+that includes the synthetic `[hidden]` notification at
+`render.c:442-474`. `wayland.c:361-379` receives the
+compositor-configured width, while `render.c:424-430,482`
+excludes the hidden pseudo-note from requested surface width.
+
+The new headless Sway fixture tests this with an 84-pixel real
+notification and a `[hidden] width=260` rule with an intentionally
+long unbroken label. Its private D-Bus service receives two
+notifications. The actual compositor snapshot contains an
+**84 × 256-pixel** hidden-label region, confirming width-constrained
+wrapping rather than unconstrained layout followed by clipping.
+The earlier initial fixture failure was a busctl command-line
+argument (`-1` interpreted as an option), corrected to a positive
+test timeout without changing production behavior.
+
+[Regression c463c02](https://github.com/sguzman/posthorn/commit/c463c02a04ad67e1949e95b777f46482515caf71) ·
+[fixture correction dba311b](https://github.com/sguzman/posthorn/commit/dba311b2d4bbd64f4f86620853420f1d564f4b5b) ·
+[accepted full two-job CI 40332391193](https://github.com/sguzman/posthorn/actions/runs/40332391193).
+**349 Rust library tests, 100 private D-Bus tests and all isolated
+Wayland checks passed**, including explicit
+`Live Sway hidden text constrained by 84px surface: 84 x 256 OK`.
+
+This is fresh, **correct** acceptance evidence for
+**T105 95% → 96% (+1 pp); P1 96.4% → 96.6%;
+strict 24-task M0 90.917% → 90.958% (+0.042 pp)**.
+This does not reinstate the rejected unclamped-layout reasoning
+or imply physical Hyprland/forced-smaller-configure parity.
+T503 remains 51%, T504 authorized live Mako cutover remains 0%;
+installed Mako, public notification name and real desktop untouched.
