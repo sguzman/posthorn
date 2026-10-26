@@ -1165,3 +1165,97 @@ for variant in nested tilde; do
     "$root/mako-include-$variant-markup.png"
   echo "Pinned Mako/Posthorn real scale-2 $variant included config raster: MATCH"
 done
+
+# T104 + T303: a nested include is resolved afresh on Reload; replacing
+# the leaf must update the actual Wayland layer raster. Removing that leaf
+# afterward must reject Reload atomically and preserve the last valid
+# rendered frame. Both original Mako and the private Posthorn presenter
+# run with the same absolute include chain and symlink, on disposable CI.
+cp "$root/include-leaf.conf" "$root/include-leaf-original.conf"
+for impl in posthorn mako; do
+  cp "$root/include-leaf-original.conf" "$root/include-leaf.conf"
+  clear_color '#2A7F9B'
+  clear_color '#416D98'
+  if [[ "$impl" == posthorn ]]; then
+    ./target/debug/posthorn --experimental-private-desktop "$root/include-root.conf" \
+      >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$root/include-root.conf" >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  markup_notify "$bus"
+  original_include="$(markup_measure "$impl-include-before-reload" "$bus")"
+  echo "$impl included-style-before-Reload: $original_include"
+  sed -i 's/^background-color=#416D98$/background-color=#2A7F9B/; s/^padding=5$/padding=12/' \
+    "$root/include-leaf.conf"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null || {
+    echo "$impl rejected valid nested include Reload"
+    cat "$root/daemon.log"; exit 1
+  }
+  stable=0
+  accepted=0
+  for _ in {1..60}; do
+    if grim "$root/$impl-include-reloaded.png" 2>/dev/null; then
+      bounds="$(./target/debug/examples/qa_png_probe \
+        "$root/$impl-include-reloaded.png" '#2A7F9B' 400 bounds 2>/dev/null || true)"
+      if [[ -n "$bounds" ]]; then
+        if [[ -f "$root/$impl-include-prev.png" ]] &&
+          ./target/debug/examples/qa_png_probe \
+          "$root/$impl-include-reloaded.png" '#2A7F9B' 0 identical \
+          "$root/$impl-include-prev.png" >/dev/null 2>&1; then
+          stable=$((stable+1))
+        else
+          stable=0
+        fi
+        if (( stable >= 3 )); then accepted=1; break; fi
+        cp "$root/$impl-include-reloaded.png" "$root/$impl-include-prev.png"
+      fi
+    fi
+    sleep 0.15
+  done
+  [[ "$accepted" == 1 ]] || {
+    echo "$impl did not stabilize after nested include Reload"
+    cat "$root/daemon.log"; exit 1
+  }
+  read -r x0 x1 y0 y1 <<<"$bounds"
+  (( x1-x0+1 == 422 )) || {
+    echo "$impl dropped parent width after nested include Reload: $bounds"
+    exit 1
+  }
+  if ./target/debug/examples/qa_png_probe \
+    "$root/$impl-include-reloaded.png" '#2A7F9B' 0 identical \
+    "$root/$impl-include-before-reload-markup.png" >/dev/null 2>&1; then
+    echo "$impl did not render the modified nested include"
+    exit 1
+  fi
+  echo "$impl nested include Reload new painted bounds: $bounds"
+  mv "$root/include-leaf.conf" "$root/include-leaf.deleted"
+  if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload \
+    >"$root/$impl-include-rejected.log" 2>&1; then
+    echo "$impl accepted a dangling nested include on Reload"
+    exit 1
+  fi
+  grep -q 'Unable to parse configuration file' "$root/$impl-include-rejected.log" || {
+    echo "$impl did not return the source-compatible invalid config error"
+    cat "$root/$impl-include-rejected.log"; exit 1
+  }
+  sleep 0.25
+  grim "$root/$impl-include-rejected.png"
+  ./target/debug/examples/qa_png_probe \
+    "$root/$impl-include-rejected.png" '#2A7F9B' 0 identical \
+    "$root/$impl-include-reloaded.png"
+  echo "$impl kept its last valid included style after rejected Reload"
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+for variant in reloaded rejected; do
+  ./target/debug/examples/qa_png_probe \
+    "$root/posthorn-include-$variant.png" '#2A7F9B' 0 identical \
+    "$root/mako-include-$variant.png"
+done
+echo 'Pinned Mako/Posthorn nested include Reload and missing-file rejection: MATCH'
