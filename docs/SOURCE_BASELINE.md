@@ -4938,3 +4938,48 @@ do not establish physical Hyprland T503, nor authorize
 production Mako cutover T504. Those gates remain at
 51% and 0% respectively. Installed Mako, the standard
 user notification bus, and workstation setup remain unchanged.
+
+## Entire decoded 2× screenshot parity for styled, aligned and fallback markup (2026-10-26)
+
+The pinned Mako v1.11.0 `render.c:152-155` and
+`notification.c:291-346` require Pango markup parsing, escaped
+fallback, explicit disabled markup, and font scaling to agree.
+The earlier output-scale correction was accepted on text-color counts
+and popup dimensions. The new pinned executable fixture additionally
+checks exact placement/ink bounds for center/right text and covers
+two previously untested physical-scale formatting branches:
+`markup=0` with literal tags, and `markup=1` with a malformed
+sender-supplied body.
+
+All test notifications were sent separately to independent binaries
+on **the same isolated actual 2× Sway output** and private D-Bus,
+using a disposable fixed font/configuration. Original installed Mako
+and the desktop session remained untouched.
+
+| 2× formatting case | Posthorn background/text-color pixels | Original Mako | Ink rectangle |
+| --- | --- | --- | --- |
+| Markup off, escaped literal tags | 360 × 394 / 11,038 | exact match | (931,16)–(1249,378), exact |
+| Invalid sender markup, escaped fallback | 360 × 394 / 10,602 | exact match | (931,16)–(1248,374), exact |
+
+A separate PNG probe compares all decoded image pixels with stride
+awareness. It reported **zero different pixels in each of five
+actual compositor screenshots**, not merely matching count and bounds:
+styled markup, center alignment, right alignment, literal-tag
+fallback, and malformed-markup fallback.
+
+[Literal and malformed source-pinned tests](https://github.com/sguzman/posthorn/commit/186b8ad8711e6f918fd7425c43e61431ec997b8c) ·
+[decoded full-screen PNG comparison](https://github.com/sguzman/posthorn/commit/5ac957cd211db91dba5b648a5d314faefc0b9193) ·
+[green exact pinned-executable CI 40357633575](https://github.com/sguzman/posthorn/actions/runs/40357633575).
+The latter passed 352 Rust library tests, 100 private D-Bus
+tests, and all cross-executable cases. The separate full
+Rust/Wayland CI for this exact implementation is
+[40357633034](https://github.com/sguzman/posthorn/actions/runs/40357633034)
+and must be checked independently before claiming its completion.
+
+**Source-backed acceptance:** T205 **92% → 93% (+1 pp)**,
+P2 **98.0% → 98.2% (+0.2 pp)** and strict 24-task MVP
+**91.292% → 91.333% (+0.042 pp)**.
+The physical Hyprland workstation (T503 51%) and
+expressly authorized production cutover (T504 0%) remain
+unattempted. General renderer equivalence is not asserted
+beyond these observed fixtures.
