@@ -51,6 +51,17 @@ fn set_mako_formatted_text(layout:&pango::Layout,rendered:&str){
     }
 }
 
+/// Pinned Mako v1.11.0 render.c:81-96 selects grayscale glyph
+/// antialiasing for WL_OUTPUT_SUBPIXEL_UNKNOWN and NONE instead of
+/// Cairo's process-dependent default. The isolated headless output uses
+/// an unknown subpixel order.
+fn set_unknown_subpixel_font_options(cr:&cairo::Context)->Result<(),String>{
+    let options=cairo::FontOptions::new().map_err(|e|e.to_string())?;
+    options.set_antialias(cairo::Antialias::Gray);
+    cr.set_font_options(&options);
+    Ok(())
+}
+
 fn set_color(cr: &cairo::Context, c: Color) {
     cr.set_source_rgba(f64::from(c.red) / 255.0, f64::from(c.green) / 255.0,
         f64::from(c.blue) / 255.0, f64::from(c.alpha) / 255.0);
@@ -247,6 +258,7 @@ fn measure_height_with_icon(
     let dummy=cairo::ImageSurface::create(cairo::Format::ARgb32,1,1)
         .map_err(|e|e.to_string())?;
     let context=cairo::Context::new(&dummy).map_err(|e|e.to_string())?;
+    set_unknown_subpixel_font_options(&context)?;
     let layout=pangocairo::functions::create_layout(&context);
     layout.set_font_description(Some(&pango::FontDescription::from_string(
         style.get("font").map(String::as_str).unwrap_or("monospace 10")
@@ -352,6 +364,7 @@ pub fn render_notification_group_with_icon_scale(
     let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, w, h)
         .map_err(|e| e.to_string())?;
     let context = cairo::Context::new(&surface).map_err(|e| e.to_string())?;
+    set_unknown_subpixel_font_options(&context)?;
     context.scale(f64::from(pixel_scale),f64::from(pixel_scale));
     // Mako render.c:215-272 draws the background on the CENTERLINE of
     // a stroked border: x=b/2, width=w-b, with unmodified corner radii.
