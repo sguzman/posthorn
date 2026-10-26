@@ -1788,7 +1788,7 @@ async fn multiple_modes_route_category_sound_without_replaying_old_notifications
         "SetModes must deduplicate modes in first-observed order");
     let silent:u32=desktop.call("Notify",&send()).await?;
     assert_ne!(silent,first);
-    let active=runtime.store.lock().unwrap().active().to_vec();
+    let active=runtime.store.lock().unwrap().active().iter().cloned().collect::<Vec<_>>();
     let chosen=active.iter().find(|note|note.id==silent)
         .ok_or("quiet multi-mode notification missing")?;
     let style=posthorn::desktop::style_for_note(
