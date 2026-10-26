@@ -35,7 +35,7 @@ fn ordered_visible(runtime:&SharedRuntime)
 pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
     -> io::Result<Option<(u32,NotifyBinding)>>
 {
-    hit_test_impl(runtime,click,None,1,OutputSubpixel::Unknown)
+    hit_test_impl(runtime,click,None,1,1,OutputSubpixel::Unknown)
 }
 
 /// The desktop renderer chooses themed icon assets at the maximum output
@@ -43,7 +43,7 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
 pub fn hit_test_with_icon_scale(
     runtime:&SharedRuntime,click:PointerClick,icon_scale:u32,
 )->io::Result<Option<(u32,NotifyBinding)>>{
-    hit_test_impl(runtime,click,None,icon_scale,OutputSubpixel::Unknown)
+    hit_test_impl(runtime,click,None,icon_scale,1,OutputSubpixel::Unknown)
 }
 
 /// The live desktop's click resolver must use the same compositor font
@@ -52,7 +52,13 @@ pub fn hit_test_with_output_subpixel(
     runtime:&SharedRuntime,click:PointerClick,icon_scale:u32,
     subpixel:OutputSubpixel,
 )->io::Result<Option<(u32,NotifyBinding)>>{
-    hit_test_impl(runtime,click,None,icon_scale,subpixel)
+    hit_test_at_output_scale(runtime,click,icon_scale,1,subpixel)
+}
+pub fn hit_test_at_output_scale(
+    runtime:&SharedRuntime,click:PointerClick,icon_scale:u32,
+    pixel_scale:u32,subpixel:OutputSubpixel,
+)->io::Result<Option<(u32,NotifyBinding)>>{
+    hit_test_impl(runtime,click,None,icon_scale,pixel_scale,subpixel)
 }
 
 /// Hit-test in the coordinate system of one independently rendered Mako
@@ -62,21 +68,30 @@ pub fn hit_test_on_surface(
     runtime:&SharedRuntime,click:PointerClick,
     surface_key:&(String,String,String),
 )->io::Result<Option<(u32,NotifyBinding)>>{
-    hit_test_impl(runtime,click,Some(surface_key),1,OutputSubpixel::Unknown)
+    hit_test_impl(runtime,click,Some(surface_key),1,1,OutputSubpixel::Unknown)
 }
 
 pub fn hit_test_on_surface_with_icon_scale(
     runtime:&SharedRuntime,click:PointerClick,
     surface_key:&(String,String,String),icon_scale:u32,
 )->io::Result<Option<(u32,NotifyBinding)>>{
-    hit_test_impl(runtime,click,Some(surface_key),icon_scale,OutputSubpixel::Unknown)
+    hit_test_impl(runtime,click,Some(surface_key),icon_scale,1,OutputSubpixel::Unknown)
 }
 pub fn hit_test_on_surface_with_output_subpixel(
     runtime:&SharedRuntime,click:PointerClick,
     surface_key:&(String,String,String),icon_scale:u32,
     subpixel:OutputSubpixel,
 )->io::Result<Option<(u32,NotifyBinding)>>{
-    hit_test_impl(runtime,click,Some(surface_key),icon_scale,subpixel)
+    hit_test_on_surface_at_output_scale(
+        runtime,click,surface_key,icon_scale,1,subpixel
+    )
+}
+pub fn hit_test_on_surface_at_output_scale(
+    runtime:&SharedRuntime,click:PointerClick,
+    surface_key:&(String,String,String),icon_scale:u32,
+    pixel_scale:u32,subpixel:OutputSubpixel,
+)->io::Result<Option<(u32,NotifyBinding)>>{
+    hit_test_impl(runtime,click,Some(surface_key),icon_scale,pixel_scale,subpixel)
 }
 
 /// Surface-local rectangles in unscaled Wayland logical coordinates. The
@@ -90,7 +105,7 @@ pub struct InputRect {
 fn positioned_targets(
     runtime:&SharedRuntime,
     surface_key:Option<&(String,String,String)>,icon_scale:u32,
-    subpixel:OutputSubpixel,
+    pixel_scale:u32,subpixel:OutputSubpixel,
 )->io::Result<Vec<(u32,crate::config::Options,InputRect)>>{
     let config=runtime.config();
     let (all_notes,modes)=ordered_visible(runtime)?;
@@ -109,9 +124,9 @@ fn positioned_targets(
         let width=style.get("width")
             .and_then(|v|crate::config::parse_nonnegative_mako(v))
             .unwrap_or(300) as u32;
-        let height=crate::render::measure_notification_height_group_with_output_subpixel(
+        let height=crate::render::measure_notification_height_group_at_output_scale(
             n,&style,if entry.group_count>=2{entry.group_count}else{0},
-            icon_scale,subpixel,
+            pixel_scale,icon_scale,subpixel,
         ).map_err(error)?;
         dimensions.push((width,height));
         styles.push(style);
@@ -151,14 +166,23 @@ pub fn input_rectangles_with_output_subpixel(
     surface_key:Option<&(String,String,String)>,icon_scale:u32,
     subpixel:OutputSubpixel,
 )->io::Result<Vec<InputRect>>{
-    Ok(positioned_targets(runtime,surface_key,icon_scale,subpixel)?.into_iter()
+    input_rectangles_at_output_scale(
+        runtime,surface_key,icon_scale,1,subpixel
+    )
+}
+pub fn input_rectangles_at_output_scale(
+    runtime:&SharedRuntime,
+    surface_key:Option<&(String,String,String)>,icon_scale:u32,
+    pixel_scale:u32,subpixel:OutputSubpixel,
+)->io::Result<Vec<InputRect>>{
+    Ok(positioned_targets(runtime,surface_key,icon_scale,pixel_scale,subpixel)?.into_iter()
         .map(|(_,_,rect)|rect).collect())
 }
 
 fn hit_test_impl(
     runtime:&SharedRuntime,click:PointerClick,
     surface_key:Option<&(String,String,String)>,icon_scale:u32,
-    subpixel:OutputSubpixel,
+    pixel_scale:u32,subpixel:OutputSubpixel,
 )->io::Result<Option<(u32,NotifyBinding)>>{
     if !click.x.is_finite()||!click.y.is_finite()||click.x<0.0||click.y<0.0 {
         return Ok(None);
@@ -170,7 +194,7 @@ fn hit_test_impl(
         274=>"on-button-middle",
         _=>return Ok(None),
     };
-    for (id,style,rect) in positioned_targets(runtime,surface_key,icon_scale,subpixel)? {
+    for (id,style,rect) in positioned_targets(runtime,surface_key,icon_scale,pixel_scale,subpixel)? {
         if click.y<f64::from(rect.y) ||
            click.y>=f64::from(rect.y)+f64::from(rect.height) ||
            click.x<f64::from(rect.x) ||
@@ -374,23 +398,26 @@ mod tests {
         let note=runtime.store.lock().unwrap().active()[0].clone();
         let modes=runtime.modes().lock().unwrap().clone();
         let style=crate::desktop::style_for_note_index(&runtime,&note,&modes,-1);
+        for pixel_scale in [1,2]{
         for subpixel in [
             OutputSubpixel::Unassociated,OutputSubpixel::Unknown,
             OutputSubpixel::HorizontalRgb,OutputSubpixel::HorizontalBgr,
             OutputSubpixel::VerticalRgb,OutputSubpixel::VerticalBgr,
         ]{
             let rendered=crate::render::render_notification_group_with_output_subpixel(
-                &note,&style,0,1,1,subpixel
+                &note,&style,0,pixel_scale,1,subpixel
             ).unwrap();
-            let rects=input_rectangles_with_output_subpixel(
-                &runtime,None,1,subpixel
+            let rects=input_rectangles_at_output_scale(
+                &runtime,None,1,pixel_scale,subpixel
             ).unwrap();
             assert_eq!(rects.len(),1);
-            assert_eq!(rects[0].height as u32,rendered.height,"{subpixel:?}");
+            assert_eq!(rects[0].height as u32*pixel_scale,rendered.height,
+                "{subpixel:?} scale={pixel_scale}");
             let click=click((rects[0].x+4) as f64,
                 (rects[0].y+rects[0].height-1) as f64,273);
-            assert_eq!(hit_test_with_output_subpixel(&runtime,click,1,subpixel)
-                .unwrap().unwrap().0,id,"{subpixel:?}");
+            assert_eq!(hit_test_at_output_scale(&runtime,click,1,pixel_scale,subpixel)
+                .unwrap().unwrap().0,id,"{subpixel:?} scale={pixel_scale}");
+        }
         }
     }
     #[test]

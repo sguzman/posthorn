@@ -43,12 +43,23 @@ fn color_option(style: &Options, key: &str, fallback: &str) -> Result<Color, Str
 /// Mako's render_notification() falls back to pango_layout_set_text()
 /// on malformed *final* template markup. It does not discard the template
 /// and reconstruct summary/body. Keep measurement and painting identical.
-fn set_mako_formatted_text(layout:&pango::Layout,rendered:&str){
+fn set_mako_formatted_text_scaled(layout:&pango::Layout,rendered:&str,scale:u32){
     if pango::parse_markup(rendered,'\0').is_ok(){
         layout.set_markup(rendered);
     }else{
         layout.set_text(rendered);
     }
+    // Mako render.c inserts a PangoAttrScale into the parsed attrs even
+    // for malformed final markup. Cairo CTM scaling alone changes Pango
+    // font metrics and high-DPI wrapping (2x differed by 42 screen pixels).
+    if scale>1 {
+        let attrs=layout.attributes().unwrap_or_default();
+        attrs.insert(pango::AttrFloat::new_scale(f64::from(scale)));
+        layout.set_attributes(Some(&attrs));
+    }
+}
+fn set_mako_formatted_text(layout:&pango::Layout,rendered:&str){
+    set_mako_formatted_text_scaled(layout,rendered,1);
 }
 
 /// Wayland wl_output.geometry advertises the panel's physical subpixel order.
@@ -236,7 +247,22 @@ pub fn measure_notification_height_group_with_output_subpixel(
     subpixel:OutputSubpixel,
 )->Result<u32,String>{
     let icon=load_note_icon_scaled(note,style,icon_scale.max(1));
-    measure_height_with_icon_subpixel(note,style,icon.as_ref(),group_count,subpixel)
+    measure_height_with_icon_subpixel(note,style,icon.as_ref(),group_count,1,subpixel)
+}
+
+/// Pinned render.c multiplies Pango layout bounds and inserts the output
+/// scale as a Pango attribute, then truncates the measured physical
+/// text height back to logical pixels. The frame AND input geometry
+/// must call this exact measurement on non-1x outputs.
+pub fn measure_notification_height_group_at_output_scale(
+    note:&Notification,style:&Options,group_count:usize,
+    pixel_scale:u32,icon_scale:u32,subpixel:OutputSubpixel,
+)->Result<u32,String>{
+    if pixel_scale==0{return Err("zero Pango pixel scale".into());}
+    let icon=load_note_icon_scaled(note,style,icon_scale.max(1));
+    measure_height_with_icon_subpixel(
+        note,style,icon.as_ref(),group_count,pixel_scale,subpixel
+    )
 }
 
 fn icon_fit_limit(note:&Notification,style:&Options)->u32{
@@ -248,12 +274,13 @@ fn icon_fit_limit(note:&Notification,style:&Options)->u32{
 fn measure_height_with_icon(
     note:&Notification,style:&Options,icon:Option<&IconPixels>,group_count:usize,
 ) -> Result<u32,String> {
-    measure_height_with_icon_subpixel(note,style,icon,group_count,OutputSubpixel::Unknown)
+    measure_height_with_icon_subpixel(note,style,icon,group_count,1,OutputSubpixel::Unknown)
 }
 fn measure_height_with_icon_subpixel(
     note:&Notification,style:&Options,icon:Option<&IconPixels>,group_count:usize,
-    subpixel:OutputSubpixel,
+    pixel_scale:u32,subpixel:OutputSubpixel,
 )->Result<u32,String>{
+    if pixel_scale==0{return Err("zero Pango pixel scale".into());}
     let width=integer_option(style,"width",300);
     let cap=integer_option(style,"height",100);
     if width==0||cap==0||width>4096||cap>4096{
@@ -307,13 +334,14 @@ fn measure_height_with_icon_subpixel(
     layout.set_font_description(Some(&pango::FontDescription::from_string(
         style.get("font").map(String::as_str).unwrap_or("monospace 10")
     )));
-    layout.set_width(text_width.saturating_mul(pango::SCALE));
-    layout.set_height(text_height.saturating_mul(pango::SCALE));
+    let scale=i32::try_from(pixel_scale).unwrap_or(i32::MAX);
+    layout.set_width(text_width.saturating_mul(scale).saturating_mul(pango::SCALE));
+    layout.set_height(text_height.saturating_mul(scale).saturating_mul(pango::SCALE));
     layout.set_wrap(pango::WrapMode::WordChar);
     layout.set_ellipsize(pango::EllipsizeMode::End);
-    set_mako_formatted_text(&layout,&text);
+    set_mako_formatted_text_scaled(&layout,&text,pixel_scale);
     let measured=if layout.character_count()>0{
-        layout.pixel_size().1.max(0) as u32
+        (layout.pixel_size().1.max(0) as u32)/pixel_scale
     }else{0};
     // Upstream render.c:195 compares against its unmodified signed
     // text_layout_height, including negative limits.
@@ -393,7 +421,7 @@ pub fn render_notification_group_with_output_subpixel(
     // same icon, avoiding redundant filesystem reads and image decoding.
     let icon=load_note_icon_scaled(note,style,icon_lookup_scale.max(1));
     let height = measure_height_with_icon_subpixel(
-        note,style,icon.as_ref(),group_count,subpixel
+        note,style,icon.as_ref(),group_count,pixel_scale,subpixel
     )?;
     if width == 0 || height == 0 || width > 4096 || height > 4096
         || u64::from(width) * u64::from(height) * 4 > 64 * 1024 * 1024
@@ -481,7 +509,10 @@ pub fn render_notification_group_with_output_subpixel(
     // dimensions directly to Pango; the renderer must not undo the
     // measurement's signed geometry with a second 1px minimum.
     let interior_w=f64::from(width)-2.0*border-left-right;
-    let interior_h=f64::from(height)-2.0*border-top-bottom;
+    // Pinned Mako lays out Pango against the configured maximum height,
+    // not the later shrink-wrapped surface height or corner-radius floor.
+    let interior_h=f64::from(integer_option(style,"height",100))
+        -2.0*border-top-bottom;
     let mut text_x=border+left;
     let mut text_y=border+top;
     let mut available_w=interior_w;
@@ -523,21 +554,30 @@ pub fn render_notification_group_with_output_subpixel(
     // icon locations (including no icon), and horizontally for top/bottom.
     // Measure the Pango ink box before positioning: the popup's height may
     // be determined by a tall icon rather than by its one-line text.
+    // Mako paints text with an identity Cairo transform and a Pango scale
+    // *attribute*. Keep the earlier CTM scale for backgrounds and icons,
+    // but restore identity for Pango's physical font/layout metrics.
+    context.save().map_err(|e|e.to_string())?;
+    context.identity_matrix();
     let layout = pangocairo::functions::create_layout(&context);
     let font = style.get("font").map(String::as_str).unwrap_or("monospace 10");
     layout.set_font_description(Some(&pango::FontDescription::from_string(font)));
-    layout.set_width((available_w as i32).saturating_mul(pango::SCALE));
+    let scale=i32::try_from(pixel_scale).unwrap_or(i32::MAX);
+    layout.set_width((available_w as i32).saturating_mul(scale)
+        .saturating_mul(pango::SCALE));
     layout.set_wrap(pango::WrapMode::WordChar);
-    layout.set_height((available_h as i32).saturating_mul(pango::SCALE));
+    layout.set_height((available_h as i32).saturating_mul(scale)
+        .saturating_mul(pango::SCALE));
     layout.set_ellipsize(pango::EllipsizeMode::End);
     match style.get("text-alignment").map(String::as_str) {
         Some("center")=>layout.set_alignment(pango::Alignment::Center),
         Some("right")=>layout.set_alignment(pango::Alignment::Right),
         _=>layout.set_alignment(pango::Alignment::Left),
     }
-    set_mako_formatted_text(&layout,&rendered);
+    set_mako_formatted_text_scaled(&layout,&rendered,pixel_scale);
     let (text_width,text_height)=if layout.character_count()>0{
-        layout.pixel_size()
+        let (w,h)=layout.pixel_size();
+        (w/scale,h/scale)
     }else{(0,0)};
     let vertical_icon=matches!(style.get("icon-location").map(String::as_str),
         Some("top"|"bottom"));
@@ -553,10 +593,12 @@ pub fn render_notification_group_with_output_subpixel(
     // its width/height and ellipsizing. It does NOT add another Cairo clip.
     // The old extra clip could erase glyph ink outside the logical layout
     // rectangle (e.g. italic overhangs), even though Mako draws that ink.
-    context.move_to(text_x,text_y);
+    context.move_to(text_x*f64::from(pixel_scale),text_y*f64::from(pixel_scale));
     set_color(&context,foreground);
+    pangocairo::functions::update_layout(&context,&layout);
     pangocairo::functions::show_layout(&context, &layout);
     drop(layout);
+    context.restore().map_err(|e|e.to_string())?;
     drop(context);
     surface.flush();
     let stride = surface.stride();
