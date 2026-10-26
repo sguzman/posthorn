@@ -754,7 +754,7 @@ pub async fn run_private_multi_desktop_from_path_with_cli_overrides(
     let runtime=SharedRuntime::from_path_with_cli_overrides(path,overrides)?;
     initialize_icon_creation_scale(&runtime)?;
     let (conn,runtime)=crate::service::open_private_runtime(runtime).await?;
-    run_private_desktop_instance_with_mode(conn,runtime,true).await
+    run_private_desktop_instance_with_mode(conn,runtime,true,false).await
 }
 
 pub async fn run_private_multi_desktop_from_defaults_with_cli_overrides(
@@ -763,17 +763,37 @@ pub async fn run_private_multi_desktop_from_defaults_with_cli_overrides(
     let runtime=SharedRuntime::from_mako_defaults_with_cli_overrides(overrides)?;
     initialize_icon_creation_scale(&runtime)?;
     let (conn,runtime)=crate::service::open_private_runtime(runtime).await?;
-    run_private_desktop_instance_with_mode(conn,runtime,true).await
+    run_private_desktop_instance_with_mode(conn,runtime,true,false).await
+}
+
+/// The executable enforces both explicit authorization and a bus pin.
+pub async fn run_standard_trial_desktop_from_path_with_cli_overrides(
+    path:&std::path::Path,overrides:&[(String,String)],
+)->Result<(),Box<dyn std::error::Error+Send+Sync>>{
+    let runtime=SharedRuntime::from_path_with_cli_overrides(path,overrides)?;
+    initialize_icon_creation_scale(&runtime)?;
+    let (conn,runtime)=crate::service::open_standard_trial_runtime(runtime).await?;
+    run_private_desktop_instance_with_mode(conn,runtime,true,true).await
+}
+
+pub async fn run_standard_trial_desktop_from_defaults_with_cli_overrides(
+    overrides:&[(String,String)],
+)->Result<(),Box<dyn std::error::Error+Send+Sync>>{
+    let runtime=SharedRuntime::from_mako_defaults_with_cli_overrides(overrides)?;
+    initialize_icon_creation_scale(&runtime)?;
+    let (conn,runtime)=crate::service::open_standard_trial_runtime(runtime).await?;
+    run_private_desktop_instance_with_mode(conn,runtime,true,true).await
 }
 
 async fn run_private_desktop_instance(conn:zbus::Connection,runtime:SharedRuntime)
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
-    run_private_desktop_instance_with_mode(conn,runtime,false).await
+    run_private_desktop_instance_with_mode(conn,runtime,false,false).await
 }
 
 async fn run_private_desktop_instance_with_mode(
     conn:zbus::Connection,runtime:SharedRuntime,multiple_surfaces:bool,
+    production_trial:bool,
 )->Result<(),Box<dyn std::error::Error+Send+Sync>>{
     let visual_runtime=runtime.clone();
     let (sender,mut clicks)=tokio::sync::mpsc::unbounded_channel();
@@ -786,9 +806,11 @@ async fn run_private_desktop_instance_with_mode(
     });
     let mut timer=tokio::time::interval(Duration::from_millis(25));
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    eprintln!(
-        "Posthorn private desktop preview: bus org.posthorn.Development only; Mako remains active"
-    );
+    if production_trial {
+        eprintln!("Posthorn separately armed reversible trial: standard D-Bus name");
+    } else {
+        eprintln!("Posthorn private desktop preview: bus org.posthorn.Development only; Mako remains active");
+    }
     loop {
         tokio::select! {
             click=clicks.recv() => {

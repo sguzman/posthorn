@@ -148,6 +148,38 @@ async fn main() -> ExitCode {
             }
         };
     }
+    // Production-name ownership is never implicit: authorization and an
+    // exact controller-pinned session bus are mandatory before any start.
+    if arguments.first().is_some_and(|arg|arg=="--reversible-production-trial"){
+        if env::var("POSTHORN_PRODUCTION_TRIAL_AUTHORIZED").ok().as_deref()!=Some("1"){
+            eprintln!("Posthorn trial refused: explicit authorization required");
+            return ExitCode::FAILURE;
+        }
+        if env::var("POSTHORN_HYPRLAND_QA").ok().as_deref()==Some("1"){
+            eprintln!("Posthorn trial refused: private QA cannot own the public name");
+            return ExitCode::FAILURE;
+        }
+        let bus=env::var("DBUS_SESSION_BUS_ADDRESS").unwrap_or_default();
+        let pin=env::var("POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS").unwrap_or_default();
+        if bus.is_empty() || pin.is_empty() || bus!=pin{
+            eprintln!("Posthorn trial refused: session bus does not match controller pin");
+            return ExitCode::FAILURE;
+        }
+        return match parse_mako_cli_args(&arguments[1..]){
+            Ok((Some(path),opts))=>match posthorn::desktop::
+                run_standard_trial_desktop_from_path_with_cli_overrides(
+                    Path::new(&path),&opts).await{
+                Ok(())=>ExitCode::SUCCESS,
+                Err(e)=>{eprintln!("Posthorn trial failed: {e}");ExitCode::FAILURE}
+            },
+            Ok((None,opts))=>match posthorn::desktop::
+                run_standard_trial_desktop_from_defaults_with_cli_overrides(&opts).await{
+                Ok(())=>ExitCode::SUCCESS,
+                Err(e)=>{eprintln!("Posthorn trial defaults failed: {e}");ExitCode::FAILURE}
+            },
+            Err(e)=>{eprintln!("Posthorn trial arguments: {e}");ExitCode::FAILURE}
+        };
+    }
     // Both private Wayland presenters now exercise the same pinned Mako
     // startup and reload CLI override order as the headless service.
     // This is deliberately BEFORE the generic arg-count guard. Neither

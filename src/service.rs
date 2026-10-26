@@ -84,6 +84,14 @@ pub(crate) async fn open_private_runtime(
     open_named_runtime(runtime,PRIVATE_BUS_NAME).await
 }
 
+/// Standard-name registration exclusively for the separately gated
+/// reversible trial. The existing registration refuses to queue or
+/// displace an owned name, and all D-Bus objects are ready beforehand.
+pub(crate) async fn open_standard_trial_runtime(runtime:SharedRuntime)
+    ->zbus::Result<(Connection,SharedRuntime)>{
+    open_named_runtime(runtime,BUS_NAME).await
+}
+
 /// Prepare the eventual desktop notification server. This method is *only*
 /// exercised under dbus-run-session in CI; no startup command invokes it yet.
 /// A full replacement is forbidden until the MVP parity gate is complete.
