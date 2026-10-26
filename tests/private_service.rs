@@ -1820,6 +1820,82 @@ async fn multiple_modes_route_category_sound_without_replaying_old_notifications
 }
 
 #[tokio::test]
+async fn restoring_archived_category_notification_does_not_replay_sound_hook()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Pinned Mako dbus/mako.c:120-141 restores from history with
+    // apply_each_criteria + insert_notification, but does not execute
+    // notification_execute_binding. Only a fresh Notify can rerun sound.
+    let dir=tempfile::tempdir()?;
+    let marker=dir.path().join("restored-category-sound-events");
+    let config=Config::parse(&format!(
+        "history=1\nignore-timeout=1\ndefault-timeout=0\n\
+         [category=warning]\nbackground-color=#715536\n\
+         on-notify=exec printf 'warning:%s\\n' \"$id\" >> '{}'\n\
+         [mode=quiet]\non-notify=none\n",
+        marker.display(),
+    ))?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let notify=|replaces_id:u32|{
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from("warning")).unwrap(),
+        )].into();
+        ("sound-restore",replaces_id,"","Warning","",
+         Vec::<String>::new(),hints,-1i32)
+    };
+    let wait_for=|expected:String|{
+        let marker=marker.clone();
+        async move {
+            tokio::time::timeout(Duration::from_secs(3),async{
+                loop{
+                    if std::fs::read_to_string(&marker).unwrap_or_default()==expected {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                }
+            }).await
+        }
+    };
+
+    let id:u32=desktop.call("Notify",&notify(0)).await?;
+    let initial=format!("warning:{id}\n");
+    wait_for(initial.clone()).await?;
+    let _:()=ctl.call("SetMode",&("quiet",)).await?;
+    let options:HashMap<String,OwnedValue>=[(
+        "id".into(),OwnedValue::from(id),
+    )].into();
+    let _:()=ctl.call("DismissNotifications",&(options,)).await?;
+    assert_eq!(runtime.store.lock().unwrap().history().front().map(|n|n.id),
+        Some(id),"dismissal must archive the sounding notification");
+
+    let _:()=ctl.call("RestoreNotification",&()).await?;
+    let restored=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).cloned().ok_or("archived notification not restored")?;
+    let style=posthorn::desktop::style_for_note(
+        &runtime,&restored,&["quiet".to_owned()]);
+    assert_eq!(style["background-color"],"#715536",
+        "restoration must retain category styling under quiet mode");
+    assert_eq!(style["on-notify"],"none",
+        "restoration must reapply current quiet-mode hook selection");
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,initial,
+        "restoration itself must not rerun a category sound");
+
+    let _:()=ctl.call("SetMode",&("default",)).await?;
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,initial,
+        "leaving quiet mode after restoration must not replay the hook");
+    let replacement:u32=desktop.call("Notify",&notify(id)).await?;
+    assert_eq!(replacement,id,"direct replacement must reuse the restored ID");
+    wait_for(format!("{initial}warning:{id}\n")).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn category_sound_stack_tag_updates_honor_quiet_mode_and_app_scope()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
