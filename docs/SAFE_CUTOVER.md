@@ -79,8 +79,11 @@ machine-local rollback mechanism.
 
 The D-Bus name request uses `DoNotQueue`: an existing Mako owner cannot
 be displaced and Posthorn cannot wait behind it to acquire the name
-later. An isolated headless Sway and `dbus-run-session` test checks
-both negative guards and reversible owner lifecycle. Passing that
+later. Isolated headless Sway and `dbus-run-session` tests now prove
+both negative authorization guards, bounded owner lifetime and popup
+cleanup, and an immediate collision refusal while the **original
+Mako v1.11.0 binary** owns the standard name. They also confirm
+that the original Mako daemon still handles Notify afterward. Passing that
 test proves **only** that the binary can perform an isolated,
 explicitly armed trial. It does not supply user authorization,
 inventory the real Mako supervisor, provide a machine-local

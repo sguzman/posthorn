@@ -5733,3 +5733,59 @@ source-matched logical sound-hook routing, not
 physical speaker output. Physical Hyprland QA T503
 remains 51%, authorized Mako production switch T504
 remains 0%, and the installed user session was untouched.
+
+
+## Bounded trial lifetime and exact original-Mako no-displacement acceptance (2026-10-26)
+
+The **opt-in, nondefault** `--reversible-production-trial`
+entrypoint is no longer an indefinitely running development
+daemon. It checks independent CLI and service-registration
+authorization guards, a pinned session-bus address, the
+private-Hyprland-QA exclusion, and a mandatory `1..=600`
+second limit. Missing, malformed and out-of-range limits
+fail before a standard-name registration attempt.
+
+When the monotonic deadline expires, Posthorn sends an
+atomic cancellation signal to its Wayland rendering worker
+and waits briefly for it to finish. A stuck worker causes a
+trial-only process exit rather than allowing a stranded public
+D-Bus name owner. In isolated actual Sway, the test starts
+a guarded standard-name trial, emits a visible notification,
+and lets its timer expire **without an external kill**. The
+process releases `org.freedesktop.Notifications` and its
+live popup disappears from compositor screenshots. The same
+CI proves unarmed and wrong-bus invocations refuse, private
+QA cannot acquire the public name, and a second Posthorn
+cannot queue behind or replace the first.
+
+The stronger exact-predecessor case independently starts
+the **original source-pinned Mako v1.11.0 executable** as the
+first public-name owner on isolated Sway and a disposable
+D-Bus bus. A separately armed Posthorn trial immediately
+rejects its collision without waiting, does not acquire its
+private development name, leaves Mako's unique standard-name
+owner unchanged, and confirms that Mako still handles a
+fresh notification successfully.
+
+[Mandatory finite deadline 8e895f9](https://github.com/sguzman/posthorn/commit/8e895f94040bd975b33ff87cf814febb7b6b0997) ·
+[Worker shutdown b45b3f6](https://github.com/sguzman/posthorn/commit/b45b3f67a7ed13f97e1af443195dbba7b2863ce8) ·
+[Active-popup deadline regression d584cda](https://github.com/sguzman/posthorn/commit/d584cda289549102f9799e07f37190627f2c785e) ·
+[Pinned original-Mako collision case b6fc4d3](https://github.com/sguzman/posthorn/commit/b6fc4d31d264e7c561df66724f14d80dda5015ad) ·
+[Green deadline Rust/Wayland 40410938478](https://github.com/sguzman/posthorn/actions/runs/40410938478) ·
+[Green deadline pinned-Mako 40410937222](https://github.com/sguzman/posthorn/actions/runs/40410937222) ·
+[Green collision Rust/Wayland 40411371319](https://github.com/sguzman/posthorn/actions/runs/40411371319) ·
+[Green collision source-pinned Mako 40411371225](https://github.com/sguzman/posthorn/actions/runs/40411371225).
+
+This is a **prepared, source-validated isolated trial
+capability only**. The original Mako service on the user's
+workstation has not been stopped, no local supervisor has
+been inventoried or restart mechanism verified, no physical
+Hyprland/touch/audio acceptance was performed, and the
+separately authorized real cutover remains unattempted.
+The private Hyprland QA script was changed to exercise
+the same multi-surface renderer used by the production-name
+trial, but that script has **not** run on the physical system.
+
+**M0 stays 92.375% (delta 0.000 pp). T503 stays 51%;
+T504 stays 0%.** Do not promote safety/readiness work
+into completed physical QA or a production cutover.
