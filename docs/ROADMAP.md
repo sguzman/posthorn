@@ -20,7 +20,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 📄 T101 — Parse Mako configuration sections and ordered overrides — `██████████ 100%`
 - 🔎 T102 — Match categories, modes, exact fields, quoted and regex selectors — `██████████ 99%`
 - 🧰 T103 — Complete option validation, built-in grouping and escaping semantics — `█████████░ 94%`
-- 📂 T104 — Include files with Mako-compatible path behavior — `██████████ 95%`
+- 📂 T104 — Include files with Mako-compatible path behavior — `██████████ 96%`
 - 📐 T105 — Type/layout/style parity for all Mako config settings — `██████████ 98%`
 
 ### 📨 P2 — Notification lifecycle and formatting — `██████████ 99%`
@@ -31,11 +31,11 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `██████████ 99%`
 - 🔤 T205 — Pango markup/escaping, format specifiers and actions — `██████████ 98%`
 
-### 🚌 P3 — D-Bus protocol and control surface — `██████████ 95%`
+### 🚌 P3 — D-Bus protocol and control surface — `██████████ 96%`
 
 - 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `██████████ 99%`
 - 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `██████████ 99%`
-- 🔄 T303 — Correct startup, bus ownership and config reload behavior — `█████████░ 88%`
+- 🔄 T303 — Correct startup, bus ownership and config reload behavior — `█████████░ 89%`
 
 ### 🪟 P4 — Wayland protocol and rendering — `██████████ 99%`
 

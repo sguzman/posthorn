@@ -5241,3 +5241,44 @@ P1 **97.0% → 97.2%**, strict 24-task M0
 These acceptance cases do not establish all possible include
 filesystems, physical Hyprland T503 (51%), or authorized
 production cutover T504 (0%); live Mako remains unchanged.
+
+## Nested include live Reload and missing-file rejection executable parity (2026-10-26)
+
+The original Mako v1.11.0 executable and Posthorn both load a
+**nested absolute configuration include through a symlink** on
+an isolated scale-2 Sway output. Unlike a static parser test,
+the same running daemon must re-read a modified included leaf
+during the real `fr.emersion.Mako.Reload` method and then
+reject a missing leaf **without disrupting the last valid
+notification image**.
+
+The private compositor fixture independently establishes:
+- Initial included style: both render bounds
+  `858 1279 0 127` and **3,169** text-color pixels.
+- After the included file's `padding=5` becomes
+  `padding=12` and the background changes to `#2A7F9B`,
+  both render settled bounds **`858 1279 0 155`**.
+  Three identical consecutive decoded frames are required
+  before acceptance.
+- After deleting the included symlink target, both reject
+  `Reload` with the source-compatible `InvalidConfig`
+  error while retaining the exact previously settled
+  screenshot. The rejection adds **zero differing pixels**.
+- The source-pinned cross-executable screenshot comparison
+  of both the successful Reload and the rejected Reload
+  produces **zero decoded pixel mismatches**.
+
+[Permanent source-pinned fixture `394297c`](https://github.com/sguzman/posthorn/commit/394297c764efbff82792cb9c221b43d9c70cd43c) ·
+[green original-Mako executable differential 40377546798](https://github.com/sguzman/posthorn/actions/runs/40377546798) ·
+[green full Rust/Wayland CI 40377546761](https://github.com/sguzman/posthorn/actions/runs/40377546761).
+The pinned differential also passed **354 Rust library tests
+and 100 private D-Bus tests**.
+
+**Two independent MVP acceptance increments:** T104
+**95% → 96% (+1 pp)**, T303 **88% → 89% (+1 pp)**.
+P1 **97.2% → 97.4%**, P3 **95.333% → 95.667%**
+(displayed **96%**), strict 24-task M0 **91.625% →
+91.708% (+0.083 pp)**. The experiments exercise isolated
+Mako vs Posthorn only. Physical Hyprland T503 stays 51%;
+a production Mako replacement under T504 remains 0%
+and requires explicit authorization.
