@@ -906,3 +906,77 @@ if ./target/debug/examples/qa_png_probe \
   exit 1
 fi
 echo 'Pinned Mako/Posthorn exact scale-2 hidden %h/%t format and changed-count raster: MATCH'
+
+# Pinned notification.c's %g is the ACTUAL mutable group_count,
+# not always the singleton count. Create two messages in a
+# group-by=app-name group while hiding the secondary group-index=1
+# member. The visible leader retains the same summary, so the
+# 1->2 group-count substitution alone changes its rendered glyphs.
+cat >"$root/group-format.conf" <<'EOF_GROUP_FMT'
+width=210
+height=120
+font=Sans 17
+margin=0
+padding=4
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=Group size: %g / %s
+group-by=app-name
+background-color=#416D98
+text-color=#E5C58B
+[group-index=1]
+invisible=1
+EOF_GROUP_FMT
+group_format_notify(){
+  local bus="$1" summary="$2" response
+  response="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Pinned Mako mutable group format' 0 '' "$summary" '' 0 0 30000)"
+  [[ "$response" == u\ * ]] || {
+    echo "group format Notify failed: $response"
+    exit 1
+  }
+}
+for impl in posthorn mako; do
+  clear_color '#416D98'
+  if [[ "$impl" == posthorn ]]; then
+    ./target/debug/posthorn --experimental-private-desktop "$root/group-format.conf" \
+      >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$root/group-format.conf" >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  group_format_notify "$bus" 'Stable visible group leader'
+  first_group="$(markup_measure "$impl-group-one" "$bus")"
+  group_format_notify "$bus" 'Secondary group member'
+  changed_group=0
+  for _ in {1..60}; do
+    second_group="$(markup_measure "$impl-group-two" "$bus")"
+    if ! ./target/debug/examples/qa_png_probe \
+      "$root/$impl-group-two-markup.png" '#E5C58B' 0 identical \
+      "$root/$impl-group-one-markup.png" >/dev/null 2>&1; then
+      changed_group=1; break
+    fi
+    sleep 0.1
+  done
+  [[ "$changed_group" == 1 ]] || {
+    echo "$impl group-count format did not visibly update after grouping"
+    exit 1
+  }
+  echo "$impl source group count one: $first_group"
+  echo "$impl source group count two: $second_group"
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+for count in one two; do
+  ./target/debug/examples/qa_png_probe \
+    "$root/posthorn-group-$count-markup.png" '#E5C58B' 0 identical \
+    "$root/mako-group-$count-markup.png"
+done
+echo 'Pinned Mako/Posthorn exact 2x mutable %g group-count raster: MATCH'
