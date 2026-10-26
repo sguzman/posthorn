@@ -323,7 +323,13 @@ fn snapshot_frame_for_surface(
             .find(|note|note.surface_spec.as_ref()==Some(key))
             .and_then(|note|note.surface_output_override.clone());
         Some(observed.unwrap_or_else(||runtime.surface_output()))
-    }else{None};
+    }else{
+        // The single-surface presenter also receives wl_surface.enter.
+        // Pinned render.c:443-446 binds the synthetic hidden notif to
+        // that surface before matching [hidden output=NAME]. Dropping the
+        // observed name here wrongly suppresses valid surface-scoped rules.
+        runtime.surface_output().map(Some)
+    };
     let modes=runtime.modes().lock().map_err(|_|poisoned())?.clone();
     let mut frames=Vec::with_capacity(notes.len());
     let mut margins=Vec::with_capacity(notes.len());
@@ -821,6 +827,36 @@ mod tests {
         // Only one notification remains: no placeholder, no synthetic ID.
         assert!(snapshot_frame(&runtime).unwrap().is_some());
         assert_eq!(runtime.store.lock().unwrap().push(Request::default()),7);
+    }
+
+    #[test]
+    fn hidden_overflow_on_single_surface_matches_known_output_selector(){
+        // render.c:443-446 assigns the already-mapped surface BEFORE
+        // apply_each_criteria. The hidden pseudonote must see the same
+        // wl_surface.enter output name as ordinary notifications.
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=96\nheight=65\nmargin=0\npadding=0\nborder-size=0\nmax-visible=1\nformat=%s\n             [hidden]\nbackground-color=#224466FF\n             [hidden output=DP-1]\nbackground-color=#22CC11FF\n"
+        ).unwrap());
+        // Only the legacy single-surface path is at issue. Private
+        // multi-surface rendering already forwards per-surface output.
+        runtime.set_surface_output(Some("DP-1")).unwrap();
+        runtime.store.lock().unwrap().push(Request::default());
+        runtime.store.lock().unwrap().push(Request::default());
+        let frame=snapshot_frame(&runtime).unwrap().unwrap();
+        assert!(frame.pixels.chunks_exact(4)
+            .any(|pixel|pixel==[0x11,0xCC,0x22,0xFF]),
+            "hidden output-scoped styling lost compositor-entered output");
+        assert!(!frame.pixels.chunks_exact(4)
+            .any(|pixel|pixel==[0x66,0x44,0x22,0xFF]),
+            "fallback hidden color was used instead of [hidden output=DP-1]");
+
+        // When there has been no wl_surface.enter, output selectors do
+        // not match, even if the configured output name is nonempty.
+        runtime.set_surface_output(None).unwrap();
+        let unmapped=snapshot_frame(&runtime).unwrap().unwrap();
+        assert!(unmapped.pixels.chunks_exact(4)
+            .any(|pixel|pixel==[0x66,0x44,0x22,0xFF]),
+            "unknown output incorrectly matched the output-specific rule");
     }
 
     #[test]
