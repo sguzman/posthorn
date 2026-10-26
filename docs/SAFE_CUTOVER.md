@@ -57,6 +57,27 @@ Any failed invariant leaves the existing setup unchanged. Do not
 silently substitute a different notification daemon or omit failed
 physical-device checks.
 
+## Prepared CLI capability (not authorization)
+
+The development binary has a **non-default** `--reversible-production-trial`
+entrypoint that reuses the multi-output Wayland renderer and standard
+`org.freedesktop.Notifications` D-Bus interface. It will not start
+unless both `POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1` and
+`POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS` equal to the active
+`DBUS_SESSION_BUS_ADDRESS` are supplied by an authorized automated
+controller. It explicitly refuses private Hyprland QA mode.
+
+The D-Bus name request uses `DoNotQueue`: an existing Mako owner cannot
+be displaced and Posthorn cannot wait behind it to acquire the name
+later. An isolated headless Sway and `dbus-run-session` test checks
+both negative guards and reversible owner lifecycle. Passing that
+test proves **only** that the binary can perform an isolated,
+explicitly armed trial. It does not supply user authorization,
+inventory the real Mako supervisor, provide a machine-local
+rollback controller, or satisfy physical Hyprland acceptance.
+Do not set these opt-in variables or run a production-name trial
+against the user's real session before the separate Phase B gate.
+
 ## Phase B: explicit production-switch authorization
 
 Before any Mako process is stopped or standard bus ownership changes,

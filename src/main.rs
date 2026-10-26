@@ -247,6 +247,7 @@ async fn main() -> ExitCode {
                      \tposthorn --experimental-private-service [PATH] [--MAKO-OPTION VALUE...]\n\
                      \tposthorn --experimental-private-desktop [PATH] [--MAKO-OPTION VALUE...]\n\
                      \tposthorn --experimental-private-multi-desktop [PATH] [--MAKO-OPTION VALUE...]\n\
+                     \tposthorn --reversible-production-trial [PATH] [--MAKO-OPTION VALUE...] (explicitly authorized)\n\
                      \tposthorn --experimental-popup-preview PATH\n\
                      \tposthorn --version\n\
                      \tposthorn --help\n\

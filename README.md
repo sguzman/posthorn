@@ -145,7 +145,14 @@ independent screenshots on two virtual monitors, and a compositor
 right click that dismisses the second output's notification without
 removing the first. The survivor remains visible after unplugging the
 other monitor. These are automated isolated Sway results, not physical
-Hyprland acceptance. The separate
+Hyprland acceptance. A newly prepared, **explicitly armed** `--reversible-production-trial`
+entrypoint can register the standard notification name only after an
+authorization variable and exact session-bus pin are provided. Its
+CI test runs entirely inside disposable software Sway and a new D-Bus
+session. It is **not authorized for the workstation** and does not
+change Mako, systemd, Hyprland autostart, or package-manager state.
+
+The separate
 [consent-gated reversible Mako cutover plan](docs/SAFE_CUTOVER.md)
 defines the final MVP inauguration gate; no production switch is authorized.
 
