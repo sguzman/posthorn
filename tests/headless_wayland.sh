@@ -1758,6 +1758,67 @@ EOF_ZERO
     org.posthorn.Development /org/freedesktop/Notifications \
     org.freedesktop.Notifications CloseNotification 'u' "$hidden_note_id" >/dev/null
   echo 'Live Sway hidden-only canvas and reversible max-visible Reload: OK'
+
+  # Real configured-surface width acceptance. Pinned Mako v1.11.0
+  # render.c:113-115 clamps synthetic [hidden] notif_width before Pango.
+  # The former unconstrained implementation wraps this 64-character
+  # label at 260px (~6 lines) instead of the real 84px canvas (~16 lines).
+  # This checks actual Sway screenshot height, not just our Rust raster.
+  cat > "$root/zero-visible.conf" <<'EOF_HIDDEN_CLAMP'
+width=84
+height=270
+font=Sans 20
+margin=0
+padding=0
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%s
+background-color=#315E31
+[hidden]
+width=260
+height=270
+format=MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM
+background-color=#9361B2
+EOF_HIDDEN_CLAMP
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  for title in 'First hidden' 'Second visible'; do
+    reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+      org.posthorn.Development /org/freedesktop/Notifications \
+      org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+      'Posthorn narrow-surface QA' 0 '' "$title" '' 0 0 -1)"
+    [[ "$reply" == u\ * ]] || {
+      echo "Narrow-surface private Notify failed: $reply"
+      exit 1
+    }
+  done
+  clamp_verified=0
+  bounds=""
+  for _ in {1..35}; do
+    sleep 0.15
+    if grim "$root/hidden-narrow-clamp.png" 2>/dev/null; then
+      bounds="$(./target/debug/examples/qa_png_probe \
+        "$root/hidden-narrow-clamp.png" '#9361B2' 250 bounds 2>/dev/null || true)"
+      if [[ -n "$bounds" ]]; then
+        read -r bx0 bx1 by0 by1 <<< "$bounds"
+        bound_width=$((bx1-bx0+1))
+        bound_height=$((by1-by0+1))
+        if (( bound_width <= 84 && bound_height >= 230 )); then
+          clamp_verified=1
+          break
+        fi
+      fi
+    fi
+  done
+  [[ "$clamp_verified" == 1 ]] || {
+    echo 'Hidden Pango label was not bounded and wrapped by the actual 84px surface'
+    echo "Last observed hidden bounds: $bounds"
+    cat "$root/zero-visible-posthorn.log"
+    exit 1
+  }
+  echo "Live Sway hidden text constrained by 84px surface: $bound_width x $bound_height OK"
 fi
 
 if [[ "$test_scale" == 1 ]]; then
