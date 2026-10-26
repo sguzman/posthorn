@@ -4645,3 +4645,54 @@ This does not reinstate the rejected unclamped-layout reasoning
 or imply physical Hyprland/forced-smaller-configure parity.
 T503 remains 51%, T504 authorized live Mako cutover remains 0%;
 installed Mako, public notification name and real desktop untouched.
+
+## Direct upstream executable differential: hidden Pango geometry exactly matches (2026-10-26)
+
+A new isolated CI workflow builds *two* separate executables:
+Posthorn and source-pinned original Mako v1.11.0, whose signed
+upstream tag `v1.11.0` points to source commit
+`91c6b799855762ad1eb8b4498967c270a339be0c`.
+The workflow checks out that exact upstream commit and compiles it
+using Meson with icons disabled. Both executables run sequentially
+on the **same isolated Sway compositor and dbus-run-session**,
+with the identical disposable config. Only Posthorn uses its
+development-specific D-Bus name; original Mako uses
+`org.freedesktop.Notifications` on that *isolated bus only*.
+The first daemon and its layer-shell surfaces are gone before the
+second daemon starts. No screenshots are uploaded.
+
+The config deliberately sets real notification `width=84` and
+`[hidden] width=260`, `font=Sans 20`, and a long
+unbroken label. Both implementations are sent an identical pair
+of notifications. The background-color pixel probe measures
+the actual Sway-composited hidden label, not an internal raster.
+
+**Accepted measurements:**
+
+| | Posthorn | Original Mako v1.11.0 |
+|---|---:|---:|
+| x bounds | 1196–1279 | 1196–1279 |
+| y bounds | 96–351 | 96–351 |
+| width | 84 px | 84 px |
+| height | 256 px | 256 px |
+
+The new differential script
+`tests/pinned_mako_differential.sh` is guarded to refuse
+preexisting Wayland sessions. The accompanying
+`.github/workflows/pinned-mako-differential.yml` pins upstream
+commit identity and installs its build dependencies inside GitHub
+Actions only. Neither installation, test nor source checkout can
+alter a local workstation or installed Mako daemon.
+
+[Implementation commit 424c9ee](https://github.com/sguzman/posthorn/commit/424c9ee7fe09fad38fd0118a9fc5d276ec39823d) ·
+[successful upstream-executable differential CI 40338017171](https://github.com/sguzman/posthorn/actions/runs/40338017171),
+with explicit `Source-pinned Mako/Posthorn hidden-label geometry: MATCH`
+and a confirmed **84 × 256-pixel** output on each executable.
+
+The exact-match **external baseline** supplies new acceptance
+evidence rather than repeating Posthorn-only tests.
+**T105 96% → 97% (+1 pp), P1 96.6% → 96.8% (+0.2 pp),
+strict 24-task M0 90.958% → 91.000% (+0.042 pp).**
+This narrow differential does not claim all rendering parity,
+full compositor-forced size behavior, or physical Hyprland QA.
+T503 remains 51% and T504 reversible authorized cutover remains 0%.
