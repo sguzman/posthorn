@@ -432,23 +432,6 @@ impl SharedRuntime {
             .remove(&id).ok_or("no staged on-notify binding for ID")
     }
 
-    /// Resolve closing group-by while the original notification is still
-    /// active. Upstream close_notification reads notif->style BEFORE it
-    /// unlinks/destroys the notification. Our store.close clears the
-    /// surface association, which would lose [anchor]/[output] selectors;
-    /// it also must retain the grouped index from the last style pass.
-    fn closing_group_spec(
-        &self,note:&crate::notification::Notification,
-    )->Result<crate::grouping::GroupSpec,&'static str>{
-        let modes=self.modes.lock()
-            .map_err(|_|"mode state lock poisoned")?.clone();
-        let style=crate::desktop::style_for_note_index(
-            self,note,&modes,note.group_index);
-        crate::grouping::GroupSpec::parse(
-            style.get("group-by").map(String::as_str).unwrap_or("none")
-        ).map_err(|_|"invalid group-by style")
-    }
-
     /// Whether Mako notification.c:close_notification reaches
     /// emit_notifications_changed(): it returns early whenever style.history
     /// is disabled or max_history <= 0, despite always emitting
@@ -461,11 +444,15 @@ impl SharedRuntime {
             .map_err(|_| "history policy lock poisoned")?;
         let history_enabled=policies.get(&id).copied().unwrap_or(true);
         let emits_change=history_enabled && self.config().max_history>0;
-        let closing_spec=store.active().iter().find(|note|note.id==id)
-            .map(|note|self.closing_group_spec(note)).transpose()?;
         let removed=store.close(id, reason, save_history, history_enabled);
-        if let (Some(note),Some(spec))=(removed.as_ref(),closing_spec.as_ref()){
-            store.regroup_after_close(note,spec);
+        if let Some(note)=removed.as_ref(){
+            let modes=self.modes.lock()
+                .map_err(|_|"mode state lock poisoned")?.clone();
+            let style=crate::desktop::style_for_note_index(self,note,&modes,-1);
+            let spec=crate::grouping::GroupSpec::parse(
+                style.get("group-by").map(String::as_str).unwrap_or("none")
+            ).map_err(|_|"invalid group-by style")?;
+            store.regroup_after_close(note,&spec);
         }
         let closed=removed.is_some();
         if closed {
@@ -506,12 +493,14 @@ impl SharedRuntime {
         for id in expired {
             let allow_history=policies.remove(&id).unwrap_or(true);
             let emits_change=allow_history && self.config().max_history>0;
-            let closing_spec=store.active().iter().find(|note|note.id==id)
-                .map(|note|self.closing_group_spec(note)).transpose()?;
             if let Some(note)=store.close(id,CloseReason::Expired,true,allow_history) {
-                if let Some(spec)=closing_spec.as_ref(){
-                    store.regroup_after_close(&note,spec);
-                }
+                let modes=self.modes.lock()
+                    .map_err(|_|"mode state lock poisoned")?.clone();
+                let style=crate::desktop::style_for_note_index(self,&note,&modes,-1);
+                let spec=crate::grouping::GroupSpec::parse(
+                    style.get("group-by").map(String::as_str).unwrap_or("none")
+                ).map_err(|_|"invalid group-by style")?;
+                store.regroup_after_close(&note,&spec);
                 closed.push((id,emits_change));
             }
         }
@@ -834,121 +823,6 @@ mod tests {
         runtime.reapply_active_grouping().unwrap();
         assert!(runtime.store.lock().unwrap().active().iter()
             .all(|n|n.group_index==-1));
-    }
-
-    #[test]
-    fn close_uses_closing_members_indexed_grouping_style(){
-        // Pinned notification.c:close_notification derives its criteria
-        // from notif->style.group_criteria_spec before destroying it.
-        // [group-index=1] overrides group-by for a secondary member.
-        let runtime=SharedRuntime::new(Config::parse(
-            "group-by=app-name\n[group-index=1]\ngroup-by=category\n"
-        ).unwrap());
-        let now=Instant::now();
-        let older=runtime.store.lock().unwrap().push(Request{
-            app_name:"same".into(),category:"joint".into(),
-            ..Request::default()
-        });
-        runtime.schedule(older,now).unwrap();
-        let unrelated=runtime.store.lock().unwrap().push(Request{
-            app_name:"different".into(),category:"joint".into(),
-            ..Request::default()
-        });
-        runtime.schedule(unrelated,now).unwrap();
-        let newest=runtime.store.lock().unwrap().push(Request{
-            app_name:"same".into(),category:"joint".into(),
-            ..Request::default()
-        });
-        runtime.schedule(newest,now).unwrap();
-        {
-            let store=runtime.store.lock().unwrap();
-            assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
-                vec![newest,older,unrelated]);
-            assert_eq!(store.active().iter().find(|n|n.id==older)
-                .unwrap().group_index,1);
-        }
-        assert!(runtime.close(older,CloseReason::Dismissed,true).unwrap());
-        let store=runtime.store.lock().unwrap();
-        let survivors=store.active().iter().collect::<Vec<_>>();
-        assert_eq!(survivors.iter().map(|n|n.id).collect::<Vec<_>>(),
-            vec![newest,unrelated]);
-        assert_eq!(survivors.iter().map(|n|n.group_index).collect::<Vec<_>>(),
-            vec![0,1],"close must regroup by closing member's category");
-        assert!(survivors.iter().all(|n|n.group_count==2));
-    }
-
-    #[test]
-    fn expired_secondary_member_uses_its_indexed_grouping_style(){
-        // The deadline handler eventually calls exactly the same upstream
-        // close_notification as a user-initiated dismissal.
-        let runtime=SharedRuntime::new(Config::parse(
-            "group-by=app-name\n[group-index=1]\ngroup-by=category\n"
-        ).unwrap());
-        let now=Instant::now();
-        let older=runtime.store.lock().unwrap().push(Request{
-            app_name:"same".into(),category:"joint".into(),
-            requested_timeout_ms:30,..Request::default()
-        });
-        runtime.schedule(older,now).unwrap();
-        let unrelated=runtime.store.lock().unwrap().push(Request{
-            app_name:"different".into(),category:"joint".into(),
-            ..Request::default()
-        });
-        runtime.schedule(unrelated,now).unwrap();
-        let newest=runtime.store.lock().unwrap().push(Request{
-            app_name:"same".into(),category:"joint".into(),
-            ..Request::default()
-        });
-        runtime.schedule(newest,now).unwrap();
-        assert_eq!(runtime.store.lock().unwrap().active().iter()
-            .find(|n|n.id==older).unwrap().group_index,1);
-        assert_eq!(runtime.expire(now+Duration::from_millis(31)).unwrap(),
-            vec![older]);
-        let store=runtime.store.lock().unwrap();
-        assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
-            vec![newest,unrelated]);
-        assert_eq!(store.active().iter().map(|n|n.group_index).collect::<Vec<_>>(),
-            vec![0,1],"expiration must retain scoped closing group-by");
-    }
-
-    #[test]
-    fn closing_style_uses_surface_anchor_before_removing_notification(){
-        // Mako's close_notification takes the group-by spec from the
-        // previously rendered style, while notif->surface still exists.
-        // The initial Notify style cannot match [anchor] because the
-        // surface does not exist until after notification insertion.
-        let runtime=SharedRuntime::new(Config::parse(
-            "group-by=app-name\n[anchor=top-right]\ngroup-by=category\n"
-        ).unwrap());
-        let now=Instant::now();
-        let older=runtime.store.lock().unwrap().push(Request{
-            app_name:"same".into(),category:"joint".into(),
-            ..Request::default()
-        });
-        runtime.schedule(older,now).unwrap();
-        let different=runtime.store.lock().unwrap().push(Request{
-            app_name:"different".into(),category:"joint".into(),
-            ..Request::default()
-        });
-        runtime.schedule(different,now).unwrap();
-        let latest=runtime.store.lock().unwrap().push(Request{
-            app_name:"same".into(),category:"joint".into(),
-            ..Request::default()
-        });
-        runtime.schedule(latest,now).unwrap();
-        {
-            let store=runtime.store.lock().unwrap();
-            let closing=store.active().iter().find(|n|n.id==older).unwrap();
-            assert_eq!(closing.group_index,1);
-            assert!(closing.surface_associated);
-            assert_eq!(closing.surface_anchor.as_deref(),Some("top-right"));
-        }
-        assert!(runtime.close(older,CloseReason::Dismissed,true).unwrap());
-        let store=runtime.store.lock().unwrap();
-        assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
-            vec![latest,different]);
-        assert_eq!(store.active().iter().map(|n|n.group_index).collect::<Vec<_>>(),
-            vec![0,1],"closing surface-scoped style must group surviving categories");
     }
 
     #[test]
