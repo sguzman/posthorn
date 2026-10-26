@@ -5060,3 +5060,68 @@ Only these specifically tested 2× Pango cases are
 accepted. Physical Hyprland T503 remains 51%, reversible
 production Mako cutover T504 remains 0%; neither
 production daemon nor real session bus was changed.
+
+## Exact compositor-rendered ordinary and hidden format specifier parity (2026-10-26)
+
+Two independently guarded source-pinned executable tests now
+cover the previously unverified rendering branches of
+`notification.c:format_notif_text` and
+`notification.c:format_hidden_text`. Both use the exact
+original Mako v1.11.0 binary and Posthorn on the same
+disposable **physical scale-2 Sway compositor** and
+private D-Bus. Full decoded compositor screenshots,
+not just counts or bounds, must match.
+
+### Ordinary notification fields
+
+`format=%a / id=%i / group=%g / 100%%\\n%s\\n%b`
+exercises app name, numeric notification ID, group count,
+literal percent, summary and valid sender-body Pango markup
+together. Sender XML special characters also pass through
+normal markup escaping. Both independently rendered:
+- Background bounds `800 1279 0 451`.
+- **19,589** exact text-color pixels.
+- **Zero decoded differing screenshot pixels**.
+
+[Fixture `a907a85`](https://github.com/sguzman/posthorn/commit/a907a85fc57097d821de51482cf0f4e98151da4d) ·
+[successful exact pinned-Mako differential 40366086816](https://github.com/sguzman/posthorn/actions/runs/40366086816).
+
+### Synthetic hidden notification fields
+
+`[hidden] format=Hidden %h of %t` exercises the separate
+hidden-count and total-count formatting path. On the same
+actual scale-2 compositor, a first hidden plus one visible
+notification paints a violet background at
+`1000 1279 124 247`, and adding another notification
+preserves those bounds but changes the hidden text.
+
+Both **two-notification and three-notification** full
+screenshots matched original Mako exactly, **zero decoded
+pixel differences**. The test explicitly rejects an
+unchanged Posthorn screenshot after the third Notify, so
+matching stale frames cannot falsely pass.
+
+The initial harness accidentally left the preceding original
+Mako daemon holding the *disposable CI bus name*. This was
+corrected without changing the renderer. The following
+source comparison exposed a second harness issue:
+`capture_bounds()` accepted a stale frame while the
+background dimensions stayed constant. The final test
+waits for an actually changed screenshot in each daemon
+before cross-executable comparison; this version passed.
+
+[Hidden field fixture `39cdb14`](https://github.com/sguzman/posthorn/commit/39cdb14df84057e2f23e608ac5c73d403a6ca385) ·
+[CI fixture cleanup `1f20132`](https://github.com/sguzman/posthorn/commit/1f2013216e776c01c8743c2625b16ae33bfadd80) ·
+[redraw synchronization `ead7cbb`](https://github.com/sguzman/posthorn/commit/ead7cbb4ccc168848f3b01563528d16558cd0aa4) ·
+[green pinned-Mako comparison 40367480557](https://github.com/sguzman/posthorn/actions/runs/40367480557) ·
+[green full Rust/Wayland suite 40367480489](https://github.com/sguzman/posthorn/actions/runs/40367480489).
+
+**Two distinct source-backed T205 acceptance increments:**
+T205 **95% → 97% (+2 pp)**; phase P2
+**98.6% → 99.0% (+0.4 pp)**; strict
+24-task M0 **91.417% → 91.500% (+0.083 pp)**.
+This acceptance does not prove grouped non-default
+`%g` values, every style/compositor combination,
+physical Hyprland T503 (51%), or production
+Mako cutover T504 (0%). Installed Mako and the
+real session's public notification bus are untouched.

@@ -29,7 +29,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🗃️ T202 — Bounded in-memory history, close and restore — `██████████ 100%`
 - ⏳ T203 — Timeout selection and timer/event scheduling — `██████████ 99%`
 - 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `██████████ 99%`
-- 🔤 T205 — Pango markup/escaping, format specifiers and actions — `██████████ 95%`
+- 🔤 T205 — Pango markup/escaping, format specifiers and actions — `██████████ 97%`
 
 ### 🚌 P3 — D-Bus protocol and control surface — `██████████ 95%`
 
