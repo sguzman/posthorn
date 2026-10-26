@@ -5384,3 +5384,15 @@ universal group replacement/close/sort behavior. Physical
 Hyprland T503 stays 51%, authorized production cutover
 T504 stays 0%. Installed Mako and its public bus
 were never contacted.
+
+## Implicit HOME/XDG candidates disappear: source-pinned built-in Reload recovery (2026-10-26)
+
+Pinned Mako v1.11.0 `config.c:get_default_config_path` and `reload_config` re-evaluate implicit configuration selection on every Reload. Posthorn now has an **executable scale-2 compositor comparison** proving the complete transition **legacy `~/.mako/config` → `$XDG_CONFIG_HOME/mako/config` → built-in Mako defaults**. Both test daemons run on the same isolated Sway output and distinct disposable D-Bus services. HOME and XDG trees are temporary, restored between binary runs; no real user files or production bus were accessed.
+
+The third transition removes the last candidate file and issues `fr.emersion.Mako.Reload` while the notification remains active. It waits for stable background pixels and compares decoded full screenshots, not merely geometry. Both daemons painted the default `#285577` background at physical bounds **854 1255 24 171**; legacy, XDG, and built-in screenshots each had **zero differing pixels**. The existing `--width=205` CLI override remains in use. The fixture's first iteration exposed an **isolation mistake** (XDG fixture was not restored before the second binary), corrected before acceptance; the red intermediate run is not source-parity evidence.
+
+The same verified pinned-Mako workflow additionally compares grouped notification explicit-ID replacement, group splitting and rejoining, with pixel-exact equality at every stage. This is bounded T204 regression evidence, **not** a claim that all grouping, physical Hyprland, or T204's remaining final acceptance gates are complete.
+
+[Built-in fallback fixture 6370ac2](https://github.com/sguzman/posthorn/commit/6370ac2b9aee74470fd2c5bf6b74ec7e48035438) · [isolated fixture restoration e7c9cf0](https://github.com/sguzman/posthorn/commit/e7c9cf0fbdf22ffd5e331d516a6fb62cad9d7818) · [grouped replacement test 9ca40eb](https://github.com/sguzman/posthorn/commit/9ca40ebbd7762eba98ccfe7215db66c47833caea) · [pinned differential 40383427830](https://github.com/sguzman/posthorn/actions/runs/40383427830) · [Rust/Wayland 40383427898](https://github.com/sguzman/posthorn/actions/runs/40383427898). **355 Rust library tests, 100 private D-Bus tests, full headless Sway, and original Mako executable comparisons passed** on the same `9ca40eb` commit.
+
+Accepted atomic progress: **T104 97% → 98%, T303 90% → 91%**, strict 24-task M0 **91.833% → 91.917% (+0.083 percentage points)**. P1 **97.6% → 97.8%**, P3 **96.000% → 96.333%**. These hosted tests do not count toward physical Hyprland T503 (still 51%) or the separately authorized reversible live Mako switch T504 (still 0%).
