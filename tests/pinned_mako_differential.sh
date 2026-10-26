@@ -412,3 +412,74 @@ two_x_slack=$((tmc/20+20))
   exit 1
 }
 echo 'Pinned Mako/Posthorn actual compositor 2x Pango markup: MATCH'
+
+# T205/T105 text-height cap and rounded-popup expansion. Pinned Mako
+# render.c:139-155 uses style->height for the Pango layout even if
+# render.c:208-213 subsequently expands the *popup* to fit its corner
+# radii. A second, taller Pango layout would reveal extra glyphs.
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+clear_color '#416D98'
+swaymsg -s "$ipc" 'output HEADLESS-1 scale 1' >/dev/null
+scale_one=0
+for _ in {1..60}; do
+  if swaymsg -s "$ipc" -t get_outputs >"$root/cap-outputs.json" &&
+    grep -Eq '"scale":[[:space:]]*1([.]0+)?[,}]' "$root/cap-outputs.json"; then
+    scale_one=1; break
+  fi
+  sleep 0.15
+done
+[[ "$scale_one" == 1 ]] || {
+  echo 'Private compositor did not return to scale 1'
+  cat "$root/cap-outputs.json"
+  exit 1
+}
+cat >"$root/cap.conf" <<'EOF_CAP'
+width=180
+height=45
+font=Sans 17
+margin=0
+padding=4
+border-size=0
+border-radius=55
+icons=0
+max-visible=1
+default-timeout=0
+format=%s\n%b
+markup=1
+background-color=#416D98
+text-color=#E5C58B
+EOF_CAP
+./target/debug/posthorn --experimental-private-desktop "$root/cap.conf" \
+  >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.posthorn.Development
+markup_notify org.posthorn.Development
+post_cap="$(markup_measure posthorn-height-cap org.posthorn.Development)"
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+clear_color '#416D98'
+"$mako_binary" -c "$root/cap.conf" >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.freedesktop.Notifications
+markup_notify org.freedesktop.Notifications
+mako_cap="$(markup_measure mako-height-cap org.freedesktop.Notifications)"
+read -r cp0 cp1 cp2 cp3 cpc <<< "$post_cap"
+read -r cm0 cm1 cm2 cm3 cmc <<< "$mako_cap"
+cpw=$((cp1-cp0+1)); cph=$((cp3-cp2+1))
+cmw=$((cm1-cm0+1)); cmh=$((cm3-cm2+1))
+echo "Posthorn radius-expanded height-cap: background $cpw x $cph; text pixels $cpc"
+echo "Mako v1.11.0 radius-expanded height-cap: background $cmw x $cmh; text pixels $cmc"
+(( cpw>=160 && cmw>=160 && cph>=100 && cmh>=100 && cpc>=20 && cmc>=20 )) || {
+  echo 'The cap test did not exercise rounded popup expansion with actual text'
+  exit 1
+}
+(( (cpw-cmw)<=2 && (cmw-cpw)<=2 && (cph-cmh)<=2 && (cmh-cph)<=2 )) || {
+  echo 'Pinned Mako/Posthorn radius-expanded height-cap geometry differs'
+  exit 1
+}
+[[ "$cpc" == "$cmc" ]] || {
+  echo 'Pinned Mako/Posthorn configured text-height cap has different glyph coverage'
+  exit 1
+}
+echo 'Pinned Mako/Posthorn radius-expanded configured Pango height-cap: MATCH'
