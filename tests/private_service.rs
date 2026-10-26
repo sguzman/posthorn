@@ -2248,6 +2248,85 @@ async fn category_sound_expiration_and_history_restore_do_not_replay_hooks()
 }
 
 #[tokio::test]
+async fn app_scoped_category_sound_mute_preserves_other_application_audio()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Mako criteria.c:421-438 applies all matching selectors in file order.
+    // A later [app-name=muted category=warning] rule mutes just that
+    // application's warning sounds, not every warning from other senders.
+    // A later global [mode=quiet] temporarily mutes both applications.
+    let dir=tempfile::tempdir()?;
+    let marker=dir.path().join("app-category-sound-events");
+    let config=Config::parse(&format!(
+        "[category=warning]\nbackground-color=#715536\n\
+         on-notify=exec printf '%s:%s\\n' 'warning' \"$id\" >> '{}'\n\
+         [app-name=muted category=warning]\non-notify=none\n\
+         [mode=quiet]\non-notify=none\n",
+        marker.display(),
+    ))?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let notify=|app:&str|{
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from("warning")).unwrap(),
+        )].into();
+        (app.to_owned(),0u32,"","Warning","",Vec::<String>::new(),hints,-1i32)
+    };
+    let wait_for=|expected:String|{
+        let marker=marker.clone();
+        async move{
+            tokio::time::timeout(Duration::from_secs(3),async{
+                loop{
+                    if std::fs::read_to_string(&marker).unwrap_or_default()==expected{
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                }
+            }).await
+        }
+    };
+
+    let allowed:u32=desktop.call("Notify",&notify("allowed")).await?;
+    let first=format!("warning:{allowed}\n");
+    wait_for(first.clone()).await?;
+    let muted:u32=desktop.call("Notify",&notify("muted")).await?;
+    let notes=runtime.store.lock().unwrap().active().iter().cloned().collect::<Vec<_>>();
+    for (id,binding) in [(allowed,false),(muted,true)]{
+        let note=notes.iter().find(|n|n.id==id).ok_or("warning missing")?;
+        let style=posthorn::desktop::style_for_note(
+            &runtime,note,&["default".to_owned()]);
+        assert_eq!(style["background-color"],"#715536");
+        assert_eq!(style["on-notify"]=="none",binding,
+            "app-scoped mute should not suppress other warning applications");
+    }
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,first,
+        "muted warning cannot run the shared category sound");
+
+    let _:()=ctl.call("SetMode",&("quiet",)).await?;
+    let quiet_allowed:u32=desktop.call("Notify",&notify("allowed")).await?;
+    let quiet_muted:u32=desktop.call("Notify",&notify("muted")).await?;
+    assert_ne!(quiet_allowed,quiet_muted);
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,first,
+        "quiet mode must mute both app-specific category paths");
+
+    let _:()=ctl.call("SetMode",&("default",)).await?;
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,first,
+        "leaving quiet mode must not replay older warning hooks");
+    let final_allowed:u32=desktop.call("Notify",&notify("allowed")).await?;
+    wait_for(format!("{first}warning:{final_allowed}\n")).await?;
+    let _:u32=desktop.call("Notify",&notify("muted")).await?;
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,
+        format!("{first}warning:{final_allowed}\n"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn category_sound_stack_tag_updates_honor_quiet_mode_and_app_scope()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
