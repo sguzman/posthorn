@@ -1505,7 +1505,7 @@ mod tests {
         // Actual Mako PangoAttrScale font metrics can change logical
         // popup height across outputs; only the margins scale linearly.
         let note=runtime.store.lock().unwrap().active()[0].clone();
-        let style=runtime.config().global;
+        let style=runtime.config().global.clone();
         let painted=render_notification_group_with_icon_scale(&note,&style,0,2,2)
             .unwrap();
         assert_eq!(two.height,painted.height+8,
