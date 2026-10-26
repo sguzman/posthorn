@@ -1441,7 +1441,9 @@ mod tests {
         ] {
             style.insert(key.into(),value.into());
         }
-        let note=fixture();
+        let mut note=fixture();
+        note.summary.clear();
+        note.body.clear();
         for scale in [1u32,2] {
             let measured=measure_notification_height(&note,&style).unwrap();
             assert_eq!(measured,220,
