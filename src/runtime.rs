@@ -448,7 +448,11 @@ impl SharedRuntime {
         if let Some(note)=removed.as_ref(){
             let modes=self.modes.lock()
                 .map_err(|_|"mode state lock poisoned")?.clone();
-            let style=crate::desktop::style_for_note_index(self,note,&modes,-1);
+            // Mako notification.c:close_notification reads the already
+            // applied notif->style.group_criteria_spec. Re-evaluating a
+            // closing member with group-index=-1 loses scoped group-by.
+            let style=crate::desktop::style_for_note_index(
+                self,note,&modes,note.group_index);
             let spec=crate::grouping::GroupSpec::parse(
                 style.get("group-by").map(String::as_str).unwrap_or("none")
             ).map_err(|_|"invalid group-by style")?;
@@ -496,7 +500,10 @@ impl SharedRuntime {
             if let Some(note)=store.close(id,CloseReason::Expired,true,allow_history) {
                 let modes=self.modes.lock()
                     .map_err(|_|"mode state lock poisoned")?.clone();
-                let style=crate::desktop::style_for_note_index(self,&note,&modes,-1);
+                // Expiration calls the same Mako close_notification path:
+                // retain the closing member's grouped style projection.
+                let style=crate::desktop::style_for_note_index(
+                    self,&note,&modes,note.group_index);
                 let spec=crate::grouping::GroupSpec::parse(
                     style.get("group-by").map(String::as_str).unwrap_or("none")
                 ).map_err(|_|"invalid group-by style")?;
@@ -823,6 +830,81 @@ mod tests {
         runtime.reapply_active_grouping().unwrap();
         assert!(runtime.store.lock().unwrap().active().iter()
             .all(|n|n.group_index==-1));
+    }
+
+    #[test]
+    fn close_uses_closing_members_indexed_grouping_style(){
+        // Pinned notification.c:close_notification derives its criteria
+        // from notif->style.group_criteria_spec before destroying it.
+        // [group-index=1] overrides group-by for a secondary member.
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=app-name\\n[group-index=1]\\ngroup-by=category\\n"
+        ).unwrap());
+        let now=Instant::now();
+        let older=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),category:"joint".into(),
+            ..Request::default()
+        });
+        runtime.schedule(older,now).unwrap();
+        let unrelated=runtime.store.lock().unwrap().push(Request{
+            app_name:"different".into(),category:"joint".into(),
+            ..Request::default()
+        });
+        runtime.schedule(unrelated,now).unwrap();
+        let newest=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),category:"joint".into(),
+            ..Request::default()
+        });
+        runtime.schedule(newest,now).unwrap();
+        {
+            let store=runtime.store.lock().unwrap();
+            assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+                vec![newest,older,unrelated]);
+            assert_eq!(store.active().iter().find(|n|n.id==older)
+                .unwrap().group_index,1);
+        }
+        assert!(runtime.close(older,CloseReason::Dismissed,true).unwrap());
+        let store=runtime.store.lock().unwrap();
+        let survivors=store.active().iter().collect::<Vec<_>>();
+        assert_eq!(survivors.iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![newest,unrelated]);
+        assert_eq!(survivors.iter().map(|n|n.group_index).collect::<Vec<_>>(),
+            vec![0,1],"close must regroup by closing member's category");
+        assert!(survivors.iter().all(|n|n.group_count==2));
+    }
+
+    #[test]
+    fn expired_secondary_member_uses_its_indexed_grouping_style(){
+        // The deadline handler eventually calls exactly the same upstream
+        // close_notification as a user-initiated dismissal.
+        let runtime=SharedRuntime::new(Config::parse(
+            "group-by=app-name\\n[group-index=1]\\ngroup-by=category\\n"
+        ).unwrap());
+        let now=Instant::now();
+        let older=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),category:"joint".into(),
+            requested_timeout_ms:30,..Request::default()
+        });
+        runtime.schedule(older,now).unwrap();
+        let unrelated=runtime.store.lock().unwrap().push(Request{
+            app_name:"different".into(),category:"joint".into(),
+            ..Request::default()
+        });
+        runtime.schedule(unrelated,now).unwrap();
+        let newest=runtime.store.lock().unwrap().push(Request{
+            app_name:"same".into(),category:"joint".into(),
+            ..Request::default()
+        });
+        runtime.schedule(newest,now).unwrap();
+        assert_eq!(runtime.store.lock().unwrap().active().iter()
+            .find(|n|n.id==older).unwrap().group_index,1);
+        assert_eq!(runtime.expire(now+Duration::from_millis(31)).unwrap(),
+            vec![older]);
+        let store=runtime.store.lock().unwrap();
+        assert_eq!(store.active().iter().map(|n|n.id).collect::<Vec<_>>(),
+            vec![newest,unrelated]);
+        assert_eq!(store.active().iter().map(|n|n.group_index).collect::<Vec<_>>(),
+            vec![0,1],"expiration must retain scoped closing group-by");
     }
 
     #[test]
