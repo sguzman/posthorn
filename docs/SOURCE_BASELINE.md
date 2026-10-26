@@ -4899,3 +4899,42 @@ possible font/rendering layouts. Physical Hyprland T503 remains
 51%; separately authorized reversible production cutover T504
 remains 0%. Live Mako, the public notification bus, and workstation
 configuration were not changed.
+
+## Physical 2× Pango horizontal text alignment executable parity (2026-10-26)
+
+T205's source-pinned markup and layout acceptance now checks
+`text-alignment=center` and `text-alignment=right` on a real
+**scale-2 private Sway output**. Unlike a color-pixel count,
+the **absolute text-color pixel bounding box** detects incorrectly
+positioned ink when the same glyphs were rendered elsewhere.
+
+The fixture starts original Mako v1.11.0 and Posthorn separately,
+with the same synthetic notification, fonts, configuration,
+private D-Bus, and screenshot conditions, then checks the
+painted notification rectangle, exact text-color count, and
+actual ink bounds.
+
+| Alignment | Posthorn text-color bounds (x0 x1 y0 y1) | Mako text-color bounds | Text-color pixel count, both |
+| --- | --- | --- | ---: |
+| Center | **966 1236 16 114** | **966 1236 16 114** | 3,169 |
+| Right | **998 1268 16 114** | **998 1268 16 114** | 3,169 |
+
+Both cases show identical full-popup bounds
+`920 1279 0 123`. Exact ink-bounds equality also
+verifies the 32-physical-pixel horizontal translation from
+center to right; total pixels alone would not prove alignment.
+
+[Permanent executable test 289e6d8](https://github.com/sguzman/posthorn/commit/289e6d89ef84dfb88d5b8a1ff5e4e45bb869d3b1) ·
+[successful pinned-Mako comparison 40356399096](https://github.com/sguzman/posthorn/actions/runs/40356399096) ·
+[successful full Rust/Wayland suite 40356399258](https://github.com/sguzman/posthorn/actions/runs/40356399258):
+352 Rust library tests, 100 private D-Bus tests, and all
+isolated compositor checks.
+
+**Independent T205 acceptance:** **91% → 92% (+1 pp)**;
+P2 **97.8% → 98.0% (+0.2 pp)**;
+strict 24-task M0 **91.250% → 91.292% (+0.042 pp)**.
+The checks are source-backed and use disposable CI. They
+do not establish physical Hyprland T503, nor authorize
+production Mako cutover T504. Those gates remain at
+51% and 0% respectively. Installed Mako, the standard
+user notification bus, and workstation setup remain unchanged.
