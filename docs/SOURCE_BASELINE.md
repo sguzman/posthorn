@@ -4363,3 +4363,58 @@ P5 57.75% → 58.00% (display 58%);
 strict M0 90.583% → 90.625% (display 91%).**
 Physical Hyprland acceptance T503 stays 51%, and the explicit-authorization
 reversible production cutover T504 stays 0%. Those gates are not credited.
+
+## Rejected Reload cannot partially replace category sound hooks (2026-10-25)
+
+Pinned Mako v1.11.0 `config.c:993-1019` parses a candidate
+configuration into an isolated temporary object, and only replaces the
+active one after successful parsing. Its `dbus/mako.c:354-368`
+returns InvalidConfig on failure without style reapplication. Category
+`on-notify=exec` sound hooks and category colors must therefore
+retain the last-good configuration after any rejected reload.
+
+The new file-backed private-D-Bus regression
+`tests/private_service.rs::invalid_reload_retains_last_good_category_sound_and_quiet_mode`
+verifies an initial warning sound; rejects `width=0` alongside
+different sound/color settings; retains the former warning color and
+command on the next Notify; accepts a subsequent valid new command;
+suppresses it under quiet mode; does not replay it when quiet ends;
+and executes the new command on the next new notification.
+No physical audio or public notification bus is used.
+
+[Implementation commit 7804131](https://github.com/sguzman/posthorn/commit/78041318f6cb3c9473e82ec86ad715de4de60ccb) ·
+[accepted two-job CI 40263302366](https://github.com/sguzman/posthorn/actions/runs/40263302366):
+**347 Rust library tests, 96 private D-Bus tests and complete isolated
+Wayland compositor acceptance passed.**
+T502 received **+1 pp** acceptance credit.
+
+## Ordered category and quiet criteria determine sound precedence (2026-10-25)
+
+Pinned Mako v1.11.0 `criteria.c:421-438` applies every matching
+criteria section in its configuration-file order. A later
+`[category=warning]` section can override an earlier
+`[mode=quiet] on-notify=none` rule and run its sound hook even
+while quiet mode is active. Putting `[mode=quiet]` last mutes
+that same category. Posthorn must preserve this ordered semantics, not
+invent an unconditional mute layer.
+
+The private D-Bus regression
+`tests/private_service.rs::category_sound_and_quiet_mode_follow_mako_config_section_order`
+checks both orders on a live private service across configuration
+reloads: category-last runs its file-backed sound while quiet is active;
+quiet-last suppresses the next warning while preserving its color;
+returning to category-last does not replay old hooks but the next
+warning sounds again.
+
+[Implementation commit 44f9740](https://github.com/sguzman/posthorn/commit/44f97402efb4227501b5930cd0c20d14a382c800) ·
+[accepted two-job CI 40263555358](https://github.com/sguzman/posthorn/actions/runs/40263555358):
+**347 Rust library tests, 97 private D-Bus tests and all isolated
+Wayland acceptance checks passed.**
+T502 received a further **+1 pp** acceptance credit.
+
+Combined accepted delta: **T502 82% → 84%; category-sound feature
+82% → 84%; P5 58.00% → 58.50%; strict 24-task M0
+90.625% → 90.708% (+0.083 percentage points).**
+T503 physical Hyprland remains at 51%; T504 reversible, explicitly
+authorized production cutover remains 0%. Installed Mako, live bus,
+desktop configuration and hardware audio remain untouched.
