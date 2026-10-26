@@ -72,6 +72,8 @@ jobs:
         run: dbus-run-session -- bash tests/headless_input_region.sh
       - name: Verify mixed-output DPI icon selection and bottom-edge pointer routing
         run: dbus-run-session -- bash tests/headless_mixed_scale.sh
+      - name: Verify reversible production-name trial on isolated software compositor
+        run: POSTHORN_PUBLIC_TRIAL_CI=1 dbus-run-session -- bash tests/public_trial_isolated.sh
       - name: Verify pinned Mako superstyle margins from unmatched criteria
         run: dbus-run-session -- bash tests/headless_superstyle_margin.sh
       - name: Verify signed Mako padding on actual compositor mode redraw
