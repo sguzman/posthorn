@@ -226,12 +226,14 @@ markup_measure(){
 }
 markup_notify(){
   local name="$1" response
+  local body='<b>Bold &amp; ready</b> with <i>italic words</i> and <u>underlined detail</u>'
+  if (( $#>=2 )); then body="$2"; fi
   response="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
     "$name" /org/freedesktop/Notifications \
     org.freedesktop.Notifications Notify 'susssasa{sv}i' \
     'Pinned Mako markup differential' 0 '' \
     'Fish & Chips <ready>' \
-    '<b>Bold &amp; ready</b> with <i>italic words</i> and <u>underlined detail</u>' \
+    "$body" \
     0 0 30000)"
   [[ "$response" == u\ * ]] || { echo "markup Notify failed: $response"; exit 1; }
 }
@@ -311,3 +313,44 @@ literal_slack=$((lmc/20+20))
   echo 'markup=0 did not materially change literal-tag text coverage'; exit 1
 }
 echo 'Pinned Mako/Posthorn markup-disabled literal-body format: MATCH'
+
+# A malformed sender body is not trusted Pango markup. Upstream
+# notification.c:324-336 escapes invalid body tags; Posthorn must make
+# the same fallback choice without discarding the template or summary.
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+clear_color '#416D98'
+sed -i 's/^markup=0$/markup=1/' "$root/markup.conf"
+malformed='<b>broken <i>markup without closing tags & raw'
+./target/debug/posthorn --experimental-private-desktop "$root/markup.conf" \
+  >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.posthorn.Development
+markup_notify org.posthorn.Development "$malformed"
+post_malformed="$(markup_measure posthorn-malformed org.posthorn.Development)"
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+clear_color '#416D98'
+"$mako_binary" -c "$root/markup.conf" >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.freedesktop.Notifications
+markup_notify org.freedesktop.Notifications "$malformed"
+mako_malformed="$(markup_measure mako-malformed org.freedesktop.Notifications)"
+read -r xp0 xp1 yp0 yp1 xpc <<< "$post_malformed"
+read -r xm0 xm1 ym0 ym1 xmc <<< "$mako_malformed"
+xpw=$((xp1-xp0+1)); xph=$((yp1-yp0+1))
+xmw=$((xm1-xm0+1)); xmh=$((ym1-ym0+1))
+echo "Posthorn malformed-body escaped Pango: background $xpw x $xph; text pixels $xpc"
+echo "Mako v1.11.0 malformed-body escaped Pango: background $xmw x $xmh; text pixels $xmc"
+(( xpw>=160 && xmw>=160 && xph>=40 && xmh>=40 && xpc>=20 && xmc>=20 )) || {
+  echo 'Malformed-body fallback text not painted'; exit 1;
+}
+(( (xpw-xmw)<=2 && (xmw-xpw)<=2 && (xph-xmh)<=2 && (xmh-xph)<=2 )) || {
+  echo 'Mako/Posthorn malformed markup layout differs'; exit 1;
+}
+fallback_slack=$((xmc/20+20))
+(( (xpc-xmc)<=fallback_slack && (xmc-xpc)<=fallback_slack )) || {
+  echo "Mako/Posthorn malformed markup coverage differs by more than $fallback_slack pixels"
+  exit 1
+}
+echo 'Pinned Mako/Posthorn malformed sender markup fallback: MATCH'
