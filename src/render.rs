@@ -222,12 +222,20 @@ fn measure_height_with_icon(
         else{padding.left};
     let vertical_extra=if icon_location=="bottom" {padding.bottom}
         else{padding.top};
+    // Mako render.c:139-155 passes SIGNED text-layout dimensions into
+    // Pango without imposing a minimum of 1. In particular, a border
+    // taller than half the configured height gives a negative Pango
+    // height, and render.c:195-199 then clamps text_height to that
+    // negative value. Prematurely clamping to 1 makes a valid popup
+    // taller than the configured height even with an empty body.
     let text_width=(i64::from(width)-width_padding-if !vertical {
         icon_size.map_or(0,|(w,_)|i64::from(w)+i64::from(horizontal_extra)*2)
-    }else{0}).clamp(1,4096) as i32;
+    }else{0}).clamp(i64::from(i32::MIN)/i64::from(pango::SCALE),
+                    i64::from(i32::MAX)/i64::from(pango::SCALE)) as i32;
     let text_height=(i64::from(cap)-height_padding-if vertical {
         icon_size.map_or(0,|(_,h)|i64::from(h)+i64::from(vertical_extra)*2)
-    }else{0}).clamp(1,4096) as i32;
+    }else{0}).clamp(i64::from(i32::MIN)/i64::from(pango::SCALE),
+                    i64::from(i32::MAX)/i64::from(pango::SCALE)) as i32;
 
     let markup=style.get("markup")
         .is_none_or(|v|v=="1"||v.eq_ignore_ascii_case("true"));
@@ -251,6 +259,8 @@ fn measure_height_with_icon(
     let measured=if layout.character_count()>0{
         layout.pixel_size().1.max(0) as u32
     }else{0};
+    // Upstream render.c:195 compares against its unmodified signed
+    // text_layout_height, including negative limits.
     let text=i64::from(measured).min(i64::from(text_height));
     let content=if let Some((_,icon_h))=icon_size{
         if vertical{text+i64::from(icon_h)+i64::from(vertical_extra)}
@@ -397,8 +407,11 @@ pub fn render_notification_group_with_icon_scale(
     // Upstream treats invalid final markup as literal *formatted* text,
     // preserving template prefixes, suffixes and field substitutions.
 
-    let interior_w=(f64::from(width)-2.0*border-left-right).max(1.0);
-    let interior_h=(f64::from(height)-2.0*border-top-bottom).max(1.0);
+    // Source set_layout_size() passes signed, potentially nonpositive
+    // dimensions directly to Pango; the renderer must not undo the
+    // measurement's signed geometry with a second 1px minimum.
+    let interior_w=f64::from(width)-2.0*border-left-right;
+    let interior_h=f64::from(height)-2.0*border-top-bottom;
     let mut text_x=border+left;
     let mut text_y=border+top;
     let mut available_w=interior_w;
@@ -428,10 +441,10 @@ pub fn render_notification_group_with_icon_scale(
             let icon_radius=integer_option(style,"icon-border-radius",0) as f64;
             paint_icon(&context,&icon,x,y,scale,iw as u32,ih as u32,icon_radius)?;
             match location {
-                "right"=>available_w=(available_w-iw-2.0*right).max(1.0),
-                "top"=>{text_y+=ih+top;available_h=(available_h-ih-2.0*top).max(1.0)},
-                "bottom"=>available_h=(available_h-ih-2.0*bottom).max(1.0),
-                _=>{text_x+=iw+left;available_w=(available_w-iw-2.0*left).max(1.0)},
+                "right"=>available_w=(available_w-iw-2.0*right),
+                "top"=>{text_y+=ih+top;available_h=(available_h-ih-2.0*top)},
+                "bottom"=>available_h=(available_h-ih-2.0*bottom),
+                _=>{text_x+=iw+left;available_w=(available_w-iw-2.0*left)},
             }
         }
     }
@@ -1376,6 +1389,32 @@ mod tests {
             &[0,0,255,255],"Mako selects the unscaled category asset at 1x");
         assert_eq!(&hidpi.pixels[index(&hidpi)..index(&hidpi)+4],
             &[0,255,0,255],"Mako reads @2 from a later category at 2x");
+    }
+
+    #[test]
+    fn negative_pango_text_cap_retains_mako_configured_popup_height(){
+        // Pinned render.c:139-155,195-199. A 40px height and 30px
+        // border produce signed text_layout_height=-20, not +1.
+        // Upstream clips even an empty text block to -20 and then
+        // computes final height=-20+2*30=40.
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","100"),("height","40"),("border-size","30"),
+            ("padding","0"),("border-radius","0"),("format","%s"),
+            ("icons","0"),
+        ]{style.insert(key.into(),value.into());}
+        let mut store=crate::notification::NotificationStore::new(0);
+        let id=store.push(crate::notification::Request::default());
+        let note=store.active().iter().find(|n|n.id==id).unwrap();
+        assert_eq!(measure_notification_height(note,&style).unwrap(),40);
+        for scale in [1u32,2]{
+            let frame=render_notification_group_scaled(note,&style,0,scale).unwrap();
+            assert_eq!((frame.width,frame.height),(100*scale,40*scale));
+        }
+        // With a non-negative layout limit, normal text dimensions
+        // must still use Pango's ordinary positive measurement.
+        style.insert("border-size".into(),"2".into());
+        assert_eq!(measure_notification_height(note,&style).unwrap(),4);
     }
 
     #[test]
