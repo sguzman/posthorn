@@ -2176,3 +2176,104 @@ done
 diff -u "$root/posthorn-tag-sound.events" "$root/mako-tag-sound.events"
 echo 'Pinned Mako/Posthorn app-scoped tagged category sound lifecycle: MATCH'
 
+# T502: pinned config.c:reload_config constructs a replacement config
+# separately. A rejected Reload may not change category sound commands;
+# the next accepted valid Reload must replace the hook without replaying
+# previously emitted sound events. Compare Mako and Posthorn on a
+# disposable file marker, never the speaker or user's real config.
+for impl in posthorn mako;do
+  marker="$root/$impl-reload-sound.events"
+  config="$root/$impl-reload-sound.conf"
+  cat >"$config" <<EOF_RELOAD_OLD
+width=195
+height=100
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=8
+default-timeout=0
+format=%s
+on-notify=none
+[category=warning]
+background-color=#715536
+on-notify=exec printf 'old:%s\n' "\$id" >> "$marker"
+[mode=quiet]
+on-notify=none
+EOF_RELOAD_OLD
+  if [[ "$impl" == posthorn ]];then
+    ./target/debug/posthorn --experimental-private-desktop \
+      "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  first="$(sound_notify_category "$bus" warning)"
+  sound_wait_count "$marker" 1
+  [[ "$(tail -n 1 "$marker")" == "old:$first" ]] || exit 1
+
+  # Invalid on-disk candidate must be rejected before changing the
+  # active category on-notify command. Keep both the error and hook.
+  printf 'width=invalid\n' >"$config"
+  if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload \
+    >"$root/$impl-reload-sound-invalid.log" 2>&1;then
+    echo "$impl accepted an invalid category sound Reload" >&2;exit 1
+  fi
+  grep -q 'Unable to parse configuration file' \
+    "$root/$impl-reload-sound-invalid.log" || {
+    echo "$impl returned a non-source InvalidConfig error" >&2
+    cat "$root/$impl-reload-sound-invalid.log" >&2;exit 1
+  }
+  second="$(sound_notify_category "$bus" warning)"
+  sound_wait_count "$marker" 2
+  [[ "$(tail -n 1 "$marker")" == "old:$second" ]] || {
+    echo "$impl lost the original sound hook after invalid Reload" >&2
+    cat "$marker" >&2;exit 1
+  }
+
+  cat >"$config" <<EOF_RELOAD_NEW
+width=195
+height=100
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=8
+default-timeout=0
+format=%s
+on-notify=none
+[category=warning]
+background-color=#715536
+on-notify=exec printf 'new:%s\n' "\$id" >> "$marker"
+[mode=quiet]
+on-notify=none
+EOF_RELOAD_NEW
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null || {
+    echo "$impl rejected valid category sound Reload" >&2
+    cat "$root/daemon.log" >&2;exit 1
+  }
+  # Reload is not Notify: previously emitted hooks may not be replayed.
+  sleep 0.20
+  [[ "$(grep -c '^' "$marker")" == 2 ]] || {
+    echo "$impl replayed category hooks on valid Reload" >&2;exit 1
+  }
+  third="$(sound_notify_category "$bus" warning)"
+  sound_wait_count "$marker" 3
+  [[ "$(tail -n 1 "$marker")" == "new:$third" ]] || {
+    echo "$impl did not select the new category command after Reload" >&2
+    cat "$marker" >&2;exit 1
+  }
+  echo "$impl invalid sound Reload preserved old hook and accepted valid new hook: MATCH"
+  kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+diff -u "$root/posthorn-reload-sound.events" "$root/mako-reload-sound.events"
+echo 'Pinned Mako/Posthorn atomic category sound Reload retention: MATCH'
+
