@@ -813,6 +813,62 @@ mod tests {
     }
 
     #[test]
+    fn wider_hidden_placeholder_uses_full_pango_width_then_clips_to_real_canvas(){
+        // Source render.c:442-484 does not include the hidden synthetic
+        // notification in max_width. But render_notification() receives its
+        // ORIGINAL style width, so narrowing the style before rendering
+        // introduces extra Pango line wraps and changes canvas height.
+        let format="Overflow status: %h hidden among %t total notifications, with deliberately long text";
+        let config=Config::parse(&format!(
+            "width=84\nheight=200\nborder-size=0\npadding=0\nmargin=0\n\
+             font=Sans 20\nicons=0\nmax-visible=1\nformat=%s\n\
+             [hidden]\nwidth=260\nformat={format}\nbackground-color=#9371B2\n",
+        )).unwrap();
+        let runtime=SharedRuntime::new(config);
+        let first=runtime.store.lock().unwrap().push(Request{
+            summary:"Older hidden".into(),..Request::default()
+        });
+        let second=runtime.store.lock().unwrap().push(Request{
+            summary:"Newer visible".into(),..Request::default()
+        });
+        let projection=visible_projection(&runtime).unwrap();
+        assert_eq!((projection.hidden_count,projection.members.len()),(1,1));
+        assert_eq!(projection.members[0].notification.id,second);
+        assert_ne!(first,second);
+        let entry=&projection.members[0];
+        let modes=["default".to_owned()];
+        let style=style_for_note_index(
+            &runtime,&entry.notification,&modes,entry.group_index
+        );
+        let visible=render_notification_group_with_icon_scale(
+            &entry.notification,&style,0,1,1
+        ).unwrap();
+        let mut hidden_style=runtime.config().global.clone();
+        hidden_style.insert("width".into(),"260".into());
+        hidden_style.insert("format".into(),format.into());
+        hidden_style.insert("background-color".into(),"#9371B2".into());
+        let wide=render_hidden_placeholder_scaled(1,2,&hidden_style,1).unwrap();
+        let mut incorrectly_clamped=hidden_style.clone();
+        incorrectly_clamped.insert("width".into(),"84".into());
+        let narrow=render_hidden_placeholder_scaled(
+            1,2,&incorrectly_clamped,1
+        ).unwrap();
+        assert!(narrow.height>wide.height,
+            "negative control: premature width clamp must introduce extra wrapping");
+        let no_margin=PopupMargins::uniform(0);
+        let reference=compose_mako_stack_with_visible_count(
+            &[visible,wide],&[no_margin,no_margin],StackAlignment::Right,1
+        ).unwrap().unwrap();
+        let actual=snapshot_frame(&runtime).unwrap().unwrap();
+        assert_eq!(actual.width,84,
+            "synthetic overflow cannot widen the real notification canvas");
+        assert_eq!(actual.height,reference.height,
+            "hidden text must contribute height measured at its own configured width");
+        assert_eq!(actual.pixels,reference.pixels,
+            "rendering must clip the original wide hidden bitmap, not relayout it");
+    }
+
+    #[test]
     fn hidden_placeholder_redraw_consumes_mako_id_but_not_active_slot() {
         let runtime=SharedRuntime::new(Config::parse(
             "width=90\nheight=30\nmax-visible=1\n"
