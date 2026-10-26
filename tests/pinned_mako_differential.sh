@@ -354,3 +354,61 @@ fallback_slack=$((xmc/20+20))
   exit 1
 }
 echo 'Pinned Mako/Posthorn malformed sender markup fallback: MATCH'
+
+# Compare the existing T205 Pango fixture at an actual 2x compositor
+# output scale, not a post-hoc enlarged screenshot. In pinned Mako,
+# render.c scales Pango attributes and layout metrics in physical pixels.
+# Both binaries run sequentially on the SAME 2x Sway output.
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+clear_color '#416D98'
+swaymsg -s "$ipc" 'output HEADLESS-1 scale 2' >/dev/null
+scaled_ready=0
+for _ in {1..60}; do
+  if swaymsg -s "$ipc" -t get_outputs >"$root/two-x-outputs.json" &&
+      grep -Eq '"scale":[[:space:]]*2(\\.0+)?[,}]' "$root/two-x-outputs.json"; then
+    scaled_ready=1; break
+  fi
+  sleep 0.15
+done
+[[ "$scaled_ready" == 1 ]] || {
+  echo 'Private compositor did not apply scale 2'
+  cat "$root/two-x-outputs.json"
+  exit 1
+}
+./target/debug/posthorn --experimental-private-desktop "$root/markup.conf" \
+  >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.posthorn.Development
+markup_notify org.posthorn.Development
+post_two_x="$(markup_measure posthorn-two-x org.posthorn.Development)"
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+clear_color '#416D98'
+"$mako_binary" -c "$root/markup.conf" >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.freedesktop.Notifications
+markup_notify org.freedesktop.Notifications
+mako_two_x="$(markup_measure mako-two-x org.freedesktop.Notifications)"
+read -r tp0 tp1 tp2 tp3 tpc <<< "$post_two_x"
+read -r tm0 tm1 tm2 tm3 tmc <<< "$mako_two_x"
+tpw=$((tp1-tp0+1)); tph=$((tp3-tp2+1))
+tmw=$((tm1-tm0+1)); tmh=$((tm3-tm2+1))
+echo "Posthorn actual 2x Pango: background $tpw x $tph; text pixels $tpc"
+echo "Mako v1.11.0 actual 2x Pango: background $tmw x $tmh; text pixels $tmc"
+(( tpw>=320 && tmw>=320 && tph>=80 && tmh>=80 && tpc>=50 && tmc>=50 )) || {
+  echo 'Actual compositor 2x output did not paint full popup or text'
+  exit 1
+}
+(( (tpw-tmw)<=2 && (tmw-tpw)<=2 && (tph-tmh)<=2 && (tmh-tph)<=2 )) || {
+  echo 'Pinned Mako/Posthorn actual 2x Pango geometry differs'
+  exit 1
+}
+# Use the same narrow cross-executable tolerance as the 1x fixture;
+# print both raw pixel counts before the assertion for diagnosis.
+two_x_slack=$((tmc/20+20))
+(( (tpc-tmc)<=two_x_slack && (tmc-tpc)<=two_x_slack )) || {
+  echo "Pinned Mako/Posthorn 2x text coverage differs by more than $two_x_slack pixels"
+  exit 1
+}
+echo 'Pinned Mako/Posthorn actual compositor 2x Pango markup: MATCH'
