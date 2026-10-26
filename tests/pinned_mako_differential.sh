@@ -1398,7 +1398,7 @@ for impl in posthorn mako; do
   # T104/T303: an invalid, newly reappearing high-priority
   # candidate must reject Reload atomically, rather than silently
   # choosing defaults or replacing the already painted built-in style.
-  printf 'width=invalid\\n' >"$root/default-home/.mako/config"
+  printf 'width=invalid\n' >"$root/default-home/.mako/config"
   if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
     "$bus" /fr/emersion/Mako fr.emersion.Mako Reload \
     >"$root/$impl-default-restored-invalid.log" 2>&1; then
