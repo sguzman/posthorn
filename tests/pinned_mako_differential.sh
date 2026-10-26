@@ -2361,3 +2361,83 @@ done
 diff -u "$root/posthorn-app-sound.events" "$root/mako-app-sound.events"
 echo 'Pinned Mako/Posthorn app-specific category sound suppression: MATCH'
 
+# T502: closing a category notification into Mako history then
+# RestoreNotification must not replay its on-notify=exec command.
+# A genuinely new Notify afterwards must execute its hook exactly
+# once. Compare original Mako and Posthorn via temporary event files.
+for impl in posthorn mako;do
+  marker="$root/$impl-restore-sound.events"
+  config="$root/$impl-restore-sound.conf"
+  cat >"$config" <<EOF_RESTORE_SOUND
+width=195
+height=100
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=8
+max-history=6
+history=1
+default-timeout=0
+format=%s
+on-notify=none
+[category=warning]
+background-color=#715536
+on-notify=exec printf 'warning:%s\n' "\$id" >> "$marker"
+[mode=quiet]
+on-notify=none
+EOF_RESTORE_SOUND
+  if [[ "$impl" == posthorn ]];then
+    ./target/debug/posthorn --experimental-private-desktop \
+      "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  first="$(sound_notify_category "$bus" warning)"
+  sound_wait_count "$marker" 1
+  [[ "$(tail -n 1 "$marker")" == "warning:$first" ]] || exit 1
+  cp "$marker" "$root/$impl-restore-sound-before.events"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /org/freedesktop/Notifications org.freedesktop.Notifications \
+    CloseNotification u "$first" >/dev/null || {
+    echo "$impl did not archive warning notification" >&2
+    cat "$root/daemon.log" >&2;exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako RestoreNotification >/dev/null || {
+    echo "$impl rejected history restoration" >&2
+    cat "$root/daemon.log" >&2;exit 1
+  }
+  sleep 0.25
+  cmp -s "$marker" "$root/$impl-restore-sound-before.events" || {
+    echo "$impl replayed warning hook on history restore" >&2
+    diff -u "$root/$impl-restore-sound-before.events" "$marker" >&2 || true
+    exit 1
+  }
+  restored="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako ListNotifications)"
+  [[ "$restored" == *"Category warning"* ]] || {
+    echo "$impl failed to restore the actual warning notification" >&2
+    echo "$restored" >&2;exit 1
+  }
+  second="$(sound_notify_category "$bus" warning)"
+  [[ "$second" != "$first" ]] || {
+    echo "$impl reused the restored ID for an unrelated fresh Notify" >&2;exit 1
+  }
+  sound_wait_count "$marker" 2
+  [[ "$(tail -n 1 "$marker")" == "warning:$second" ]] || {
+    echo "$impl did not resume hook after restoring history" >&2
+    cat "$marker" >&2;exit 1
+  }
+  echo "$impl archived/restored category notification without replaying sound: MATCH"
+  kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+diff -u "$root/posthorn-restore-sound.events" "$root/mako-restore-sound.events"
+echo 'Pinned Mako/Posthorn restored category sound hook suppression: MATCH'
+
