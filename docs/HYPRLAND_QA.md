@@ -19,7 +19,14 @@ Wayland compositor socket, and runs Posthorn on its private
 Direct `--inside` invocation is rejected unless the parent has supplied
 the original bus address and checked owner. The child also compares
 the two bus daemon GUIDs to prove that its private session is **not**
-the original bus, even if address strings are misleading.
+the original bus, even if address strings are misleading. It asserts
+that `org.freedesktop.Notifications` has **no owner** on the isolated
+bus both before and after the private notification lifecycle. It also
+resolves the unique owner of `org.posthorn.Development` via the
+D-Bus daemon and checks that its process ID matches the exact
+Posthorn process started by the harness. Unexpected public-name
+ownership or a foreign private owner fails QA without touching the
+original session.
 
 Before launching Posthorn, the runner captures an ephemeral baseline
 screenshot. It sends a Freedesktop `Notify`, verifies the resulting
