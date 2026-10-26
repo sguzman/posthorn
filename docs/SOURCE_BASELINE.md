@@ -4572,41 +4572,42 @@ P1 **96.2% → 96.4%**; strict 24-task M0
 T503 physical Hyprland remains 51%; the separately authorized
 reversible Mako cutover T504 remains 0%.
 
-## Hidden-count placeholder preserves configured Pango width before clipping (2026-10-26)
+## Correction: hidden text clamps to compositor-confirmed surface width (2026-10-26)
 
-Pinned Mako v1.11.0 `render.c:442-484` creates a hidden
-pseudo-notification, applies its own `[hidden]` style, and calls
-`render_notification()` using that style's original width. The
-returned `rendered_width` is **only** `max_width` accumulated
-from real notifications (`render.c:424-430`). The compositor
-therefore clips the hidden pseudo-notification to the real canvas,
-but the hidden text's **wrapping and height** were already measured
-using the full hidden style width.
+**Supersedes the previous entry at this location.** The 7ba8436 /
+07ccdc9 implementation and green CI originally earned T105 +1 point
+for preserving an unclamped `[hidden]` width. That interpretation
+was **incorrect**: upstream Mako v1.11.0 `render.c:113-115` sets
+`notif_width = min(style->width, surface->width)` BEFORE constructing
+the Pango layout (lines 139-159). This applies to the synthetic
+hidden-count notification passed through the same renderer at
+`render.c:442-474`. While `render.c:424-430,482` excludes the
+hidden placeholder from the requested canvas width, the compositor
+confirms that requested surface size and stores it in
+`wayland.c:361-379`; subsequent drawing is constrained by the
+confirmed width. The old section omitted that essential bound.
 
-Posthorn previously reduced a wider `[hidden] width` to the
-real canvas width *before* invoking Pango. This could wrap a
-wide single-line overflow label into several lines and increase
-the final stack height, contradicting Mako. The correction
-preserves the hidden style and uses the existing
-`compose_mako_stack_with_visible_count` crop to clip the painted
-pixels, rather than changing glyph layout constraints.
+[Correction cb0074e](https://github.com/sguzman/posthorn/commit/cb0074e5cf019dec86a34d7ac5a714aae0b59e4d)
+restores the source-backed surface-width clamp before Pango. The
+negative-control raster test was inverted:
+`desktop::tests::wider_hidden_style_is_clamped_to_configured_surface_before_pango`
+now requires the narrow, surface-bounded raster including its extra
+wrapping and verifies that the unconstrained wide rendering differs.
+The configured-surface width is calculated from real notifications,
+not the synthetic hidden frame. Actual compositor-forced sizes below
+the requested size remain a separate physical/compositor acceptance
+gap; no all-display-size parity is implied.
 
-[Implementation 7ba8436](https://github.com/sguzman/posthorn/commit/7ba843695a9ef09e5d7c806de85c81eb15a41279) ·
-[negative-control raster regression 07ccdc9](https://github.com/sguzman/posthorn/commit/07ccdc919a7eb8c630c6f6863b1fe481f2a7f4f3) ·
-[fully green two-job CI 40328202952](https://github.com/sguzman/posthorn/actions/runs/40328202952):
-**349 Rust library tests, 100 private D-Bus tests, and the complete
-isolated Wayland acceptance suite passed**.
+The formerly credited task increment was invalid and is withdrawn:
+**T105 96% → 95% (-1 pp), P1 96.6% → 96.4% (-0.2 pp),
+strict M0 90.958% → 90.917% (-0.042 pp)**.
+This is an evidence correction, not lost working functionality.
+The earlier live Sway `max-visible=0 ↔ 1` acceptance remains valid
+and is unaffected. Physical Hyprland T503 remains 51% and the
+explicitly authorized reversible production cutover T504 remains 0%.
 
-The new
-`desktop::tests::wider_hidden_placeholder_uses_full_pango_width_then_clips_to_real_canvas`
-renders the same long hidden message at both its configured wide
-width and the former narrow substitute. It proves that narrowing
-causes additional wrapping, then compares the entire composed
-frame pixel-for-pixel with the source-matched original-width
-hidden bitmap cropped to the real notification canvas.
-
-**T105 layout/style 95% → 96%; P1 96.4% → 96.6%;
-strict 24-task M0 90.917% → 90.958% (+0.042 pp).**
-These are private raster and compositor tests, not physical
-Hyprland acceptance. Real T503 remains 51%, separately
-authorized production Mako cutover T504 remains 0%.
+The isolated Wayland suite for the corrected implementation passed
+in [CI 40330397284](https://github.com/sguzman/posthorn/actions/runs/40330397284);
+the separate Rust job was still at dependency installation at the
+time of this source-accounting correction, so complete exact-SHA
+CI success is **not claimed** here.
