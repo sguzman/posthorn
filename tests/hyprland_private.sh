@@ -240,5 +240,44 @@ listed_after="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListNotifications)"
 [[ "$listed_after" != *'Temporary QA popup'* ]] ||
   die 'closed notification remains active on the private control API'
+
+# T503 physical compositor expiry: an actual expiring notification must
+# appear, stay on the private name, and vanish after its own timer fires.
+# Unlike an immediate CloseNotification, this probes the real
+# Wayland notification lifecycle with its event/timer scheduling.
+timed_reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /org/freedesktop/Notifications \
+  org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+  'Posthorn private expiry QA' 0 '' 'Synthetic expiry popup' '' 0 0 9000)"
+[[ "$timed_reply" == u\ * ]] ||
+  die "private timed Notify returned an unexpected reply: $timed_reply"
+timed_visible=0
+for _ in {1..40};do
+  timeout --signal=TERM --kill-after=2s 5s grim "$root/timed-visible.png" ||
+    die 'timed popup screenshot failed'
+  if ./target/debug/examples/qa_png_probe \
+      "$root/timed-visible.png" '#307E47' 500 increase "$root/baseline.png" >/dev/null 2>&1;then
+    timed_visible=1;break
+  fi
+  sleep 0.15
+done
+[[ "$timed_visible" == 1 ]] ||
+  die 'timed private notification never appeared on real Hyprland'
+timed_gone=0
+for _ in {1..85};do
+  timeout --signal=TERM --kill-after=2s 5s grim "$root/timed-after-expiry.png" ||
+    die 'expiry screenshot failed'
+  if ./target/debug/examples/qa_png_probe \
+      "$root/timed-after-expiry.png" '#307E47' 60 restored "$root/baseline.png" >/dev/null 2>&1;then
+    timed_gone=1;break
+  fi
+  sleep 0.15
+done
+[[ "$timed_gone" == 1 ]] ||
+  die 'private notification did not expire from the real compositor'
+after_expiry="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListNotifications)"
+[[ "$after_expiry" != *'Synthetic expiry popup'* ]] ||
+  die 'expired notification remains active in the private D-Bus control API'
 assert_no_public_owner
-printf 'PASS: private Hyprland popup appeared, restyled, and disappeared on screenshots and control bus\n'
+printf 'PASS: private Hyprland popup appeared, restyled, closed, and expired on screenshots and control bus\n'
