@@ -1409,3 +1409,93 @@ done
   "$root/posthorn-default-builtin.png" '#285577' 0 identical \
   "$root/mako-default-builtin.png"
 echo 'Pinned Mako/Posthorn implicit legacy/XDG/built-in config rediscovery and Reload: MATCH'
+
+
+# Pinned dbus/xdg.c:handle_notify reuses an ID while recomputing the
+# group-by match on replacements. The same secondary notification leaves
+# its app group and later rejoins, on the private bus and compositor only.
+cat >"$root/group-replacement.conf" <<'EOF_REPLACEMENT'
+width=205
+height=125
+font=Sans 17
+margin=0
+padding=4
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=Group %g / %s
+group-by=app-name
+background-color=#416D98
+text-color=#E5C58B
+[group-index=1]
+invisible=1
+EOF_REPLACEMENT
+group_replacement_notify(){
+  local bus="$1" app="$2" id="$3" summary="$4" reply
+  reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /org/freedesktop/Notifications org.freedesktop.Notifications \
+    Notify 'susssasa{sv}i' "$app" "$id" '' "$summary" '' 0 0 30000)"
+  [[ "$reply" == u\ * ]] || { echo "group replacement Notify failed: $reply";exit 1; }
+  echo "${reply#u }"
+}
+capture_group_replacement(){
+  local impl="$1" stage="$2" prev="${3:-}" current stable=0
+  current="$root/$impl-group-replace-$stage.png"
+  for _ in {1..70}; do
+    if grim "$current" 2>/dev/null &&
+       ./target/debug/examples/qa_png_probe \
+         "$current" '#416D98' 400 bounds >/dev/null 2>&1; then
+      if [[ -n "$prev" ]] &&
+         ./target/debug/examples/qa_png_probe \
+           "$current" '#416D98' 0 identical "$prev" >/dev/null 2>&1; then
+        stable=0
+      elif [[ -f "$root/$impl-group-previous.png" ]] &&
+         ./target/debug/examples/qa_png_probe \
+           "$current" '#416D98' 0 identical \
+           "$root/$impl-group-previous.png" >/dev/null 2>&1; then
+        stable=$((stable+1))
+      else
+        stable=0
+      fi
+      if ((stable>=3));then return 0;fi
+      cp "$current" "$root/$impl-group-previous.png"
+    fi
+    sleep 0.15
+  done
+  echo "$impl group replacement $stage never reached a changed stable raster"
+  exit 1
+}
+for impl in posthorn mako; do
+  clear_color '#416D98'
+  if [[ "$impl" == posthorn ]];then
+    ./target/debug/posthorn --experimental-private-desktop \
+      "$root/group-replacement.conf" >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$root/group-replacement.conf" >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  id1="$(group_replacement_notify "$bus" 'Pinned Group A' 0 'Stable leader')"
+  id2="$(group_replacement_notify "$bus" 'Pinned Group A' 0 'Secondary')"
+  [[ "$id1" != "$id2" ]] || { echo "duplicate group IDs";exit 1; }
+  capture_group_replacement "$impl" grouped
+  before="$root/$impl-group-replace-grouped.png"
+  replacement="$(group_replacement_notify "$bus" 'Pinned Group B' "$id2" 'Changed app')"
+  [[ "$replacement" == "$id2" ]] || { echo "replace changed ID";exit 1; }
+  capture_group_replacement "$impl" split "$before"
+  split="$root/$impl-group-replace-split.png"
+  restored="$(group_replacement_notify "$bus" 'Pinned Group A' "$id2" 'Returned group')"
+  [[ "$restored" == "$id2" ]] || { echo "regroup changed ID";exit 1; }
+  capture_group_replacement "$impl" regrouped "$split"
+  kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+for stage in grouped split regrouped; do
+  ./target/debug/examples/qa_png_probe \
+    "$root/posthorn-group-replace-$stage.png" '#E5C58B' 0 identical \
+    "$root/mako-group-replace-$stage.png"
+  echo "Pinned Mako/Posthorn grouped ID replacement $stage: MATCH"
+done
