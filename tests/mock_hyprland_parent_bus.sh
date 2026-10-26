@@ -12,8 +12,8 @@ cat >"$root/bin/busctl" <<'EOF_BUSCTL'
 #!/usr/bin/env bash
 [[ " $* " == *" GetId "* ]] || exit 89
 case "${1:-}" in
-  --user) printf 's "original-user-bus-guid"\\n' ;;
-  --address=*) printf 's "mismatched-pinned-bus-guid"\\n' ;;
+  --user) printf 's "original-user-bus-guid"\n' ;;
+  --address=*) printf 's "mismatched-pinned-bus-guid"\n' ;;
   *) exit 90 ;;
 esac
 EOF_BUSCTL
