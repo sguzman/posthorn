@@ -5344,3 +5344,43 @@ These results prove only isolated config selection and
 Reload equivalence, not physical Hyprland T503 (51%)
 or production cutover T504 (0%). Installed Mako,
 its public D-Bus name and user HOME are untouched.
+
+## Source-pinned replacement-ID group split and rejoin semantics (2026-10-26)
+
+Pinned `dbus/xdg.c:handle_notify` reuses an existing
+notification ID while updating its application name, then
+reapplies the notification's group-by criteria without
+allocating a new ID. `notification.c:group_notifications`
+assigns group indices and counts after every matching pass.
+Posthorn's store already preserved explicit replacement
+identity and group metadata, but the full compositor sequence
+had not been compared against original Mako.
+
+A permanent guarded fixture configures `group-by=app-name`,
+`format=Group %g / %s`, an invisible secondary member, and
+`max-visible=1`. On one **isolated scale-2 Sway compositor**
+and private D-Bus session, both daemons independently execute:
+
+1. Two different IDs arrive from the same app and form a group.
+2. The secondary ID is replaced by a notification from a
+   different app, leaving its original group without changing ID.
+3. That same ID is replaced again with its original app name,
+   rejoining the former group.
+
+The fixture requires all three states to become stable *and*
+requires the split and rejoin to change the displayed image.
+Each **entire decoded screenshot** matched the corresponding
+original Mako screenshot with **zero differing pixels**.
+
+[Permanent executable comparison `9ca40eb`](https://github.com/sguzman/posthorn/commit/9ca40ebbd7762eba98ccfe7215db66c47833caea) ·
+[green pinned-Mako differential 40383427830](https://github.com/sguzman/posthorn/actions/runs/40383427830) ·
+[green full Rust/isolated Wayland CI 40383427898](https://github.com/sguzman/posthorn/actions/runs/40383427898).
+
+**Conservative T103 source grouping acceptance: 94% → 95%
+(+1 pp); P1 97.6% → 97.8% (+0.2 pp); strict
+24-task M0 91.792% → 91.833% (+0.042 pp).**
+T204 remains 99% because this fixture does not establish
+universal group replacement/close/sort behavior. Physical
+Hyprland T503 stays 51%, authorized production cutover
+T504 stays 0%. Installed Mako and its public bus
+were never contacted.
