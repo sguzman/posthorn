@@ -5440,3 +5440,42 @@ these are bounded Reload acceptance cases, not proof of
 universal file/path behavior. Physical Hyprland T503
 remains 51%, production cutover T504 remains 0%. Neither
 installed Mako nor the user's real session was touched.
+
+## Explicit -c path remains pinned across unrelated HOME default changes (2026-10-26)
+
+Pinned Mako v1.11.0 `config.c:parse_config_arguments` selects an
+explicit `-c` file before implicit default discovery and repeats
+that argument selection during `reload_config`. Posthorn's private
+desktop must therefore keep the explicit path fixed on Reload,
+even when `~/.mako/config` changes, while still rediscovering the
+latest contents of its selected `-c` file.
+
+The guarded executable test uses synthetic disposable HOME/XDG,
+one isolated actual-scale-2 Sway compositor and a private D-Bus
+session. Posthorn and original Mako independently:
+
+1. Start with `-c` pointing to a separate config whose painted
+   background is `#705098`, plus `--width=205`. Both show
+   physical popup bounds `870 1279 0 127` (410 px wide).
+2. Change the implicit legacy HOME file and call
+   `fr.emersion.Mako.Reload`. The explicit-path popup
+   remains **byte-for-byte identical** to its initial raster.
+3. Modify only the explicitly selected config, call Reload
+   again, and verify that its `#2A7F9B` replacement color
+   appears while its overridden 410 px width is retained.
+
+Both implementations passed every transition, and full decoded
+screenshots of the initial, unaffected and changed states had
+**zero differing pixels** in their independent source comparison.
+
+[Executable regression 99369a0](https://github.com/sguzman/posthorn/commit/99369a0736daf01458fb36a212cce46660eac38a) ·
+[Green pinned-Mako differential 40387586952](https://github.com/sguzman/posthorn/actions/runs/40387586952) ·
+[Green Rust/isolated Wayland 40387586986](https://github.com/sguzman/posthorn/actions/runs/40387586986).
+
+**Accepted T303 92% → 93% (+1 pp), P3
+96.667% → 97.000%, strict 24-task M0
+91.958% → 92.000% (+0.042 percentage points).**
+T104 remains 98%, physical Hyprland T503
+51%, and authorized production switch T504 0%.
+No active Mako, workstation configuration or
+production D-Bus ownership was changed.
