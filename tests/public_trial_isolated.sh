@@ -121,12 +121,22 @@ owner_pid="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
 }
 # A second armed process cannot queue behind the first one. It must fail
 # immediately, and the first owner must remain the owner.
-if POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 \
+# Returning a timeout status would indicate a queued/hung contender,
+# not a real DoNotQueue refusal. Fail rather than accept it as safety.
+contender_status=0
+POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 \
   POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
-  timeout 12s ./target/debug/posthorn --reversible-production-trial \
-  -c "$root/config" >"$root/contender.log" 2>&1;then
-  echo 'Second public-name trial incorrectly succeeded' >&2;exit 1
+  timeout 5s ./target/debug/posthorn --reversible-production-trial \
+  -c "$root/config" >"$root/contender.log" 2>&1 || contender_status=$?
+if [[ "$contender_status" == 0 || "$contender_status" == 124 || "$contender_status" == 137 ]];then
+  echo "Second public-name trial did not reject owner collision cleanly (exit $contender_status)" >&2
+  cat "$root/contender.log" >&2
+  exit 1
 fi
+grep -q 'Posthorn trial failed:' "$root/contender.log" || {
+  echo 'Collision did not fail through standard-name registration' >&2
+  cat "$root/contender.log" >&2;exit 1
+}
 [[ "$(name_has_owner org.freedesktop.Notifications)" == 'b true' ]] || exit 1
 same="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
   org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
