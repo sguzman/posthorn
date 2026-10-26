@@ -1449,8 +1449,8 @@ mod tests {
             assert_eq!(measured,220,
                 "two true 110px borders, not two clamped 100px borders");
             let frame=render_notification_group_scaled(&note,&style,0,scale).unwrap();
-            assert_eq!((frame.width,frame.height),(200,220),
-                "painting and text measurement must agree at {scale}x");
+            assert_eq!((frame.width,frame.height),(200*scale,220*scale),
+                "physical framebuffer dimensions must follow {scale}x");
             assert_eq!(frame.pixels.len(),
                 200usize*220usize*4usize*(scale as usize).pow(2));
         }
