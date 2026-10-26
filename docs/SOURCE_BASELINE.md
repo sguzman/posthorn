@@ -3997,15 +3997,20 @@ correction, not an unbounded memory allocation allowance.
 
 A source-derived fixture uses `width=200`, `height=90`,
 `padding=0`, `border-size=110`, `format=%s`, no icon,
-and empty summary/body. Mako measures the resulting popup as
-**200×220 logical pixels**, since it retains the full pair
-of 110px borders, not 200×200 as the previous Posthorn half-width
-clamp did. The regression asserts that measurement and actual
-raster dimensions agree at both 1× and 2× output scales,
-including correct physical pixel-buffer lengths.
+and empty summary/body. The source's **signed** Pango text-height
+limit is `90 - 2*110 = -130`, so Mako clamps the empty text
+height to `-130` and calculates final popup height as
+`-130 + 2*110 = 90`. The resulting popup is therefore
+**200×90 logical pixels**, with the full 110px border still passed
+to Cairo for the path and stroke. The earlier 200×220 assertion
+was incorrect: it arose from Posthorn clamping the signed text
+height prematurely and was accepted by CI before a direct source
+comparison exposed the discrepancy. The corrected regression
+asserts dimensions at both 1× and 2× scales.
 
 - [Pinned Mako config.c and render.c](https://github.com/emersion/mako/blob/v1.11.0/render.c#L99-L225)
 - [Accepted implementation and final test 5bafb1d](https://github.com/sguzman/posthorn/commit/5bafb1d4ebcd83cb550df851eda9729572b0b375)
+- [Source-corrected signed-height regression 0133812](https://github.com/sguzman/posthorn/commit/01338124d864c44918ca3a79c0c42b51102f17e7)
 - [Fully green Rust / D-Bus / isolated Wayland CI 40250768590](https://github.com/sguzman/posthorn/actions/runs/40250768590):
   **344 Rust library tests, 90 private D-Bus tests,
   complete headless compositor suite**.
@@ -4109,3 +4114,41 @@ strict 24-task M0 **90.333% → 90.375%
 physical Hyprland QA remains 51%, and T504
 production cutover remains 0%. No real notification
 service, user configuration, audio routing or live bus was changed.
+
+## Signed Pango height limits and oversized Mako borders (2026-10-25)
+
+Mako v1.11.0 `render.c:139-155` constructs signed Pango text
+layout dimensions by subtracting twice the configured border size,
+padding, and any icon offsets from the configured width/height.
+It passes those signed values **without clamping to a 1px minimum**.
+After querying the Pango layout, `render.c:192-199` computes
+`text_height = min(buffer_text_height / scale, text_layout_height)`,
+even if that cap is **negative**, and adds both borders and
+padding to obtain the popup's logical height.
+
+Posthorn previously clamped both available Pango dimensions to
+`1..4096` while measuring, and applied another 1px minimum
+during painting. This changed valid notifications whose configured
+height or width was smaller than their surrounding border/padding.
+The new implementation preserves signed Pango dimensions, with
+arithmetic saturation restricted to the safe Pango i32 range.
+An empty-text `height=40, border-size=30, padding=0`
+notification has `text_layout_height = -20`, yielding
+`-20 + 60 = 40` logical pixels. A companion source
+fixture corrects the earlier wrongly accepted
+`height=90, border-size=110` assertion from 220 to **90**.
+The tests also exercise 1x and 2x physical rasters.
+
+- [Pinned Mako render.c:139-155,192-199](https://github.com/emersion/mako/blob/v1.11.0/render.c#L139-L199)
+- [Signed text layout correction ce4e61b](https://github.com/sguzman/posthorn/commit/ce4e61b95ade36186b3a60c46dc0f7b88da6bb33)
+- [Corrected older border regression 0133812](https://github.com/sguzman/posthorn/commit/01338124d864c44918ca3a79c0c42b51102f17e7)
+- [Rust + private D-Bus regression CI 40256739010](https://github.com/sguzman/posthorn/actions/runs/40256739010):
+  **347 Rust library tests and 90 private D-Bus tests passed**.
+  The headless Wayland acceptance job was still pending when
+  this correction to the written evidence was committed.
+
+The prior 200×220 source assertion was **incorrect** even though
+the old CI was green. It must not be cited as Mako parity evidence.
+The thick-border no-half-width-clamp change remains relevant, but
+the combined border and Pango measurement behavior is only credited
+after the complete new acceptance gate is green.
