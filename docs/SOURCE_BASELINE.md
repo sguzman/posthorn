@@ -4158,3 +4158,49 @@ strict M0 (24 tasks) raw **90.375% → 90.417%
 (+0.042 pp)**. T503 physical Hyprland acceptance
 remains 51% and T504 opt-in production cutover remains 0%.
 No production notification bus or personal desktop was modified.
+
+## Category sound-hook direct replacement across quiet mode (2026-10-25)
+
+Mako v1.11.0 `dbus/xdg.c:106-113` resets an existing notification
+object when a `Notify` call supplies its active `replaces_id`.
+It then rematches category and active modes, regroups and runs
+`notification_execute_binding` for **each new Notify call**
+(`dbus/xdg.c:385-430`). A Mako sound integration is a configured
+`on-notify=exec` shell command, not a new built-in audio subsystem
+(`notification.c:381-435`). On the other hand, `SetMode`
+(`dbus/mako.c:337-350`) and `SetModes` reapply criteria to
+existing notifications **without executing on-notify**.
+Valid `[mode=quiet]\non-notify=none` must suppress category
+commands without discarding the notification.
+
+A new isolated private D-Bus regression exercises an active
+notification's ID across these stages, each via an actual
+`org.freedesktop.Notifications.Notify` call:
+(1) initial `category=success` writes `success:ID` to a
+temporary command-output file; (2) explicit replacement with
+`category=warning` writes `warning:ID`, retaining the ID;
+(3) quiet mode via private `SetMode` suppresses a new replacement's
+sound; (4) leaving quiet mode via `SetMode` cannot replay that
+suppressed sound; (5) a subsequent warning replacement resumes the
+category sound exactly once, still with the original ID.
+The active store remains at one notification across replacements.
+The test uses a local file-backed command, not a paid audio service,
+installed Mako, speakers, or the production bus.
+
+- [Pinned Mako notification replacement and hook ordering](https://github.com/emersion/mako/blob/v1.11.0/dbus/xdg.c#L106-L113)
+- [Pinned Mako notify binding execution](https://github.com/emersion/mako/blob/v1.11.0/dbus/xdg.c#L385-L430)
+- [Pinned Mako mode reapply without hooks](https://github.com/emersion/mako/blob/v1.11.0/dbus/mako.c#L302-L350)
+- [Accepted private D-Bus sound/quiet regression 885671a](https://github.com/sguzman/posthorn/commit/885671a7c457710546a0235a084042fe259fc31d)
+- [Accepted complete CI 40258277057](https://github.com/sguzman/posthorn/actions/runs/40258277057):
+  **347 Rust library tests, 91 private D-Bus tests and the
+  complete isolated Wayland acceptance suite**.
+
+**Accepted progress:** T502 **77% → 78% (+1 pp)**;
+category/sound feature inventory **77% → 78%**;
+P5 raw **56.75% → 57.00% (+0.25 pp)**;
+strict 24-task M0 **90.417% → 90.458% (+0.042 pp)**.
+This is reproducible hook-routing compatibility, not
+physical speakers/audio-pipeline testing. T503 physical Hyprland
+QA remains **51%** and T504 opt-in reversible production
+cutover remains **0%**. No installed notification daemon,
+live bus or user configuration was touched.
