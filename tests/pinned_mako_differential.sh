@@ -1879,3 +1879,82 @@ done
 diff -u "$root/posthorn-ordered-sound.events" "$root/mako-ordered-sound.events"
 echo 'Pinned Mako/Posthorn source-ordered category/quiet hooks across Reload: MATCH'
 
+# T502: source Mako notification.c executes on-notify=exec in a
+# double-fork, so a shell/player exit 27 cannot reject Notify,
+# discard the notification or prevent a subsequent sound hook.
+# Exercise the real executable, not just a Rust unit test. The command
+# is a harmless temporary file write followed by an intentional error.
+for impl in posthorn mako; do
+  marker="$root/$impl-failed-sound.events"
+  config="$root/$impl-failed-sound.conf"
+  cat >"$config" <<EOF_FAILED_HOOK
+width=185
+height=100
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=8
+default-timeout=0
+format=%s
+on-notify=none
+[category=warning]
+background-color=#715536
+on-notify=exec printf 'failed:%s\n' "\$id" >> "$marker"; exit 27
+[mode=quiet]
+on-notify=none
+EOF_FAILED_HOOK
+  if [[ "$impl" == posthorn ]];then
+    ./target/debug/posthorn --experimental-private-desktop \
+      "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  first="$(sound_notify_category "$bus" warning)"
+  sound_wait_count "$marker" 1
+  [[ "$(tail -n 1 "$marker")" == "failed:$first" ]] || {
+    echo "$impl did not run its intentionally failing first hook" >&2
+    cat "$marker" >&2;exit 1
+  }
+  second="$(sound_notify_category "$bus" warning)"
+  [[ "$second" != "$first" ]] || {
+    echo "$impl reused the ID after a failed hook" >&2;exit 1
+  }
+  sound_wait_count "$marker" 2
+  [[ "$(tail -n 1 "$marker")" == "failed:$second" ]] || {
+    echo "$impl did not run the next hook after a nonzero exit" >&2
+    cat "$marker" >&2;exit 1
+  }
+  cp "$marker" "$root/$impl-failed-before-quiet.events"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetMode s quiet >/dev/null
+  sound_notify_category "$bus" warning >/dev/null
+  sleep 0.35
+  cmp -s "$marker" "$root/$impl-failed-before-quiet.events" || {
+    echo "$impl invoked a failed sound hook in quiet mode" >&2
+    cat "$marker" >&2;exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetMode s default >/dev/null
+  third="$(sound_notify_category "$bus" warning)"
+  sound_wait_count "$marker" 3
+  [[ "$(tail -n 1 "$marker")" == "failed:$third" ]] || {
+    echo "$impl did not recover a hook after leaving quiet mode" >&2
+    cat "$marker" >&2;exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s introspect \
+    "$bus" /org/freedesktop/Notifications >/dev/null || {
+    echo "$impl lost its bus name after nonzero hook exit" >&2;exit 1
+  }
+  echo "$impl nonzero-exit sound hook: Notify survives, quiet suppresses, later hook runs"
+  kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+diff -u "$root/posthorn-failed-sound.events" "$root/mako-failed-sound.events"
+echo 'Pinned Mako/Posthorn failed category hook exit and subsequent quiet lifecycle: MATCH'
+
