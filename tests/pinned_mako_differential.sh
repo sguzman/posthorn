@@ -133,3 +133,33 @@ echo "Pinned Mako hidden bounds: $mako_bounds ($mw x $mh)"
   echo 'Source-pinned Mako/Posthorn hidden-label geometry differs'; exit 1;
 }
 echo 'Source-pinned Mako/Posthorn hidden-label geometry: MATCH'
+
+# Non-gating observation of upstream Mako's ambiguous max-visible=0
+# synthetic surface. render.c reports width=0 but nonzero height;
+# wayland.c may attempt a zero-width layer-shell configure. Do NOT
+# silently turn this into a passing source-parity claim. Observe the
+# actual pinned executable and record whether the pixel/color remains.
+sed -i 's/^max-visible=1$/max-visible=0/' "$root/mako.conf"
+if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.freedesktop.Notifications /fr/emersion/Mako fr.emersion.Mako Reload \
+    >"$root/hidden-zero-reload.log" 2>&1; then
+  sleep 0.5
+  if ! kill -0 "$daemon_pid" 2>/dev/null; then
+    echo 'UPSTREAM OBSERVATION max-visible=0: Mako exited after successful Reload'
+    cat "$root/daemon.log"
+  elif grim "$root/hidden-zero.png" 2>/dev/null; then
+    bounds="$(./target/debug/examples/qa_png_probe \
+      "$root/hidden-zero.png" '#9361B2' 1 bounds 2>/dev/null || true)"
+    if [[ -n "$bounds" ]]; then
+      echo "UPSTREAM OBSERVATION max-visible=0: hidden-only pixels at $bounds"
+    else
+      echo 'UPSTREAM OBSERVATION max-visible=0: no hidden-only label pixels'
+    fi
+  else
+    echo 'UPSTREAM OBSERVATION max-visible=0: screenshot unavailable'
+  fi
+else
+  echo 'UPSTREAM OBSERVATION max-visible=0: Reload failed; inspect daemon log'
+  cat "$root/hidden-zero-reload.log"
+  cat "$root/daemon.log"
+fi
