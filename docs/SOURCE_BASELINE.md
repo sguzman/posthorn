@@ -5201,3 +5201,43 @@ strict 24-task M0 **91.500% → 91.583% (+0.083 pp)**.
 Remaining user-workstation physical Hyprland T503 is **51%**;
 authorized reversible production Mako cutover T504 is **0%**.
 These tests establish only the tested isolated source cases.
+
+## Executable Mako config include expansion and nested symlink alias parity (2026-10-26)
+
+T104 now has pinned-Mako **actual compositor executable parity**
+in addition to parser unit regressions for include resolution and
+stacked styles. The test starts Posthorn and original Mako v1.11.0
+independently under one disposable scale-2 Sway compositor and
+private D-Bus, never the installed production notification daemon.
+
+Two independently rendered configurations exercise source
+`config.c:expand_config_path` / `load_config_file`:
+
+1. A **three-level absolute include chain** loads a leaf through a
+   symlink alias, with the middle and root files applying their own
+   ordered width overrides. The source and Posthorn both render
+   the final **422 physical-pixel** popup `858 1279 0 127`,
+   **3,169** text-color pixels and **0 differing decoded
+   screenshot pixels**.
+2. `include=~//tilde-leaf.conf` expands beneath a **disposable
+   HOME**. The root file's width override wins over the leaf,
+   yielding the same **414 physical-pixel** popup `866 1279 0 127`,
+   **3,169** text-color pixels and **0 differing decoded
+   screenshot pixels**.
+
+The fixture verifies each expected width and that meaningful
+text is drawn before comparing the entire PNG's decoded pixel
+channels, preventing a trivially empty screenshot from passing.
+Independent daemon runs never use real HOME or the production
+D-Bus name.
+
+[Committed source-pinned fixture 1de6606](https://github.com/sguzman/posthorn/commit/1de6606115e7ac7188c7a0f71bf6ee142b40c666) ·
+[passing original Mako differential 40376479281](https://github.com/sguzman/posthorn/actions/runs/40376479281) ·
+[passing full Rust and isolated Wayland CI 40376478759](https://github.com/sguzman/posthorn/actions/runs/40376478759).
+
+**Accepted T104 progress:** **94% → 95% (+1 pp)**.
+P1 **97.0% → 97.2%**, strict 24-task M0
+**91.583% → 91.625% (+0.042 pp)**.
+These acceptance cases do not establish all possible include
+filesystems, physical Hyprland T503 (51%), or authorized
+production cutover T504 (0%); live Mako remains unchanged.
