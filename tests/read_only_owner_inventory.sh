@@ -50,7 +50,10 @@ candidate=""
 ambiguous=0
 while IFS= read -r record;do
   cgroup="$(printf '%s\n' "$record" | cut -d ':' -f 3-)"
-  for component in $(printf '%s\n' "$cgroup" | tr '/' ' ');do
+  # Parse cgroup components literally: wildcard characters and spaces
+  # must never undergo shell word splitting or pathname expansion.
+  IFS='/' read -r -a components <<<"$cgroup"
+  for component in "${components[@]}";do
     if [[ "$component" == *.service ]];then
       [[ -z "$candidate" || "$candidate" == "$component" ]] || ambiguous=1
       candidate="$component"
