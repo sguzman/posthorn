@@ -1983,6 +1983,101 @@ async fn reloaded_category_sound_configuration_applies_only_to_new_notifies()
 }
 
 #[tokio::test]
+async fn invalid_reload_retains_last_good_category_sound_and_quiet_mode()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::open_private_service_from_path;
+    // Pinned Mako config.c:993-1019 commits a newly parsed configuration
+    // only after validation; dbus/mako.c:354-368 skips reapply_config when
+    // Reload fails. No category sound/visual rule may partly leak through.
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("config");
+    let marker=dir.path().join("atomic-category-sound-events");
+    let config=|sound:&str,color:&str,width:&str|format!(
+        "width={width}\ndefault-timeout=0\n\
+         [category=warning]\nbackground-color={color}\n\
+         on-notify=exec printf '{sound}:%s\\n' \"$id\" >> '{}'\n\
+         [mode=quiet]\non-notify=none\n",
+        marker.display(),
+    );
+    std::fs::write(&path,config("old","#715536","180"))?;
+    let (conn,runtime)=open_private_service_from_path(&path).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let notify=||{
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from("warning")).unwrap(),
+        )].into();
+        ("invalid-reload-sound",0u32,"","Warning","",
+         Vec::<String>::new(),hints,-1i32)
+    };
+    let wait_for=|expected:String|{
+        let marker=marker.clone();
+        async move{
+            tokio::time::timeout(Duration::from_secs(3),async{
+                loop{
+                    if std::fs::read_to_string(&marker).unwrap_or_default()==expected {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                }
+            }).await
+        }
+    };
+    let first:u32=desktop.call("Notify",&notify()).await?;
+    let first_events=format!("old:{first}\n");
+    wait_for(first_events.clone()).await?;
+
+    std::fs::write(&path,config("rejected","#305747","0"))?;
+    let invalid:zbus::Result<()>=ctl.call("Reload",&()).await;
+    assert!(invalid.is_err(),"width=0 must reject the whole Mako Reload");
+    assert_eq!(runtime.config().global["width"],"180");
+    let active=runtime.store.lock().unwrap().active().front()
+        .cloned().ok_or("initial note disappeared on invalid reload")?;
+    let style=posthorn::desktop::style_for_note(
+        &runtime,&active,&["default".to_owned()]);
+    assert_eq!(style["background-color"],"#715536");
+    assert!(style["on-notify"].contains("old:"),
+        "rejected category hook must not displace the last-good command");
+
+    let second:u32=desktop.call("Notify",&notify()).await?;
+    let old_events=format!("{first_events}old:{second}\n");
+    wait_for(old_events.clone()).await?;
+
+    std::fs::write(&path,config("new","#684148","180"))?;
+    let _:()=ctl.call("Reload",&()).await?;
+    let third:u32=desktop.call("Notify",&notify()).await?;
+    let new_events=format!("{old_events}new:{third}\n");
+    wait_for(new_events.clone()).await?;
+    let latest=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==third).cloned().ok_or("post-Reload note missing")?;
+    let latest_style=posthorn::desktop::style_for_note(
+        &runtime,&latest,&["default".to_owned()]);
+    assert_eq!(latest_style["background-color"],"#684148");
+
+    let _:()=ctl.call("SetMode",&("quiet",)).await?;
+    let quiet:u32=desktop.call("Notify",&notify()).await?;
+    let silent=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==quiet).cloned().ok_or("quiet warning missing")?;
+    let silent_style=posthorn::desktop::style_for_note(
+        &runtime,&silent,&["quiet".to_owned()]);
+    assert_eq!(silent_style["on-notify"],"none");
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,new_events,
+        "quiet mode must still silence recovered category sound commands");
+    let _:()=ctl.call("SetMode",&("default",)).await?;
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,new_events,
+        "leaving quiet mode cannot replay the suppressed sound");
+
+    let after:u32=desktop.call("Notify",&notify()).await?;
+    wait_for(format!("{new_events}new:{after}\n")).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),5);
+    Ok(())
+}
+
+#[tokio::test]
 async fn category_sound_stack_tag_updates_honor_quiet_mode_and_app_scope()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
