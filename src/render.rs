@@ -1964,7 +1964,11 @@ mod tests {
         let logical=render_notification_group_scaled(&note,&style,0,1).unwrap();
         let native=render_notification_group_scaled(&note,&style,0,2).unwrap();
         assert_eq!(native.width,logical.width*2);
-        assert_eq!(native.height,logical.height*2);
+        let source_height=measure_notification_height_group_at_output_scale(
+            &note,&style,0,2,2,OutputSubpixel::Unknown
+        ).unwrap();
+        assert_eq!(native.height,source_height*2,
+            "Mako scales font metrics before truncating to logical height");
         assert_eq!(native.stride,native.width as i32*4);
         let stretched=crate::wayland::scale_frame(&logical,2).unwrap();
         // Glyph edges rendered directly at 2x must not be pixel copies of
@@ -1973,7 +1977,10 @@ mod tests {
         assert!(render_notification_group_scaled(&note,&style,0,0).is_err());
         let scale_nine=render_notification_group_scaled(&note,&style,0,9).unwrap();
         assert_eq!(scale_nine.width,logical.width*9);
-        assert_eq!(scale_nine.height,logical.height*9);
+        let source_nine=measure_notification_height_group_at_output_scale(
+            &note,&style,0,9,9,OutputSubpixel::Unknown
+        ).unwrap();
+        assert_eq!(scale_nine.height,source_nine*9);
         assert!(render_notification_group_scaled(&note,&style,0,4096).is_err());
     }
 

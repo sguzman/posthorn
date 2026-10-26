@@ -1501,7 +1501,15 @@ mod tests {
         });
         let one=snapshot_frame_scaled(&runtime,1).unwrap().unwrap();
         let two=snapshot_frame_scaled(&runtime,2).unwrap().unwrap();
-        assert_eq!((two.width,two.height),(one.width*2,one.height*2));
+        assert_eq!(two.width,one.width*2);
+        // Actual Mako PangoAttrScale font metrics can change logical
+        // popup height across outputs; only the margins scale linearly.
+        let note=runtime.store.lock().unwrap().active()[0].clone();
+        let style=runtime.config().global;
+        let painted=render_notification_group_with_icon_scale(&note,&style,0,2,2)
+            .unwrap();
+        assert_eq!(two.height,painted.height+8,
+            "the 4px top margin scales to 8px at output scale 2");
         assert!(snapshot_frame_scaled(&runtime,0).is_err());
     }
 

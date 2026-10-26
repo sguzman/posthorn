@@ -494,8 +494,11 @@ mod tests {
             ).unwrap();
         assert_eq!(high[0].height as u32,rendered_1x_with_2x_icon.height,
             "Wayland logical hotspot must equal the selected themed frame height");
-        assert_eq!((high[0].height as u32)*2,rendered_2x_with_2x_icon.height,
-            "physical 2x buffer size must not distort logical hit testing");
+        let real_two_x=input_rectangles_at_output_scale(
+            &runtime,None,2,2,OutputSubpixel::Unknown
+        ).unwrap();
+        assert_eq!(real_two_x[0].height as u32*2,rendered_2x_with_2x_icon.height,
+            "scaled Mako Pango metrics must also control the physical hitbox");
         assert_eq!(high[0].height,low[0].height,
             "Mako creates the icon once at Notify; changing monitor scale must not reload it");
         let bottom_click=click((high[0].x+2) as f64,
