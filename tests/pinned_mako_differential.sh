@@ -1476,6 +1476,112 @@ done
   "$root/mako-default-restored.png"
 echo 'Pinned Mako/Posthorn implicit config invalid-restore and valid-restore Reload: MATCH'
 
+# T303: -c must pin its path across Reload even if a higher-priority
+# implicit HOME default changes. Conversely, modifying the explicit
+# -c file must reapply its style while preserving CLI --width.
+# Both original Mako and private Posthorn run on disposable HOME/XDG.
+cat >"$root/explicit-base.conf" <<'EOF_EXPLICIT'
+width=174
+height=94
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%s
+markup=0
+background-color=#705098
+text-color=#E5C58B
+EOF_EXPLICIT
+capture_explicit(){
+  local impl="$1" stage="$2" color="$3" bounds="" stable=0
+  local image="$root/$impl-explicit-$stage.png"
+  for _ in {1..60}; do
+    if grim "$image" 2>/dev/null; then
+      bounds="$(./target/debug/examples/qa_png_probe \
+        "$image" "$color" 400 bounds 2>/dev/null || true)"
+      if [[ -n "$bounds" ]] &&
+        ./target/debug/examples/qa_png_probe \
+          "$image" '#E5C58B' 200 present >/dev/null 2>&1; then
+        if [[ -f "$root/$impl-explicit-$stage-prev.png" ]] &&
+          ./target/debug/examples/qa_png_probe \
+            "$image" "$color" 0 identical \
+            "$root/$impl-explicit-$stage-prev.png" >/dev/null 2>&1; then
+          stable=$((stable+1))
+        else
+          stable=0
+        fi
+        if (( stable>=3 ));then echo "$bounds";return 0;fi
+        cp "$image" "$root/$impl-explicit-$stage-prev.png"
+      fi
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+      echo "$impl stopped before explicit $stage capture" >&2
+      cat "$root/daemon.log" >&2;return 1
+    fi
+    sleep 0.15
+  done
+  echo "$impl did not settle for explicit -c $stage" >&2
+  cat "$root/daemon.log" >&2
+  return 1
+}
+for impl in posthorn mako; do
+  cp "$root/explicit-base.conf" "$root/explicit.conf"
+  cp "$root/default-legacy-original.conf" "$root/default-home/.mako/config"
+  clear_color '#705098'
+  clear_color '#2A7F9B'
+  if [[ "$impl" == posthorn ]]; then
+    HOME="$root/default-home" XDG_CONFIG_HOME="$root/default-xdg" \
+      ./target/debug/posthorn --experimental-private-desktop \
+        -c "$root/explicit.conf" --width=205 >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    HOME="$root/default-home" XDG_CONFIG_HOME="$root/default-xdg" \
+      "$mako_binary" -c "$root/explicit.conf" --width 205 \
+      >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  markup_notify "$bus"
+  initial_explicit="$(capture_explicit "$impl" initial '#705098')"
+  echo "$impl explicit -c initial bounds: $initial_explicit"
+  sed -i 's/#416D98/#2A7F9B/' "$root/default-home/.mako/config"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null || {
+    echo "$impl rejected explicit config after implicit HOME change"
+    cat "$root/daemon.log";exit 1
+  }
+  unaffected="$(capture_explicit "$impl" unaffected '#705098')"
+  ./target/debug/examples/qa_png_probe \
+    "$root/$impl-explicit-unaffected.png" '#705098' 0 identical \
+    "$root/$impl-explicit-initial.png"
+  echo "$impl explicit -c path retained despite implicit HOME update: $unaffected"
+  sed -i 's/#705098/#2A7F9B/' "$root/explicit.conf"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null || {
+    echo "$impl rejected valid explicit -c config change"
+    cat "$root/daemon.log";exit 1
+  }
+  changed="$(capture_explicit "$impl" changed '#2A7F9B')"
+  read -r x0 x1 y0 y1 <<<"$changed"
+  (( x1-x0+1 == 410 )) || {
+    echo "$impl lost the --width=205 CLI override on explicit Reload: $changed"
+    exit 1
+  }
+  echo "$impl explicitly selected config was reloaded: $changed"
+  kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+for stage in initial unaffected changed; do
+  ./target/debug/examples/qa_png_probe \
+    "$root/posthorn-explicit-$stage.png" '#E5C58B' 0 identical \
+    "$root/mako-explicit-$stage.png"
+done
+echo 'Pinned Mako/Posthorn fixed -c path and CLI override on Reload: MATCH'
+
 
 # Pinned dbus/xdg.c:handle_notify reuses an ID while recomputing the
 # group-by match on replacements. The same secondary notification leaves
