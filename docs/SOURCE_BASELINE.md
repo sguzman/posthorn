@@ -4983,3 +4983,43 @@ The physical Hyprland workstation (T503 51%) and
 expressly authorized production cutover (T504 0%) remain
 unattempted. General renderer equivalence is not asserted
 beyond these observed fixtures.
+
+## Pixel-exact physical 2× Pango wrapping and ellipsized-height parity (2026-10-26)
+
+The pinned v1.11.0 `render.c` uses
+`PANGO_WRAP_WORD_CHAR` plus `PANGO_ELLIPSIZE_END`, with
+physical `PangoAttrScale` and integer-truncated logical
+heights. Matching short markup is insufficient to establish
+parity for long mixed-markup notifications and wrapped text.
+
+The permanent differential exercises the **same synthetic
+long notification** containing XML-escaped ampersands, Greek
+letters, bold and italic spans, and an intentionally long
+unspaced word, with `width=154`, `font=Sans 17`,
+and two separate configured height caps on the **same
+actual scale-2 disposable Sway output**:
+
+| High-DPI source comparison | Posthorn | Mako v1.11.0 | Decoded full screenshot |
+| --- | --- | --- | --- |
+| `height=62`, ellipsized cap | Bounds `972 1279 0 73`, 1,521 text-color pixels | Identical | **0 mismatched pixels** |
+| `height=238`, long wrapped text | Bounds `972 1279 0 451`, 15,638 text-color pixels | Identical | **0 mismatched pixels** |
+
+These captures independently establish that the source's small
+height cap truncates output and that the larger cap displays
+substantially more wrapped glyph ink. The exact comparison
+operates on **decoded pixel channels**, not PNG file bytes.
+
+[Permanent guarded differential 5aa2143](https://github.com/sguzman/posthorn/commit/5aa214370abe2319b74a1e14734a33082d7ef4e2) ·
+[green original-Mako differential 40359369008](https://github.com/sguzman/posthorn/actions/runs/40359369008) ·
+[green full Rust/isolated Wayland CI 40359369001](https://github.com/sguzman/posthorn/actions/runs/40359369001).
+The exact source comparison also passed **352 Rust library
+tests, 100 private D-Bus tests**, and all preceding
+cross-executable screenshot cases.
+
+**Independent T205 acceptance:** **93% → 94% (+1 pp)**,
+P2 **98.2% → 98.4% (+0.2 pp)**,
+strict 24-task M0 **91.333% → 91.375% (+0.042 pp)**.
+Neither disposable compositor comparison nor its test harness
+counts as physical Hyprland T503 (51%), a real RGB/BGR panel
+test, or T504 authorized live Mako cutover (0%). The
+installed daemon and production D-Bus session are unchanged.
