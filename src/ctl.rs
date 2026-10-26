@@ -412,6 +412,19 @@ fn selected_action_key(
         .map(|(key,_)|key.clone())
 }
 
+/// A user-visible menu error emitted without the generic Posthorn prefix.
+/// Pinned makoctl prints these diagnostics itself (makoctl.c:590-783).
+#[derive(Debug)]
+pub struct MakoCtlMenuError(pub String);
+impl fmt::Display for MakoCtlMenuError {
+    fn fmt(&self,f:&mut fmt::Formatter<'_>)->fmt::Result{f.write_str(&self.0)}
+}
+impl std::error::Error for MakoCtlMenuError {}
+
+fn menu_error(message:impl Into<String>)->Box<dyn std::error::Error+Send+Sync>{
+    Box::new(MakoCtlMenuError(message.into()))
+}
+
 /// Mako's getline() reads the first line as bytes and discards only
 /// a terminal LF. The later strcmp(title,selected_title) stops at the
 /// first embedded NUL; bytes after it are invisible, including invalid
@@ -454,16 +467,31 @@ fn choose_from_menu(
         // Closing this reader also closes the pipe before waiting, as in
         // makoctl's fclose(out). Trailing data is never buffered indefinitely.
     }
+    // Upstream tests getline EOF BEFORE it waits for the menu helper.
+    // Reap the child either way, but report an empty selection ahead of
+    // a nonzero exit. With a selection, the waitpid exit status wins over
+    // an action-title mismatch (makoctl.c:731-775).
+    let selected=mako_menu_selected_line(&first_line);
     let status=child.wait()?;
-    if !status.success(){return Err(format!(
-        "menu command exited with {status}"
-    ).into());}
-    let selected=mako_menu_selected_line(&first_line).ok_or("no action selected")?;
-    // D-Bus labels are UTF-8; decode only the selected line. Bytes after
-    // its newline are irrelevant to makoctl's getline() semantics.
-    let selected=std::str::from_utf8(selected)?;
+    let selected=selected.ok_or_else(||menu_error("No action selected"))?;
+    if !status.success(){
+        use std::os::unix::process::ExitStatusExt;
+        let detail=if let Some(code)=status.code(){
+            format!("Menu failed with exit code {code}")
+        }else if let Some(signal)=status.signal(){
+            format!("Menu failed with signal {signal}")
+        }else{
+            "Menu failed".to_owned()
+        };
+        return Err(menu_error(detail));
+    }
+    // A label is UTF-8 on D-Bus. Even malformed bytes before NUL cannot
+    // equal any valid label: C strcmp returns Action not found, not a UTF-8
+    // conversion error. The later suffix is already hidden by the C NUL.
+    let selected=std::str::from_utf8(selected)
+        .map_err(|_|menu_error("Action not found"))?;
     selected_action_key(actions,selected)
-        .ok_or_else(||"menu returned a title not present in notification actions".into())
+        .ok_or_else(||menu_error("Action not found"))
 }
 
 fn value_string(map: &HashMap<String,OwnedValue>, key: &str) -> Option<String> {
@@ -614,10 +642,12 @@ pub async fn execute(command: Command) -> Result<(), Box<dyn std::error::Error +
             let note=records.iter().find(|record| {
                 id==0 || record.fields.get("id")
                     .and_then(|v|u32::try_from(v).ok())==Some(id)
-            }).ok_or("notification not found")?;
+            }).ok_or_else(||menu_error("Notification not found"))?;
             let notification_id=note.fields.get("id")
                 .and_then(|v|u32::try_from(v).ok()).ok_or("missing notification ID")?;
-            if note.actions.is_empty(){return Err("notification has no actions".into());}
+            if note.actions.is_empty(){
+                return Err(menu_error("Notification has no actions"));
+            }
             let action=choose_from_menu(&program,&note.actions)?;
             let _: ()=proxy.call("InvokeAction",&(notification_id,action)).await?;
         }
@@ -767,6 +797,30 @@ mod tests {
             "printf 'Open\\n'; sleep 0.1; printf 'extra\\n'".to_string(),
         ];
         assert!(choose_from_menu(&late,&actions).is_err());
+    }
+
+    #[test]
+    fn menu_helper_errors_follow_mako_getline_then_waitpid_precedence(){
+        let actions=vec![("default".into(),"Open".into())];
+        // These tests launch only a synthetic shell, never a notification
+        // daemon or either the production or private D-Bus service.
+        for (script,expected) in [
+            ("exit 7","No action selected"),
+            ("printf 'Open\\n'; exit 7","Menu failed with exit code 7"),
+            ("printf 'Not listed\\n'","Action not found"),
+            ("printf '\\377\\n'","Action not found"),
+            ("printf 'Open\\n'; kill -TERM $","Menu failed with signal 15"),
+        ] {
+            let program=vec!["sh".to_owned(),"-c".to_owned(),script.to_owned()];
+            let err=choose_from_menu(&program,&actions).unwrap_err();
+            let diagnostic=err.downcast_ref::<MakoCtlMenuError>()
+                .expect("menu errors need source-compatible stderr");
+            assert_eq!(diagnostic.to_string(),expected,"script: {script}");
+        }
+        assert_eq!(menu_error("Notification not found").to_string(),
+            "Notification not found");
+        assert_eq!(menu_error("Notification has no actions").to_string(),
+            "Notification has no actions");
     }
 
     #[test]
