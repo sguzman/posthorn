@@ -2159,6 +2159,95 @@ async fn category_sound_and_quiet_mode_follow_mako_config_section_order()
 }
 
 #[tokio::test]
+async fn category_sound_expiration_and_history_restore_do_not_replay_hooks()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use futures_util::StreamExt;
+    // Pinned Mako dbus/xdg.c:84-91 expires by close_notification()
+    // without calling notification_execute_binding (only Notify does so
+    // at xdg.c:430). dbus/mako.c:120-141 restores an archived note without
+    // restarting its deadline or re-executing the category sound hook.
+    let dir=tempfile::tempdir()?;
+    let marker=dir.path().join("expiry-category-sound-events");
+    let config=Config::parse(&format!(
+        "default-timeout=0\nmax-history=5\nhistory=1\n\
+         [category=warning]\ndefault-timeout=30\n\
+         background-color=#715536\n\
+         on-notify=exec printf 'warning:%s\\n' \"$id\" >> '{}'\n\
+         [mode=quiet]\non-notify=none\n",
+        marker.display(),
+    ))?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let mut closed=desktop.receive_signal("NotificationClosed").await?;
+    let send=||{
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from("warning")).unwrap(),
+        )].into();
+        ("category-expiry-test",0u32,"","Expiry","",
+         Vec::<String>::new(),hints,-1i32)
+    };
+    let wait_for=|expected:String|{
+        let marker=marker.clone();
+        async move{
+            tokio::time::timeout(Duration::from_secs(3),async{
+                loop{
+                    if std::fs::read_to_string(&marker).unwrap_or_default()==expected{
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                }
+            }).await
+        }
+    };
+
+    let id:u32=desktop.call("Notify",&send()).await?;
+    let sounded=format!("warning:{id}\n");
+    wait_for(sounded.clone()).await?;
+    assert!(runtime.next_deadline()?.is_some());
+    tokio::time::sleep(Duration::from_millis(70)).await;
+    assert_eq!(tick_expirations(&conn,&runtime).await?,1);
+    let signal=tokio::time::timeout(Duration::from_secs(3),closed.next()).await?
+        .ok_or("missing expired NotificationClosed signal")?;
+    let (closed_id,reason):(u32,u32)=signal.body().deserialize()?;
+    assert_eq!((closed_id,reason),(id,1));
+    assert_eq!(runtime.store.lock().unwrap().history().front().map(|n|n.id),
+        Some(id),"expired warning must be saved in history");
+    assert_eq!(std::fs::read_to_string(&marker)?,sounded,
+        "notification expiry must not replay category audio");
+
+    let _:()=ctl.call("SetMode",&("quiet",)).await?;
+    let _:()=ctl.call("RestoreNotification",&()).await?;
+    let restored=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==id).cloned().ok_or("missing restored warning")?;
+    let style=posthorn::desktop::style_for_note(
+        &runtime,&restored,&["quiet".to_owned()]);
+    assert_eq!(style["background-color"],"#715536");
+    assert_eq!(style["on-notify"],"none");
+    assert_eq!(runtime.next_deadline()?,None,
+        "Mako history restore must not restart the expired deadline");
+    tokio::time::sleep(Duration::from_millis(70)).await;
+    assert_eq!(tick_expirations(&conn,&runtime).await?,0);
+    assert_eq!(std::fs::read_to_string(&marker)?,sounded,
+        "restore while quiet must not replay the initial sound");
+
+    let quiet_id:u32=desktop.call("Notify",&send()).await?;
+    assert_ne!(quiet_id,id);
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,sounded,
+        "a fresh warning in quiet mode must also suppress its sound");
+    let _:()=ctl.call("SetMode",&("default",)).await?;
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,sounded,
+        "leaving quiet mode must not replay the old hook");
+    let resumed:u32=desktop.call("Notify",&send()).await?;
+    wait_for(format!("{sounded}warning:{resumed}\n")).await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn category_sound_stack_tag_updates_honor_quiet_mode_and_app_scope()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
