@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::config::{Options, Traits};
 use crate::grouping::group_ordered_scoped;
 use crate::notification::Notification;
-use crate::render::{compose_mako_stack,compose_mako_stack_with_visible_count,mako_stack_geometry,render_notification_group_with_icon_scale,render_hidden_placeholder_scaled,PixelFrame,StackAlignment};
+use crate::render::{compose_mako_stack,compose_mako_stack_with_visible_count,mako_stack_geometry,render_notification_group_with_icon_scale,render_notification_group_with_output_subpixel,render_hidden_placeholder_scaled,render_hidden_placeholder_with_subpixel,OutputSubpixel,PixelFrame,StackAlignment};
 use crate::runtime::SharedRuntime;
 use crate::wayland::{LivePresenter, ScreenCorner,PopupLayer,PopupMargins};
 
@@ -271,7 +271,9 @@ pub fn snapshot_frame_scaled(runtime:&SharedRuntime,pixel_scale:u32)
 fn snapshot_frame_with_icon_scale(
     runtime:&SharedRuntime,pixel_scale:u32,icon_lookup_scale:u32,
 )->io::Result<Option<PixelFrame>>{
-    snapshot_frame_for_surface(runtime,pixel_scale,icon_lookup_scale,None)
+    snapshot_frame_for_surface(
+        runtime,pixel_scale,icon_lookup_scale,None,OutputSubpixel::Unknown
+    )
 }
 
 /// Rasterize ONLY the notifications and overflow placeholder belonging to
@@ -280,12 +282,14 @@ fn snapshot_frame_with_icon_scale(
 pub fn snapshot_surface_frame_scaled(
     runtime:&SharedRuntime,surface_key:&(String,String,String),pixel_scale:u32,
 )->io::Result<Option<PixelFrame>>{
-    snapshot_frame_for_surface(runtime,pixel_scale,pixel_scale,Some(surface_key))
+    snapshot_frame_for_surface(
+        runtime,pixel_scale,pixel_scale,Some(surface_key),OutputSubpixel::Unknown
+    )
 }
 
 fn snapshot_frame_for_surface(
     runtime:&SharedRuntime,pixel_scale:u32,icon_lookup_scale:u32,
-    surface_key:Option<&(String,String,String)>,
+    surface_key:Option<&(String,String,String)>,subpixel:OutputSubpixel,
 )->io::Result<Option<PixelFrame>>{
     // The Wayland compositor may advertise scales above 8. Preserve the
     // reported positive i32 value; downstream frame measurements enforce
@@ -339,9 +343,9 @@ fn snapshot_frame_for_surface(
         margins.push(style.get("margin")
             .and_then(scale_margin)
             .unwrap_or(PopupMargins::uniform(10*scale)));
-        frames.push(render_notification_group_with_icon_scale(
+        frames.push(render_notification_group_with_output_subpixel(
             note,&style,if entry.group_count>=2{entry.group_count}else{0},
-            pixel_scale,icon_lookup_scale
+            pixel_scale,icon_lookup_scale,subpixel
         ).map_err(other)?);
     }
     let visible_count=frames.len();
@@ -394,8 +398,9 @@ fn snapshot_frame_for_surface(
                     style.insert("width".into(),logical_width.to_string());
                 }
             }
-            frames.push(render_hidden_placeholder_scaled(hidden,total,&style,pixel_scale)
-                .map_err(other)?);
+            frames.push(render_hidden_placeholder_with_subpixel(
+                hidden,total,&style,pixel_scale,subpixel
+            ).map_err(other)?);
             margins.push(style.get("margin")
                 .and_then(scale_margin)
                 .unwrap_or(PopupMargins::uniform(10*scale)));
@@ -439,6 +444,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
     let mut previous_revision=u64::MAX;
     let mut previous_scale=0u32;
     let mut previous_icon_scale=0u32;
+    let mut previous_subpixel=OutputSubpixel::Unknown;
     let mut expected_surface=false;
     loop {
         let notes: Vec<_>=runtime.store.lock().map_err(|_|poisoned())?
@@ -468,14 +474,18 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
         }
         let scale=viewer.output_scale(selected_output);
         let icon_scale=viewer.maximum_output_scale();
+        let subpixel=viewer.output_subpixel(selected_output);
         runtime.set_icon_creation_scale(icon_scale);
         let revision=runtime.revision();
         if notes!=previous || modes!=previous_modes ||
             revision!=previous_revision || scale!=previous_scale ||
             icon_scale!=previous_icon_scale ||
+            subpixel!=previous_subpixel ||
             (expected_surface && !viewer.has_active_surface()) {
 
-            let frame=snapshot_frame_with_icon_scale(&runtime,scale,icon_scale)?;
+            let frame=snapshot_frame_for_surface(
+                &runtime,scale,icon_scale,None,subpixel
+            )?;
             let corner=config.global.get("anchor")
                 .and_then(|s|ScreenCorner::from_mako(s))
                 .unwrap_or(ScreenCorner::TopRight);
@@ -496,6 +506,7 @@ fn render_loop(runtime:SharedRuntime,sender:tokio::sync::mpsc::UnboundedSender<D
                 previous_revision=revision;
                 previous_scale=scale;
                 previous_icon_scale=icon_scale;
+                previous_subpixel=subpixel;
                 expected_surface=frame.is_some();
             }
             // Otherwise leave the previous snapshots unchanged: the next
@@ -550,7 +561,7 @@ fn render_loop_multi(
     sender:tokio::sync::mpsc::UnboundedSender<DesktopClick>,
 )->io::Result<()>{
     type Key=(String,String,String);
-    type FrameStamp=(Vec<Notification>,Vec<String>,u64,u32,u32,bool);
+    type FrameStamp=(Vec<Notification>,Vec<String>,u64,u32,u32,OutputSubpixel,bool);
     let mut viewers=std::collections::HashMap::<Key,LivePresenter>::new();
     let mut rendered=std::collections::HashMap::<Key,FrameStamp>::new();
     // Mako tracks wl_output scale independently of notification surfaces.
@@ -597,6 +608,7 @@ fn render_loop_multi(
             }
             let scale=viewer.output_scale(&key.0);
             let icon_scale=viewer.maximum_output_scale();
+            let subpixel=viewer.output_subpixel(&key.0);
             runtime.set_icon_creation_scale(icon_scale);
             let revision=runtime.revision();
             let current_notes=all_notes.iter()
@@ -604,12 +616,12 @@ fn render_loop_multi(
                 .cloned().collect::<Vec<_>>();
             let changed=rendered.get(&key).is_none_or(|stamp|{
                 stamp.0!=current_notes||stamp.1!=modes||stamp.2!=revision||
-                stamp.3!=scale||stamp.4!=icon_scale||
-                (stamp.5&&!viewer.has_active_surface())
+                stamp.3!=scale||stamp.4!=icon_scale||stamp.5!=subpixel||
+                (stamp.6&&!viewer.has_active_surface())
             });
             if changed{
                 let frame=snapshot_frame_for_surface(
-                    &runtime,scale,icon_scale,Some(&key)
+                    &runtime,scale,icon_scale,Some(&key),subpixel
                 )?;
                 let corner=ScreenCorner::from_mako(&key.2)
                     .ok_or_else(||other("invalid surface anchor"))?;
@@ -627,7 +639,7 @@ fn render_loop_multi(
                     ).map_err(other)?;
                     rendered.insert(key.clone(),(
                         current_notes,modes.clone(),revision,scale,icon_scale,
-                        frame.is_some(),
+                        subpixel,frame.is_some(),
                     ));
                 }
             }

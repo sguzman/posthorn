@@ -17,7 +17,7 @@ use std::io::Write;
 use nix::poll::{poll, PollFd, PollFlags};
 use std::os::fd::AsFd;
 use std::time::{Duration,Instant};
-use crate::render::PixelFrame;
+use crate::render::{PixelFrame,OutputSubpixel};
 use wayland_protocols::wp::cursor_shape::v1::client::{
     wp_cursor_shape_manager_v1, wp_cursor_shape_device_v1,
 };
@@ -186,6 +186,7 @@ struct ConfigureState {
     output_globals: Vec<(u32,wl_output::WlOutput)>,
     output_names: Vec<(wl_output::WlOutput,String)>,
     output_scales: Vec<(wl_output::WlOutput,u32)>,
+    output_subpixels: Vec<(wl_output::WlOutput,OutputSubpixel)>,
     entered_output: Option<wl_output::WlOutput>,
     released_buffers: Vec<wl_buffer::WlBuffer>,
     activation_token: Option<String>,
@@ -277,6 +278,7 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for ConfigureState {
                     let (_,output)=state.output_globals.swap_remove(index);
                     state.output_names.retain(|(proxy,_)|proxy!=&output);
                     state.output_scales.retain(|(proxy,_)|proxy!=&output);
+                    state.output_subpixels.retain(|(proxy,_)|proxy!=&output);
                     if state.entered_output.as_ref()==Some(&output) {
                         state.entered_output=None;
                     }
@@ -339,12 +341,31 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for ConfigureState {
     }
 }
 
+fn decode_output_subpixel(value:WEnum<wl_output::Subpixel>)->OutputSubpixel{
+    match value {
+        WEnum::Value(wl_output::Subpixel::None)=>OutputSubpixel::None,
+        WEnum::Value(wl_output::Subpixel::HorizontalRgb)=>OutputSubpixel::HorizontalRgb,
+        WEnum::Value(wl_output::Subpixel::HorizontalBgr)=>OutputSubpixel::HorizontalBgr,
+        WEnum::Value(wl_output::Subpixel::VerticalRgb)=>OutputSubpixel::VerticalRgb,
+        WEnum::Value(wl_output::Subpixel::VerticalBgr)=>OutputSubpixel::VerticalBgr,
+        _=>OutputSubpixel::Unknown,
+    }
+}
 impl Dispatch<wl_output::WlOutput, ()> for ConfigureState {
     fn event(
         state:&mut Self, output:&wl_output::WlOutput,event:wl_output::Event,
         _:&(),_:&Connection,_:&QueueHandle<Self>,
     ){
         match event {
+            wl_output::Event::Geometry{subpixel,..}=>{
+                let order=decode_output_subpixel(subpixel);
+                if let Some((_,value))=state.output_subpixels.iter_mut()
+                    .find(|(proxy,_)|proxy==output){
+                    *value=order;
+                }else{
+                    state.output_subpixels.push((output.clone(),order));
+                }
+            }
             wl_output::Event::Name{name}=>{
                 if let Some((_,value))=state.output_names.iter_mut()
                     .find(|(proxy,_)|proxy==output){
@@ -751,6 +772,20 @@ impl LivePresenter {
     pub fn maximum_output_scale(&self)->u32{
         self.state.output_scales.iter().map(|(_,scale)|*scale)
             .max().unwrap_or(1).max(1)
+    }
+
+    /// Mako uses the wl_surface-entered output's subpixel geometry for
+    /// text. Until enter, a requested output is only a placement hint.
+    pub fn output_subpixel(&self,output_name:&str)->OutputSubpixel{
+        let output=if output_name.is_empty(){
+            self.state.entered_output.as_ref()
+        }else{
+            self.state.output_names.iter().find(|(_,name)|name==output_name)
+                .map(|(proxy,_)|proxy)
+        };
+        output.and_then(|target|self.state.output_subpixels.iter()
+            .find(|(proxy,_)|proxy==target).map(|(_,order)|*order))
+            .unwrap_or(OutputSubpixel::Unknown)
     }
 
     pub fn output_scale(&self,output_name:&str)->u32{

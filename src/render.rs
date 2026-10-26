@@ -51,15 +51,36 @@ fn set_mako_formatted_text(layout:&pango::Layout,rendered:&str){
     }
 }
 
-/// Pinned Mako v1.11.0 render.c:81-96 selects grayscale glyph
-/// antialiasing for WL_OUTPUT_SUBPIXEL_UNKNOWN and NONE instead of
-/// Cairo's process-dependent default. The isolated headless output uses
-/// an unknown subpixel order.
-fn set_unknown_subpixel_font_options(cr:&cairo::Context)->Result<(),String>{
+/// Wayland wl_output.geometry advertises the panel's physical subpixel order.
+/// The pinned Mako render.c:64-96 selects the corresponding Cairo options
+/// independently for each layer surface. Unknown/none use grayscale.
+#[derive(Clone,Copy,Debug,Default,Eq,PartialEq)]
+pub enum OutputSubpixel {
+    #[default] Unknown, None,
+    HorizontalRgb, HorizontalBgr, VerticalRgb, VerticalBgr,
+}
+fn set_mako_font_options(
+    cr:&cairo::Context,subpixel:OutputSubpixel,
+)->Result<(),String>{
     let mut options=cairo::FontOptions::new().map_err(|e|e.to_string())?;
-    options.set_antialias(cairo::Antialias::Gray);
+    let order=match subpixel {
+        OutputSubpixel::Unknown|OutputSubpixel::None=>None,
+        OutputSubpixel::HorizontalRgb=>Some(cairo::SubpixelOrder::Rgb),
+        OutputSubpixel::HorizontalBgr=>Some(cairo::SubpixelOrder::Bgr),
+        OutputSubpixel::VerticalRgb=>Some(cairo::SubpixelOrder::Vrgb),
+        OutputSubpixel::VerticalBgr=>Some(cairo::SubpixelOrder::Vbgr),
+    };
+    if let Some(order)=order {
+        options.set_antialias(cairo::Antialias::Subpixel);
+        options.set_subpixel_order(order);
+    }else{
+        options.set_antialias(cairo::Antialias::Gray);
+    }
     cr.set_font_options(&options);
     Ok(())
+}
+fn set_unknown_subpixel_font_options(cr:&cairo::Context)->Result<(),String>{
+    set_mako_font_options(cr,OutputSubpixel::Unknown)
 }
 
 fn set_color(cr: &cairo::Context, c: Color) {
@@ -210,6 +231,12 @@ fn icon_fit_limit(note:&Notification,style:&Options)->u32{
 fn measure_height_with_icon(
     note:&Notification,style:&Options,icon:Option<&IconPixels>,group_count:usize,
 ) -> Result<u32,String> {
+    measure_height_with_icon_subpixel(note,style,icon,group_count,OutputSubpixel::Unknown)
+}
+fn measure_height_with_icon_subpixel(
+    note:&Notification,style:&Options,icon:Option<&IconPixels>,group_count:usize,
+    subpixel:OutputSubpixel,
+)->Result<u32,String>{
     let width=integer_option(style,"width",300);
     let cap=integer_option(style,"height",100);
     if width==0||cap==0||width>4096||cap>4096{
@@ -258,7 +285,7 @@ fn measure_height_with_icon(
     let dummy=cairo::ImageSurface::create(cairo::Format::ARgb32,1,1)
         .map_err(|e|e.to_string())?;
     let context=cairo::Context::new(&dummy).map_err(|e|e.to_string())?;
-    set_unknown_subpixel_font_options(&context)?;
+    set_mako_font_options(&context,subpixel)?;
     let layout=pangocairo::functions::create_layout(&context);
     layout.set_font_description(Some(&pango::FontDescription::from_string(
         style.get("font").map(String::as_str).unwrap_or("monospace 10")
@@ -330,6 +357,17 @@ pub fn render_notification_group_with_icon_scale(
     note:&Notification,style:&Options,group_count:usize,
     pixel_scale:u32,icon_lookup_scale:u32,
 )->Result<PixelFrame,String>{
+    render_notification_group_with_output_subpixel(
+        note,style,group_count,pixel_scale,icon_lookup_scale,OutputSubpixel::Unknown
+    )
+}
+
+/// Compositor-specific text rasterization; legacy headless callers keep
+/// their unknown-subpixel grayscale behavior.
+pub fn render_notification_group_with_output_subpixel(
+    note:&Notification,style:&Options,group_count:usize,
+    pixel_scale:u32,icon_lookup_scale:u32,subpixel:OutputSubpixel,
+)->Result<PixelFrame,String>{
     if pixel_scale==0 {
         return Err("invalid notification pixel scale".into());
     }
@@ -337,7 +375,9 @@ pub fn render_notification_group_with_icon_scale(
     // One decode per frame. Both text measurement and painting consume the
     // same icon, avoiding redundant filesystem reads and image decoding.
     let icon=load_note_icon_scaled(note,style,icon_lookup_scale.max(1));
-    let height = measure_height_with_icon(note,style,icon.as_ref(),group_count)?;
+    let height = measure_height_with_icon_subpixel(
+        note,style,icon.as_ref(),group_count,subpixel
+    )?;
     if width == 0 || height == 0 || width > 4096 || height > 4096
         || u64::from(width) * u64::from(height) * 4 > 64 * 1024 * 1024
     {
@@ -364,7 +404,7 @@ pub fn render_notification_group_with_icon_scale(
     let surface = cairo::ImageSurface::create(cairo::Format::ARgb32, w, h)
         .map_err(|e| e.to_string())?;
     let context = cairo::Context::new(&surface).map_err(|e| e.to_string())?;
-    set_unknown_subpixel_font_options(&context)?;
+    set_mako_font_options(&context,subpixel)?;
     context.scale(f64::from(pixel_scale),f64::from(pixel_scale));
     // Mako render.c:215-272 draws the background on the CENTERLINE of
     // a stroked border: x=b/2, width=w-b, with unmodified corner radii.
@@ -525,6 +565,14 @@ pub fn render_hidden_placeholder(
 pub fn render_hidden_placeholder_scaled(
     hidden:usize,total:usize,style:&Options,pixel_scale:u32,
 ) -> Result<PixelFrame,String> {
+    render_hidden_placeholder_with_subpixel(
+        hidden,total,style,pixel_scale,OutputSubpixel::Unknown
+    )
+}
+pub fn render_hidden_placeholder_with_subpixel(
+    hidden:usize,total:usize,style:&Options,pixel_scale:u32,
+    subpixel:OutputSubpixel,
+)->Result<PixelFrame,String>{
     let raw=style.get("format").map(String::as_str).unwrap_or("(%h more)");
     let decoded=decode_format(raw).map_err(|e|e.to_string())?;
     let literal=crate::format::render_hidden_format(&decoded,hidden,total);
@@ -537,7 +585,31 @@ pub fn render_hidden_placeholder_scaled(
     let mut store=crate::notification::NotificationStore::new(0);
     store.push(crate::notification::Request::default());
     let note=store.active().front().ok_or("failed to create hidden placeholder")?;
-    render_notification_group_scaled(note,&prepared,0,pixel_scale)
+    render_notification_group_with_output_subpixel(
+        note,&prepared,0,pixel_scale,pixel_scale,subpixel
+    )
+}
+
+#[cfg(test)]
+#[test]
+fn pinned_mako_subpixel_font_options_match_all_wayland_orders(){
+    let surface=cairo::ImageSurface::create(cairo::Format::ARgb32,16,16).unwrap();
+    let context=cairo::Context::new(&surface).unwrap();
+    for (order,antialias,expected) in [
+        (OutputSubpixel::Unknown,cairo::Antialias::Gray,None),
+        (OutputSubpixel::None,cairo::Antialias::Gray,None),
+        (OutputSubpixel::HorizontalRgb,cairo::Antialias::Subpixel,Some(cairo::SubpixelOrder::Rgb)),
+        (OutputSubpixel::HorizontalBgr,cairo::Antialias::Subpixel,Some(cairo::SubpixelOrder::Bgr)),
+        (OutputSubpixel::VerticalRgb,cairo::Antialias::Subpixel,Some(cairo::SubpixelOrder::Vrgb)),
+        (OutputSubpixel::VerticalBgr,cairo::Antialias::Subpixel,Some(cairo::SubpixelOrder::Vbgr)),
+    ]{
+        set_mako_font_options(&context,order).unwrap();
+        let options=context.font_options().unwrap();
+        assert_eq!(options.antialias(),antialias,"{order:?}");
+        if let Some(expected)=expected{
+            assert_eq!(options.subpixel_order(),expected,"{order:?}");
+        }
+    }
 }
 
 /// Exact rectangle coordinates for the positive-margin subset of Mako's
