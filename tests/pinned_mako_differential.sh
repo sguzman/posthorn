@@ -1394,6 +1394,44 @@ for impl in posthorn mako; do
     cat "$root/daemon.log";exit 1
   }
   echo "$impl default lookup switched to Mako built-ins on Reload: $builtin_bounds"
+
+  # T104/T303: when a legacy config reappears after built-in fallback,
+  # Reload must rediscover its higher-priority path and repaint the
+  # already displayed notification. Compare with the original pre-delete
+  # raster to detect stale fallback styling or lost CLI overrides.
+  cp "$root/default-legacy-original.conf" "$root/default-home/.mako/config"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null || {
+    echo "$impl rejected the restored implicit legacy configuration"
+    cat "$root/daemon.log";exit 1
+  }
+  stable_restored=0
+  accepted_restored=0
+  for _ in {1..60}; do
+    if grim "$root/$impl-default-restored.png" 2>/dev/null &&
+      ./target/debug/examples/qa_png_probe \
+        "$root/$impl-default-restored.png" '#416D98' 400 bounds >/dev/null 2>&1; then
+      if [[ -f "$root/$impl-default-restored-prev.png" ]] &&
+        ./target/debug/examples/qa_png_probe \
+          "$root/$impl-default-restored.png" '#416D98' 0 identical \
+          "$root/$impl-default-restored-prev.png" >/dev/null 2>&1; then
+        stable_restored=$((stable_restored+1))
+      else
+        stable_restored=0
+      fi
+      if (( stable_restored >= 3 )); then accepted_restored=1;break;fi
+      cp "$root/$impl-default-restored.png" "$root/$impl-default-restored-prev.png"
+    fi
+    sleep 0.15
+  done
+  [[ "$accepted_restored" == 1 ]] || {
+    echo "$impl did not settle after its implicit legacy config reappeared"
+    cat "$root/daemon.log";exit 1
+  }
+  ./target/debug/examples/qa_png_probe \
+    "$root/$impl-default-restored.png" '#416D98' 0 identical \
+    "$root/$impl-default-legacy-markup.png"
+  echo "$impl reselected the restored legacy file with an identical initial raster"
   kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
   daemon_pid=""
   cp "$root/default-legacy-original.conf" "$root/default-home/.mako/config"
@@ -1408,7 +1446,10 @@ done
 ./target/debug/examples/qa_png_probe \
   "$root/posthorn-default-builtin.png" '#285577' 0 identical \
   "$root/mako-default-builtin.png"
-echo 'Pinned Mako/Posthorn implicit legacy/XDG/built-in config rediscovery and Reload: MATCH'
+./target/debug/examples/qa_png_probe \
+  "$root/posthorn-default-restored.png" '#416D98' 0 identical \
+  "$root/mako-default-restored.png"
+echo 'Pinned Mako/Posthorn implicit legacy/XDG/built-in/reappearing legacy config rediscovery: MATCH'
 
 
 # Pinned dbus/xdg.c:handle_notify reuses an ID while recomputing the
