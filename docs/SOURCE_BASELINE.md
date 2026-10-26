@@ -5614,3 +5614,52 @@ Real Hyprland T503 remains 51%, and explicitly authorized
 production cutover T504 remains 0%. Installed Mako,
 public bus, personal configuration and physical speakers
 were not accessed.
+
+
+## Source-pinned tagged and application-specific category sound routing (2026-10-26)
+
+Two independently guarded **executable** cases now compare
+Posthorn against the actual pinned Mako v1.11.0 daemon on
+isolated scale-2 Sway and separate private D-Bus services.
+All sound commands only append to disposable event files;
+the user's real speaker, notification daemon, HOME and
+Hyprland configuration remain untouched.
+
+**App-scoped stack-tag replacements:** Notifications with
+`x-dunst-stack-tag=same-tag` emitted by the same application
+retain their sender-visible ID while rerunning the newly
+selected category `on-notify=exec` command on replacement.
+Entering `quiet` suppresses the hook without losing the
+notification ID; exiting quiet does not replay old hooks,
+and the next Notify resumes normally. The identical tag
+used by another application allocates a different
+notification ID and its own warning hook. The full sequence
+of source-Mako and Posthorn event files compares byte-for-byte.
+[Executable case da6ec58](https://github.com/sguzman/posthorn/commit/da6ec583f27eb11612faff16c1e33178a1f76ce8).
+
+**Per-application muting:** A generic
+`[category=warning] on-notify=exec` rule runs for
+`ChimeApp`, but a later `[app-name=MutedApp]
+on-notify=none` suppresses warnings from that application.
+Unrelated categories remain silent, a final
+`[mode=quiet]` suppresses all remaining hooks, and leaving
+quiet resumes only the previously allowed application.
+Both Mako and Posthorn produce exactly the same
+file-backed hook events.
+[Executable case b2f0aa5](https://github.com/sguzman/posthorn/commit/b2f0aa5e558ec836fc6a0707795880e44a2f832b).
+
+Both tests passed on the same source-pinned commit, alongside
+355 Rust library tests, 100 private D-Bus tests, all existing
+compositor fixtures and the successful source-pinned
+atomic sound-hook Reload case.
+
+[Green original-Mako differential 40392668945](https://github.com/sguzman/posthorn/actions/runs/40392668945) ·
+[Green full Rust/Wayland CI 40392668986](https://github.com/sguzman/posthorn/actions/runs/40392668986).
+
+**Conservative accepted progress:** T502 **92% → 94%
+(+2 pp)**, category-color/sound feature **92% → 94%
+(+2 pp)**, P5 **60.50% → 61.00%**,
+strict 24-task M0 **92.208% → 92.292%
+(+0.083 percentage points)**. Exact real audio and
+physical Hyprland remain unverified; T503 stays 51%,
+authorized Mako production cutover T504 stays 0%.
