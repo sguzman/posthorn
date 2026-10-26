@@ -1097,3 +1097,71 @@ done
   "$root/posthorn-cli-rejected.png" '#2A7F9B' 0 identical \
   "$root/mako-cli-rejected.png"
 echo 'Pinned Mako/Posthorn private Wayland CLI startup, valid Reload, and rejected Reload rasters: MATCH'
+
+# T104: verify config.c's recursive include processing in the actual
+# graphical daemon. The include target can be a symlink, children may
+# include other children, and the parent may override the included
+# root-style values AFTER the include. A second case verifies source
+# expand_config_path("~//leaf") against a disposable HOME, without
+# modifying a real user's environment or startup configuration.
+mkdir -p "$root/include-home"
+cat >"$root/include-leaf.conf" <<'EOF_INCLUDE_LEAF'
+width=190
+height=110
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%s
+markup=0
+background-color=#416D98
+text-color=#E5C58B
+EOF_INCLUDE_LEAF
+ln -s "$root/include-leaf.conf" "$root/include-alias.conf"
+printf 'include=%s\nwidth=192\n' "$root/include-alias.conf" >"$root/include-middle.conf"
+printf 'include=%s\nwidth=211\n' "$root/include-middle.conf" >"$root/include-root.conf"
+cp "$root/include-leaf.conf" "$root/include-home/tilde-leaf.conf"
+cat >"$root/include-tilde.conf" <<'EOF_INCLUDE_TILDE'
+include=~//tilde-leaf.conf
+width=207
+EOF_INCLUDE_TILDE
+for variant in nested tilde; do
+  if [[ "$variant" == nested ]]; then
+    config="$root/include-root.conf"
+    expected_width=422
+  else
+    config="$root/include-tilde.conf"
+    expected_width=414
+  fi
+  for impl in posthorn mako; do
+    clear_color '#416D98'
+    if [[ "$impl" == posthorn ]]; then
+      HOME="$root/include-home" ./target/debug/posthorn \
+        --experimental-private-desktop "$config" >"$root/daemon.log" 2>&1 &
+      bus=org.posthorn.Development
+    else
+      HOME="$root/include-home" "$mako_binary" -c "$config" \
+        >"$root/daemon.log" 2>&1 &
+      bus=org.freedesktop.Notifications
+    fi
+    daemon_pid=$!
+    wait_for_bus "$bus"
+    markup_notify "$bus"
+    result="$(markup_measure "$impl-include-$variant" "$bus")"
+    echo "$impl source-pinned $variant include geometry and text: $result"
+    read -r ix0 ix1 iy0 iy1 itext <<<"$result"
+    (( ix1-ix0+1 == expected_width && itext > 250 )) || {
+      echo "$impl did not apply the included style and final parent width"
+      exit 1
+    }
+    kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+    daemon_pid=""
+  done
+  ./target/debug/examples/qa_png_probe \
+    "$root/posthorn-include-$variant-markup.png" '#E5C58B' 0 identical \
+    "$root/mako-include-$variant-markup.png"
+  echo "Pinned Mako/Posthorn real scale-2 $variant included config raster: MATCH"
+done
