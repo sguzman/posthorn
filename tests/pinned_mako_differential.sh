@@ -633,3 +633,58 @@ for variant in literal malformed; do
     "$root/mako-two-x-$variant-markup.png"
 done
 echo 'Pinned Mako/Posthorn physical 2x decoded entire-screenshot raster equality: MATCH'
+
+# T205: pinned Mako Pango word-character wrapping and final-line
+# ellipsization depend on exact physical-scale bounds. These cases
+# deliberately use long, XML-escaped text and distinct text-height
+# limits while reusing the same 2x compositor and immutable font
+# environment. Decoded full-compositor image equality detects both
+# displaced glyphs and different ellipsis placement.
+cat >"$root/wrapping.conf" <<'EOF_WRAP'
+width=154
+height=62
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%s\n%b
+markup=1
+background-color=#416D98
+text-color=#E5C58B
+EOF_WRAP
+wrap_body='<b>Lengthy headline:</b> αβγ delta &amp; epsilon words <i>italic overflow and a deliberately stretchedlongwordwithoutspacesfortestingcharacterwrap</i> followed by more content so the final visible line needs an ellipsis.'
+for variant in ellipsized wrapped; do
+  if [[ "$variant" == wrapped ]]; then
+    sed -i 's/^height=62$/height=238/' "$root/wrapping.conf"
+  fi
+  clear_color '#416D98'
+  ./target/debug/posthorn --experimental-private-desktop "$root/wrapping.conf" \
+    >"$root/daemon.log" 2>&1 &
+  daemon_pid=$!
+  wait_for_bus org.posthorn.Development
+  markup_notify org.posthorn.Development "$wrap_body"
+  post_wrap="$(markup_measure "posthorn-wrap-$variant" org.posthorn.Development)"
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+  clear_color '#416D98'
+  "$mako_binary" -c "$root/wrapping.conf" >"$root/daemon.log" 2>&1 &
+  daemon_pid=$!
+  wait_for_bus org.freedesktop.Notifications
+  markup_notify org.freedesktop.Notifications "$wrap_body"
+  mako_wrap="$(markup_measure "mako-wrap-$variant" org.freedesktop.Notifications)"
+  echo "Posthorn scale-2 $variant Pango wrapping: $post_wrap"
+  echo "Pinned Mako scale-2 $variant Pango wrapping: $mako_wrap"
+  [[ "$post_wrap" == "$mako_wrap" ]] || {
+    echo "Pinned Mako/Posthorn scale-2 $variant bounds or glyph coverage differ"
+    exit 1
+  }
+  ./target/debug/examples/qa_png_probe \
+    "$root/posthorn-wrap-$variant-markup.png" '#E5C58B' 0 identical \
+    "$root/mako-wrap-$variant-markup.png"
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+  echo "Pinned Mako/Posthorn actual 2x $variant Pango wrapping and ink: MATCH"
+done
