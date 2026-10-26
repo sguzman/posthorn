@@ -4333,3 +4333,33 @@ strict 24-task M0 90.542% → 90.583% (display 91%).**
 Physical Hyprland T503 stays 51% and authorized reversible
 cutover T504 stays 0%. No speaker, production notification bus,
 live Mako daemon or workstation configuration was touched.
+
+## Category sound hooks honor reloaded configuration without replay (2026-10-25)
+
+Pinned Mako v1.11.0's `dbus/mako.c:296-344` rebuilds notification
+styles and surfaces during a successful Reload, but does not call
+`notification_execute_binding` on existing notes. The next
+Freedesktop `Notify` selects the current category and mode rules
+and executes the newly configured `on-notify=exec` sound command.
+
+The new private D-Bus regression
+(`tests/private_service.rs::reloaded_category_sound_configuration_applies_only_to_new_notifies`)
+loads a file-backed warning sound/color configuration, sends a notification,
+rewrites the configuration, reloads, confirms live category colors changed
+without an extra sound, and confirms the next Notify plays the new sound.
+It then enters quiet mode, rewrites and reloads sound/color rules again,
+confirms a new notification remains visually categorized and silent,
+leaves quiet without replaying any sound, and checks that the following
+Notify plays the latest command. All hooks append to a temporary file;
+no speaker, installed Mako or public notification bus is involved.
+
+[Accepted regression af546b0](https://github.com/sguzman/posthorn/commit/af546b04c39f753219c9863efd7bc70affb8e96e) ·
+[accepted two-job CI 40262257116](https://github.com/sguzman/posthorn/actions/runs/40262257116):
+**347 Rust library tests, 95 private D-Bus tests, and the complete
+isolated headless Wayland suite passed.**
+
+**T502 81% → 82%; category sound feature 81% → 82%;
+P5 57.75% → 58.00% (display 58%);
+strict M0 90.583% → 90.625% (display 91%).**
+Physical Hyprland acceptance T503 stays 51%, and the explicit-authorization
+reversible production cutover T504 stays 0%. Those gates are not credited.
