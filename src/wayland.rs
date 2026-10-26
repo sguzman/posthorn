@@ -774,17 +774,13 @@ impl LivePresenter {
             .max().unwrap_or(1).max(1)
     }
 
-    /// Mako uses the wl_surface-entered output's subpixel geometry for
-    /// text. Until enter, a requested output is only a placement hint.
-    pub fn output_subpixel(&self,output_name:&str)->OutputSubpixel{
-        let output=if output_name.is_empty(){
-            self.state.entered_output.as_ref()
-        }else{
-            self.state.output_names.iter().find(|(_,name)|name==output_name)
-                .map(|(proxy,_)|proxy)
-        };
-        output.and_then(|target|self.state.output_subpixels.iter()
-            .find(|(proxy,_)|proxy==target).map(|(_,order)|*order))
+    /// Follow the actual wl_surface.enter output, not the requested
+    /// output= placement name: Mako's set_font_options reads surface_output.
+    /// Before the first enter, no panel geometry may be assumed.
+    pub fn output_subpixel(&self)->OutputSubpixel{
+        self.state.entered_output.as_ref()
+            .and_then(|target|self.state.output_subpixels.iter()
+                .find(|(proxy,_)|proxy==target).map(|(_,order)|*order))
             .unwrap_or(OutputSubpixel::Unknown)
     }
 
@@ -1153,6 +1149,21 @@ fn validate_frame(frame: &PixelFrame) -> Result<(), &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wl_output_subpixel_geometry_matches_pinned_mako_cairo_variants(){
+        for (wire,expected) in [
+            (wl_output::Subpixel::Unknown,OutputSubpixel::Unknown),
+            (wl_output::Subpixel::None,OutputSubpixel::None),
+            (wl_output::Subpixel::HorizontalRgb,OutputSubpixel::HorizontalRgb),
+            (wl_output::Subpixel::HorizontalBgr,OutputSubpixel::HorizontalBgr),
+            (wl_output::Subpixel::VerticalRgb,OutputSubpixel::VerticalRgb),
+            (wl_output::Subpixel::VerticalBgr,OutputSubpixel::VerticalBgr),
+        ] {
+            assert_eq!(decode_output_subpixel(WEnum::Value(wire)),expected);
+        }
+        assert_eq!(decode_output_subpixel(WEnum::Unknown(900)),OutputSubpixel::Unknown);
+    }
 
     #[test]
     fn touch_contact_translates_into_the_same_event_envelope() {
