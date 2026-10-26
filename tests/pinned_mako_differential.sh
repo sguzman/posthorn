@@ -612,3 +612,24 @@ for variant in literal malformed; do
   daemon_pid=""
   echo "Pinned Mako/Posthorn physical 2x $variant markup fallback: MATCH"
 done
+
+# Test the complete decoded compositor raster as an independent equality
+# oracle. Bounds and color counts can hide glyph antialias changes or
+# transposed ink inside the same rectangle. The screenshots are synthetic,
+# private CI artifacts and are deleted by the guarded cleanup trap.
+for label in posthorn-two-x; do
+  ./target/debug/examples/qa_png_probe \
+    "$root/$label-markup.png" '#E5C58B' 0 identical \
+    "$root/mako-two-x-markup.png"
+done
+for align in center right; do
+  ./target/debug/examples/qa_png_probe \
+    "$root/posthorn-align-$align-markup.png" '#E5C58B' 0 identical \
+    "$root/mako-align-$align-markup.png"
+done
+for variant in literal malformed; do
+  ./target/debug/examples/qa_png_probe \
+    "$root/posthorn-two-x-$variant-markup.png" '#E5C58B' 0 identical \
+    "$root/mako-two-x-$variant-markup.png"
+done
+echo 'Pinned Mako/Posthorn physical 2x decoded entire-screenshot raster equality: MATCH'

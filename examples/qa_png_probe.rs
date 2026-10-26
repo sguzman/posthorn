@@ -66,6 +66,45 @@ fn color_bounds(
     Ok(rect)
 }
 
+/// Compare decoded pixels, not encoded PNG bytes. Two independent grim
+/// captures may encode the same raster with different metadata or strides.
+fn count_pixel_mismatches(a:&Pixbuf,b:&Pixbuf)->Result<usize,Box<dyn Error>>{
+    if a.width()!=b.width()||a.height()!=b.height()||
+        a.n_channels()!=b.n_channels(){
+        return Err("screenshots have different pixel geometry or channels".into());
+    }
+    let channels=usize::try_from(a.n_channels())?;
+    if channels<3{return Err("unsupported PNG channel count".into());}
+    let row_a=usize::try_from(a.rowstride())?;
+    let row_b=usize::try_from(b.rowstride())?;
+    let width=usize::try_from(a.width())?;
+    let height=usize::try_from(a.height())?;
+    let raw_a=a.read_pixel_bytes();
+    let raw_b=b.read_pixel_bytes();
+    let bytes_a=raw_a.as_ref();
+    let bytes_b=raw_b.as_ref();
+    let mut mismatches=0usize;
+    for y in 0..height {
+        for x in 0..width {
+            let a_off=y.checked_mul(row_a)
+                .and_then(|v|x.checked_mul(channels).and_then(|shift|v.checked_add(shift)))
+                .ok_or("first PNG pixel offset overflow")?;
+            let b_off=y.checked_mul(row_b)
+                .and_then(|v|x.checked_mul(channels).and_then(|shift|v.checked_add(shift)))
+                .ok_or("second PNG pixel offset overflow")?;
+            let a_end=a_off.checked_add(channels).ok_or("first PNG pixel overflow")?;
+            let b_end=b_off.checked_add(channels).ok_or("second PNG pixel overflow")?;
+            if a_end>bytes_a.len()||b_end>bytes_b.len(){
+                return Err("truncated PNG pixels".into());
+            }
+            if bytes_a[a_off..a_end]!=bytes_b[b_off..b_end]{
+                mismatches+=1;
+            }
+        }
+    }
+    Ok(mismatches)
+}
+
 fn acceptance(mode:&str,current:usize,reference:Option<usize>,threshold:usize)->bool{
     match (mode,reference){
         ("present",None)=>current>=threshold,
@@ -88,10 +127,10 @@ fn main()->Result<(),Box<dyn Error>>{
     let reference_path=args.next();
     if args.next().is_some() || !matches!(
         (mode.as_str(),reference_path.is_some()),
-        ("present"|"absent"|"bounds",false)|("increase"|"restored",true)
+        ("present"|"absent"|"bounds",false)|("increase"|"restored"|"identical",true)
     ){
         return Err(
-            "usage: qa_png_probe FILE #RRGGBB MIN_PIXELS present|absent|bounds|increase|restored [BASELINE]"
+            "usage: qa_png_probe FILE #RRGGBB MIN_PIXELS present|absent|bounds|increase|restored|identical [BASELINE]"
                 .into()
         );
     }
@@ -114,6 +153,16 @@ fn main()->Result<(),Box<dyn Error>>{
             .ok_or("no matching pixels for a bounding box")?;
         println!("{x0} {x1} {y0} {y1}");
         return Ok(());
+    }
+    // Exact source-pinned Mako parity is stronger than matching a
+    // text-color count or an ink bounding box. In identical mode the
+    // color and threshold are accepted for CLI compatibility but ignored.
+    if mode=="identical"{
+        let baseline=Pixbuf::from_file(reference_path.ok_or("missing comparison PNG")?)?;
+        let mismatches=count_pixel_mismatches(&image,&baseline)?;
+        println!("decoded screenshot pixel mismatches: {mismatches}");
+        return if mismatches==0{Ok(())}
+            else{Err("raster differs from the pinned reference PNG".into())};
     }
     let reference=match reference_path{
         Some(path)=>{
@@ -156,6 +205,19 @@ mod tests{
         assert_eq!(color_bounds(&image,[0x55,0x55,0x55]).unwrap(),None);
     }
 
+    #[test]
+    fn exact_raster_comparison_uses_decoded_pixels_and_checks_geometry(){
+        let original=Pixbuf::new(gdk_pixbuf::Colorspace::Rgb,true,8,6,4).unwrap();
+        let same=Pixbuf::new(gdk_pixbuf::Colorspace::Rgb,true,8,6,4).unwrap();
+        let changed=Pixbuf::new(gdk_pixbuf::Colorspace::Rgb,true,8,6,4).unwrap();
+        original.fill(0x193FA7FF);
+        same.fill(0x193FA7FF);
+        changed.fill(0x193FA6FF);
+        assert_eq!(count_pixel_mismatches(&original,&same).unwrap(),0);
+        assert_eq!(count_pixel_mismatches(&original,&changed).unwrap(),24);
+        let different_size=Pixbuf::new(gdk_pixbuf::Colorspace::Rgb,true,8,5,4).unwrap();
+        assert!(count_pixel_mismatches(&original,&different_size).is_err());
+    }
     #[test]
     fn baseline_comparison_does_not_confuse_wallpaper_with_popup(){
         // The baseline may contain matching pixels; a raw present/absent
