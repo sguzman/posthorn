@@ -370,25 +370,12 @@ fn snapshot_frame_for_surface(
         };
         let mut style=config.style_for(&traits);
         if !style.get("invisible").is_some_and(|x|x=="1"||x=="true"){
-            // Mako's max_width excludes the synthetic [hidden] popup. It
-            // paints that popup with notif_width clamped to the real
-            // notification surface width, and may clip it at the edge.
-            if visible_count>0 {
-                let dimensions=frames.iter().map(|frame|(frame.width,frame.height))
-                    .collect::<Vec<_>>();
-                let anchor=surface_key.map(|key|key.2.as_str()).unwrap_or_else(||
-                    config.global.get("anchor").map(String::as_str).unwrap_or("top-right"));
-                let (canvas_width,_,_)=mako_stack_geometry(
-                    &dimensions,&margins,stack_alignment(anchor)
-                ).map_err(other)?;
-                let logical_width=(canvas_width/pixel_scale).max(1);
-                let configured=style.get("width")
-                    .and_then(|v|crate::config::parse_nonnegative_mako(v))
-                    .unwrap_or(300) as u32;
-                if configured>logical_width {
-                    style.insert("width".into(),logical_width.to_string());
-                }
-            }
+            // Pinned Mako render.c:442-484 lays out the synthetic hidden
+            // notification at its FULL configured width, then reports a
+            // canvas width based only on real notifications. Narrowing
+            // [hidden] before Pango layout changes wrapping and height.
+            // compose_mako_stack_with_visible_count performs the actual
+            // output clipping without mutating the hidden style width.
             frames.push(render_hidden_placeholder_scaled(hidden,total,&style,pixel_scale)
                 .map_err(other)?);
             margins.push(style.get("margin")
