@@ -56,7 +56,7 @@ fn set_mako_formatted_text(layout:&pango::Layout,rendered:&str){
 /// Cairo's process-dependent default. The isolated headless output uses
 /// an unknown subpixel order.
 fn set_unknown_subpixel_font_options(cr:&cairo::Context)->Result<(),String>{
-    let options=cairo::FontOptions::new().map_err(|e|e.to_string())?;
+    let mut options=cairo::FontOptions::new().map_err(|e|e.to_string())?;
     options.set_antialias(cairo::Antialias::Gray);
     cr.set_font_options(&options);
     Ok(())
