@@ -861,7 +861,24 @@ for impl in posthorn mako; do
   hidden_notify "$bus" 'Constant visible'
   two_bounds="$(capture_bounds "$impl-hidden-two")"
   hidden_notify "$bus" 'Constant visible'
-  three_bounds="$(capture_bounds "$impl-hidden-three")"
+  # The purple popup retains exactly the same size when %h/%t change;
+  # capture_bounds() can otherwise accept the OLD frame immediately.
+  # Wait until the newly painted full screenshot actually differs from
+  # the two-notification baseline, proving this compositor redraw.
+  hidden_repainted=0
+  for _ in {1..60}; do
+    three_bounds="$(capture_bounds "$impl-hidden-three")"
+    if ! ./target/debug/examples/qa_png_probe \
+      "$root/$impl-hidden-three.png" '#9361B2' 0 identical \
+      "$root/$impl-hidden-two.png" >/dev/null 2>&1; then
+      hidden_repainted=1; break
+    fi
+    sleep 0.1
+  done
+  [[ "$hidden_repainted" == 1 ]] || {
+    echo "Hidden %h/%t source fixture never repainted after third Notify: $impl"
+    exit 1
+  }
   echo "$impl scale-2 hidden substitutions after two: $two_bounds"
   echo "$impl scale-2 hidden substitutions after three: $three_bounds"
   if [[ "$impl" == posthorn ]]; then
