@@ -5695,3 +5695,41 @@ strict 24-task M0 92.292% → 92.333% (+0.042 pp).**
 The independent multiple-active-mode fixture remains uncredited.
 Physical Hyprland T503 remains 51% and the separately
 authorized production cutover T504 remains 0%.
+
+
+## Source-pinned simultaneous focus/quiet mode category sound parity (2026-10-26)
+
+The final isolated T502 sound fixture compares original pinned
+Mako v1.11.0 with Posthorn under independent scale-2 Sway and
+private D-Bus sessions. It reuses a disposable category warning
+`on-notify=exec` file-writing command rather than invoking
+any real sound player.
+
+After an initial warning hook, `SetModes as 3 focus quiet focus`
+deduplicates modes to `focus`, `quiet`. A subsequent
+warning notification emits no sound event because the quiet
+criterion overrides the category sound while the focus mode
+remains enabled. `SetModes as 1 focus` does not replay
+existing hooks and a new warning triggers exactly one
+sound event. `SetModes as 0` clears all modes, also
+without replay; a final warning Notify triggers the
+expected new event. Both daemons produce identical
+complete event files and preserve the same D-Bus ID order.
+
+The executable fixture, the full Rust and private D-Bus tests,
+and the isolated Wayland suite passed on the **same
+acceptance checkpoint**.
+
+[Executable Mako comparison e18f674](https://github.com/sguzman/posthorn/commit/e18f6746a593ea63832c13fabced1e59a68f762d) ·
+[Green pinned-Mako differential 40401111270](https://github.com/sguzman/posthorn/actions/runs/40401111270) ·
+[Green Rust/Wayland CI 40401111461](https://github.com/sguzman/posthorn/actions/runs/40401111461).
+
+**Accepted T502 95% → 96% (+1 pp);
+color/sound feature 95% → 96%; P5 61.25% → 61.50%
+(display 62% with Python nearest-even rounding);
+strict 24-task M0 92.333% → 92.375%
+(+0.042 percentage points).** This establishes
+source-matched logical sound-hook routing, not
+physical speaker output. Physical Hyprland QA T503
+remains 51%, authorized Mako production switch T504
+remains 0%, and the installed user session was untouched.
