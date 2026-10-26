@@ -45,7 +45,11 @@ its disposable private config and calls `fr.emersion.Mako.Reload`. It
 checks that the existing popup acquires the new background color and
 loses the old one. After `CloseNotification`, it verifies both that the
 control entry disappears and that the final matched pixel count returns
-close to its original baseline. These comparisons reject false positives
+close to its original baseline. A second synthetic notification uses an
+explicit finite expiry timeout; the harness requires it to appear on
+real Hyprland, disappear without a CloseNotification call, and vanish
+from the active private control API. This verifies real-compositor
+expiry scheduling without altering the public service. These comparisons reject false positives
 from an existing wallpaper or application that already uses the QA
 colors. Compositor queries and screenshot captures have explicit timeouts;
 the runner terminates its child process and deletes temporary captures
