@@ -3876,3 +3876,56 @@ Actual Hyprland T503 remains **51%**, and authorized
 reversible production cutover T504 remains **0%**.
 No installed Mako, live bus, or personal Hyprland setup
 was accessed or modified.
+
+## Makoctl menu diagnostic precedence and C-visible failure text (2026-10-25)
+
+Pinned Mako v1.11.0 `makoctl.c:590-783` emits its own
+capitalized error strings and checks for failed `getline()` before
+the following `waitpid()`. An empty helper stdout therefore reports
+`No action selected` even if that menu helper also exited nonzero.
+When the helper returned a selected line, a nonzero wait status instead
+reports `Menu failed with exit code N` or
+`Menu failed with signal N` before comparing the label against
+notification actions. An unmatched title reports `Action not found`.
+The earlier Posthorn implementation waited first, returned a generic
+exit-status string, and added a `posthornctl:` prefix to all errors.
+
+Posthorn now records those source-level distinctions with a typed
+menu diagnostic that bypasses the generic development prefix.
+`ListNotifications` search reports `Notification not found`;
+an actionless notification reports `Notification has no actions`.
+The helper's first physical line and C NUL comparison remain as
+previously accepted. An invalid UTF-8 prefix before NUL cannot equal
+a valid D-Bus action label, so it now reports `Action not found`
+instead of a Rust UTF-8 decoding diagnostic. The child is still
+reaped on empty output, avoiding a zombie while preserving the same
+observable error precedence. No production bus name or daemon
+configuration is changed.
+
+A synthetic shell-based regression covers empty helper output with
+exit code 7, a valid selected title followed by exit code 7, a
+nonmatching selected title, invalid selection bytes, and selection
+followed by process termination with SIGTERM. It also checks the
+source diagnostic strings. The final synthetic PID fixture was
+corrected after an intermediate failed CI run caused by an invalid
+one-dollar shell signal target; that intermediate failure was not
+counted as acceptance.
+
+- [Pinned Makoctl menu implementation](https://github.com/emersion/mako/blob/v1.11.0/makoctl.c#L590-L783)
+- [Menu selection correction 5474576](https://github.com/sguzman/posthorn/commit/54745760a5ab8656a4424f05e78cb87f33d58457)
+- [Exact CLI menu error rendering fcd55d9](https://github.com/sguzman/posthorn/commit/fcd55d9357f6e7b11e941f40006c5277b585db49)
+- [Final passing synthetic regression 207cbbc](https://github.com/sguzman/posthorn/commit/207cbbc2cf991345a7d4695a57570b54aab7ec78)
+- [Full successful implementation CI 40248400777](https://github.com/sguzman/posthorn/actions/runs/40248400777):
+  **342 Rust library tests, 90 isolated private D-Bus tests,
+  complete headless Wayland acceptance**.
+
+**Accepted progress:** T501 **98% → 99% (+1 pp)**;
+P5 raw **56.50% → 56.75% (+0.25 pp)** (display **57%**);
+strict 24-task M0 **90.167% → 90.208% (+0.042 pp)** (display
+**90%**). The history/control feature inventory remains at
+**96%**. Private CI confirms the synthetic helper error
+behavior and existing D-Bus/Wayland regressions; it is **not**
+complete physical Hyprland or actual application menu activation
+parity. T503 remains **51%**, T504 remains **0%**. The installed
+Mako daemon, workstation bus, and personal Hyprland config remain
+untouched.
