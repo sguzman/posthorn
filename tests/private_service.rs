@@ -1737,6 +1737,88 @@ async fn category_sound_direct_replacements_follow_current_mode_without_replay()
 }
 
 
+
+#[tokio::test]
+async fn multiple_modes_route_category_sound_without_replaying_old_notifications()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Pinned dbus/mako.c:407-442 SetModes reapplies existing
+    // notification styles, but does not execute on-notify bindings.
+    // The active quiet mode overrides a category sound in the same way
+    // with multiple modes as with a single SetMode.
+    let dir=tempfile::tempdir()?;
+    let marker=dir.path().join("multiple-mode-sound-events");
+    let config=Config::parse(&format!(
+        "[category=warning]\non-notify=exec printf 'warning:%s\\n' \"$id\" >> '{}'\n[mode=focus]\nbackground-color=#304858\n[mode=quiet]\non-notify=none\n",
+        marker.display(),
+    ))?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let send=||{
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from("warning")).unwrap(),
+        )].into();
+        ("multi-mode-sound",0u32,"","Warning","",
+         Vec::<String>::new(),hints,-1i32)
+    };
+    let wait_for=|expected:String|{
+        let marker=marker.clone();
+        async move {
+            tokio::time::timeout(Duration::from_secs(3),async{
+                loop{
+                    if std::fs::read_to_string(&marker).unwrap_or_default()==expected{
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                }
+            }).await
+        }
+    };
+    let first:u32=desktop.call("Notify",&send()).await?;
+    let initial=format!("warning:{first}\n");
+    wait_for(initial.clone()).await?;
+
+    let _:()=ctl.call("SetModes",&(
+        vec!["focus".to_owned(),"quiet".to_owned(),"focus".to_owned()],
+    )).await?;
+    let current:Vec<String>=ctl.call("ListModes",&()).await?;
+    assert_eq!(current,vec!["focus","quiet"],
+        "SetModes must deduplicate modes in first-observed order");
+    let silent:u32=desktop.call("Notify",&send()).await?;
+    assert_ne!(silent,first);
+    let active=runtime.store.lock().unwrap().active().to_vec();
+    let chosen=active.iter().find(|note|note.id==silent)
+        .ok_or("quiet multi-mode notification missing")?;
+    let style=posthorn::desktop::style_for_note(
+        &runtime,chosen,&current);
+    assert_eq!(style["background-color"],"#304858",
+        "focus visual color must coexist with quiet sound suppression");
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,initial,
+        "category sounds must be silenced under a mixed mode set");
+
+    let _:()=ctl.call("SetModes",&(vec!["focus".to_owned()],)).await?;
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,initial,
+        "switching out of quiet mode must not replay earlier hooks");
+    let resumed:u32=desktop.call("Notify",&send()).await?;
+    wait_for(format!("{initial}warning:{resumed}\n")).await?;
+
+    let _:()=ctl.call("SetModes",&(Vec::<String>::new(),)).await?;
+    let modes:Vec<String>=ctl.call("ListModes",&()).await?;
+    assert!(modes.is_empty());
+    let after_empty=format!("{initial}warning:{resumed}\n");
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,after_empty,
+        "clearing modes is a style reapply, not a new Notify");
+    let final_id:u32=desktop.call("Notify",&send()).await?;
+    wait_for(format!("{after_empty}warning:{final_id}\n")).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),4);
+    Ok(())
+}
+
 #[tokio::test]
 async fn category_sound_stack_tag_updates_honor_quiet_mode_and_app_scope()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
