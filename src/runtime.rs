@@ -557,6 +557,65 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn implicit_mako_default_config_reselects_on_reload_and_rejects_bad_candidates(){
+        // Environment variables are process-global; run all HOME/XDG
+        // mutations in a subprocess, not a parallel Rust test thread.
+        const MARKER:&str="POSTHORN_DEFAULT_RELOAD_CHILD";
+        const HOME_ENV:&str="POSTHORN_DEFAULT_RELOAD_HOME";
+        const XDG_ENV:&str="POSTHORN_DEFAULT_RELOAD_XDG";
+        if std::env::var_os(MARKER).is_some(){
+            let home=std::path::PathBuf::from(std::env::var_os(HOME_ENV).unwrap());
+            let xdg=std::path::PathBuf::from(std::env::var_os(XDG_ENV).unwrap());
+            let legacy=home.join(".mako/config");
+            let modern=xdg.join("mako/config");
+            let override_width=vec![("width".to_string(),"205".to_string())];
+            let runtime=SharedRuntime::from_mako_defaults_with_cli_overrides(
+                &override_width
+            ).unwrap();
+            assert_eq!(runtime.config().global["width"],"205");
+            assert_eq!(runtime.config().max_history,4,
+                "legacy config must precede XDG even when both exist");
+            std::fs::remove_file(&legacy).unwrap();
+            runtime.reload().unwrap();
+            assert_eq!(runtime.config().global["width"],"205");
+            assert_eq!(runtime.config().max_history,7,
+                "Reload must rediscover the now-preferred XDG candidate");
+            let prior=runtime.revision();
+            std::fs::write(&modern,"width=invalid\nmax-history=2\n").unwrap();
+            assert!(runtime.reload().is_err(),
+                "invalid discovered file may not replace a valid theme");
+            assert_eq!(runtime.config().max_history,7);
+            assert_eq!(runtime.revision(),prior);
+            std::fs::remove_file(&modern).unwrap();
+            runtime.reload().unwrap();
+            assert_eq!(runtime.config().global["width"],"205",
+                "CLI overrides still apply to Mako's built-in defaults");
+            assert_ne!(runtime.config().max_history,7);
+            assert_eq!(runtime.revision(),prior+1);
+            return;
+        }
+        let dir=tempfile::tempdir().unwrap();
+        let home=dir.path().join("home");
+        let xdg=dir.path().join("xdg");
+        std::fs::create_dir_all(home.join(".mako")).unwrap();
+        std::fs::create_dir_all(xdg.join("mako")).unwrap();
+        std::fs::write(home.join(".mako/config"),
+            "width=148\nmax-history=4\n").unwrap();
+        std::fs::write(xdg.join("mako/config"),
+            "width=176\nmax-history=7\n").unwrap();
+        let result=std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact","runtime::tests::implicit_mako_default_config_reselects_on_reload_and_rejects_bad_candidates","--nocapture"])
+            .env(MARKER,"1")
+            .env(HOME_ENV,&home)
+            .env(XDG_ENV,&xdg)
+            .env("HOME",&home)
+            .env("XDG_CONFIG_HOME",&xdg)
+            .output().unwrap();
+        assert!(result.status.success(),
+            "isolated Mako default-config Reload regression: {result:?}");
+    }
+
+    #[test]
     fn reload_replays_cli_options_after_disk_file_in_original_order(){
         let dir=tempfile::tempdir().unwrap();
         let file=dir.path().join("mako.conf");
