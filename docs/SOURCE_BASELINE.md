@@ -5663,3 +5663,35 @@ strict 24-task M0 **92.208% → 92.292%
 (+0.083 percentage points)**. Exact real audio and
 physical Hyprland remain unverified; T503 stays 51%,
 authorized Mako production cutover T504 stays 0%.
+
+
+## Source-pinned history restoration does not replay category sounds (2026-10-26)
+
+The source's `fr.emersion.Mako.RestoreNotification` archives and
+restores a notification without rerunning the `on-notify=exec`
+binding. Posthorn now has a matching executable comparison
+under isolated 2× Sway and separate private D-Bus names:
+
+1. Original Mako and Posthorn independently receive a warning
+   with a configured file-backed `on-notify=exec` command.
+2. A Freedesktop `CloseNotification` archives it; Mako's
+   `RestoreNotification` restores the actual warning entry.
+3. The temporary sound event file remains **unchanged**
+   after restoring history.
+4. A new Notify gets a new ID and emits exactly one warning
+   hook. Full event files match byte-for-byte across daemons.
+
+Both the pinned original-Mako executable comparison and the
+full Rust/isolated Wayland workflow passed. No speaker, public
+notification bus, Hyprland config or installed Mako was used.
+
+[Executable source-pinned fixture aa15614](https://github.com/sguzman/posthorn/commit/aa156146554511da3fda712dcf24370206e7806f) ·
+[Green original-Mako differential 40400279322](https://github.com/sguzman/posthorn/actions/runs/40400279322) ·
+[Green Rust/Wayland 40400279569](https://github.com/sguzman/posthorn/actions/runs/40400279569).
+
+**Accepted T502 94% → 95% (+1 pp); category-color/sound
+feature 94% → 95%; P5 61.00% → 61.25%;
+strict 24-task M0 92.292% → 92.333% (+0.042 pp).**
+The independent multiple-active-mode fixture remains uncredited.
+Physical Hyprland T503 remains 51% and the separately
+authorized production cutover T504 remains 0%.
