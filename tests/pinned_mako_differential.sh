@@ -268,3 +268,46 @@ pixel_slack=$((mc/20+20))
   exit 1
 }
 echo 'Pinned Mako/Posthorn Pango markup and format geometry: MATCH'
+
+# The same pinned source also requires markup=0 to escape sender-provided
+# body tags rather than interpreting them as bold/italic/underline. Compare
+# actual text coverage under both executables, not a Posthorn-only fixture.
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+clear_color '#416D98'
+sed -i 's/^markup=1$/markup=0/' "$root/markup.conf"
+./target/debug/posthorn --experimental-private-desktop "$root/markup.conf" \
+  >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.posthorn.Development
+markup_notify org.posthorn.Development
+post_literal="$(markup_measure posthorn-literal org.posthorn.Development)"
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+clear_color '#416D98'
+"$mako_binary" -c "$root/markup.conf" >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.freedesktop.Notifications
+markup_notify org.freedesktop.Notifications
+mako_literal="$(markup_measure mako-literal org.freedesktop.Notifications)"
+read -r lp0 lp1 lp2 lp3 lpc <<< "$post_literal"
+read -r lm0 lm1 lm2 lm3 lmc <<< "$mako_literal"
+lpw=$((lp1-lp0+1)); lph=$((lp3-lp2+1))
+lmw=$((lm1-lm0+1)); lmh=$((lm3-lm2+1))
+echo "Posthorn markup-disabled literal body: background $lpw x $lph; text pixels $lpc"
+echo "Mako v1.11.0 markup-disabled literal body: background $lmw x $lmh; text pixels $lmc"
+(( lpw>=160 && lmw>=160 && lph>=40 && lmh>=40 && lpc>=20 && lmc>=20 )) || {
+  echo 'Markup-disabled text or layout unexpectedly absent'; exit 1;
+}
+(( (lpw-lmw)<=2 && (lmw-lpw)<=2 && (lph-lmh)<=2 && (lmh-lph)<=2 )) || {
+  echo 'Pinned Mako/Posthorn literal-body geometry differs'; exit 1;
+}
+literal_slack=$((lmc/20+20))
+(( (lpc-lmc)<=literal_slack && (lmc-lpc)<=literal_slack )) || {
+  echo "Pinned Mako/Posthorn literal-body text coverage differs by more than $literal_slack pixels"
+  exit 1
+}
+[[ "$lpc" != "$pc" && "$lmc" != "$mc" ]] || {
+  echo 'markup=0 did not materially change literal-tag text coverage'; exit 1
+}
+echo 'Pinned Mako/Posthorn markup-disabled literal-body format: MATCH'
