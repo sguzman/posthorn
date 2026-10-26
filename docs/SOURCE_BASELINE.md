@@ -5479,3 +5479,47 @@ T104 remains 98%, physical Hyprland T503
 51%, and authorized production switch T504 0%.
 No active Mako, workstation configuration or
 production D-Bus ownership was changed.
+
+## Source-pinned file-backed category sounds and quiet mode (2026-10-26)
+
+Mako v1.11.0 implements application-specific and category-specific
+sound commands through ordinary ordered criteria with
+`on-notify=exec`. The source's `notification_execute_binding`
+passes the notification ID as a shell `id` variable; there
+is no Mako-native audio protocol. The control interface
+`fr.emersion.Mako.SetMode` updates active mode criteria.
+
+A permanent guarded differential now checks the **original
+Mako executable** against Posthorn in the same isolated
+2× Sway/private D-Bus environment. Both daemons load
+synthetic rules for `[category=success]`,
+`[category=failure]`, `[category=warning]`, followed
+by `[mode=quiet] on-notify=none`. Rather than
+playing any sound, the selected hook appends its
+category and D-Bus-assigned ID to a disposable file.
+
+Each daemon independently passed this observable sequence:
+
+1. Three notifications with distinct category hints caused
+   exactly three matching file-backed hooks.
+2. `SetMode quiet` and another warning notification
+   produced **no additional hook**, without blocking Notify.
+3. `SetMode default` and a new warning notification
+   resumed the warning hook exactly once.
+4. The complete source-Mako and Posthorn event files
+   compared byte-for-byte without differences.
+
+[Executable comparison bcbf1be](https://github.com/sguzman/posthorn/commit/bcbf1bec67ea6729b20c0003681b14e3398c3732) ·
+[Green pinned original-Mako differential 40388975526](https://github.com/sguzman/posthorn/actions/runs/40388975526) ·
+[Green Rust/Wayland CI 40388975466](https://github.com/sguzman/posthorn/actions/runs/40388975466).
+The source-pinned workflow passed 355 library tests,
+100 isolated private D-Bus tests and all existing
+compositor comparison fixtures.
+
+**Accepted T502 87% → 88% (+1 pp), color/sound feature
+87% → 88%, P5 59.25% → 59.50% (rounded 60%),
+strict 24-task M0 92.000% → 92.042%
+(+0.042 percentage points).** These are file-backed
+source semantics, **not physical audio acceptance**.
+Real Hyprland T503 remains 51%, and the explicitly
+authorized production Mako switch T504 remains 0%.
