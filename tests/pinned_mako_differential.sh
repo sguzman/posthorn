@@ -688,3 +688,69 @@ for variant in ellipsized wrapped; do
   daemon_pid=""
   echo "Pinned Mako/Posthorn actual 2x $variant Pango wrapping and ink: MATCH"
 done
+
+# T205 fallback at the *final template markup* boundary:
+# pinned render.c's pango_parse_markup failure means the fully
+# substituted (already-escaped) format is passed to set_text
+# literally, not silently reconstructed from summary/body.
+# Compare both a valid template control and an unmatched opening
+# <b> template on a physical 2x compositor, then require them to
+# render differently from each other but exactly like pinned Mako.
+cat >"$root/final-template.conf" <<'EOF_FINAL_TEMPLATE'
+width=192
+height=160
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+markup=1
+format=<b>Alert: %s</b>
+background-color=#416D98
+text-color=#E5C58B
+EOF_FINAL_TEMPLATE
+valid_template=""
+invalid_template=""
+for variant in valid invalid; do
+  if [[ "$variant" == invalid ]]; then
+    sed -i 's|^format=.*$|format=<b>Alert: %s|' "$root/final-template.conf"
+  fi
+  clear_color '#416D98'
+  ./target/debug/posthorn --experimental-private-desktop "$root/final-template.conf" \
+    >"$root/daemon.log" 2>&1 &
+  daemon_pid=$!
+  wait_for_bus org.posthorn.Development
+  markup_notify org.posthorn.Development
+  post_template="$(markup_measure "posthorn-template-$variant" org.posthorn.Development)"
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+  clear_color '#416D98'
+  "$mako_binary" -c "$root/final-template.conf" >"$root/daemon.log" 2>&1 &
+  daemon_pid=$!
+  wait_for_bus org.freedesktop.Notifications
+  markup_notify org.freedesktop.Notifications
+  mako_template="$(markup_measure "mako-template-$variant" org.freedesktop.Notifications)"
+  echo "Posthorn scale-2 $variant format-template fallback: $post_template"
+  echo "Pinned Mako scale-2 $variant format-template fallback: $mako_template"
+  [[ "$post_template" == "$mako_template" ]] || {
+    echo "Pinned Mako/Posthorn source-final $variant template Pango geometry differs"
+    exit 1
+  }
+  ./target/debug/examples/qa_png_probe \
+    "$root/posthorn-template-$variant-markup.png" '#E5C58B' 0 identical \
+    "$root/mako-template-$variant-markup.png"
+  if [[ "$variant" == valid ]]; then
+    valid_template="$post_template"
+  else
+    invalid_template="$post_template"
+  fi
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+  echo "Pinned Mako/Posthorn physical 2x $variant final-format markup: MATCH"
+done
+[[ "$valid_template" != "$invalid_template" ]] || {
+  echo 'Valid and invalid final format templates unexpectedly paint identically'
+  exit 1
+}
