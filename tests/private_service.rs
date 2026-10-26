@@ -1748,9 +1748,9 @@ async fn category_sound_stack_tag_updates_honor_quiet_mode_and_app_scope()
     let dir=tempfile::tempdir()?;
     let marker=dir.path().join("tag-sound-events");
     let config=Config::parse(&format!(
-        "[category=success]\\non-notify=exec printf 'success:%s\\\\n' \"$id\" >> '{}'\\n\\
-         [category=warning]\\non-notify=exec printf 'warning:%s\\\\n' \"$id\" >> '{}'\\n\\
-         [mode=quiet]\\non-notify=none\\n",
+        "[category=success]\non-notify=exec printf 'success:%s\\n' \"$id\" >> '{}'\n\
+         [category=warning]\non-notify=exec printf 'warning:%s\\n' \"$id\" >> '{}'\n\
+         [mode=quiet]\non-notify=none\n",
         marker.display(),marker.display(),
     ))?;
     let (conn,runtime)=open_private_service(config).await?;
@@ -1780,11 +1780,11 @@ async fn category_sound_stack_tag_updates_honor_quiet_mode_and_app_scope()
         }
     };
     let id:u32=desktop.call("Notify",&notify("one","success")).await?;
-    let first=format!("success:{id}\\n");
+    let first=format!("success:{id}\n");
     wait_for(first.clone()).await?;
     let same:u32=desktop.call("Notify",&notify("one","warning")).await?;
     assert_eq!(same,id,"stack tag must preserve the same application's ID");
-    let before_quiet=format!("{first}warning:{id}\\n");
+    let before_quiet=format!("{first}warning:{id}\n");
     wait_for(before_quiet.clone()).await?;
 
     let _:()=ctl.call("SetMode",&("quiet",)).await?;
@@ -1801,14 +1801,14 @@ async fn category_sound_stack_tag_updates_honor_quiet_mode_and_app_scope()
         "leaving quiet mode alone must not replay suppressed tag sounds");
     let resumed:u32=desktop.call("Notify",&notify("one","success")).await?;
     assert_eq!(resumed,id);
-    let after_resumed=format!("{before_quiet}success:{id}\\n");
+    let after_resumed=format!("{before_quiet}success:{id}\n");
     wait_for(after_resumed.clone()).await?;
 
     // A different sender application using the identical tag must create
     // its OWN notification; it does not replace the prior app's ID.
     let other:u32=desktop.call("Notify",&notify("two","warning")).await?;
     assert_ne!(other,id);
-    wait_for(format!("{after_resumed}warning:{other}\\n")).await?;
+    wait_for(format!("{after_resumed}warning:{other}\n")).await?;
     assert_eq!(runtime.store.lock().unwrap().active().len(),2);
     Ok(())
 }
