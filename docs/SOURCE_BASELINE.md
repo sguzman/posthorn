@@ -3976,3 +3976,43 @@ strict M0 across 24 tasks **90.208% → 90.250%
 (+0.042 pp)**. Displayed M0 stays 90%, P1 stays 95%.
 This does not complete T402 or establish physical Hyprland
 acceptance; installed Mako and the real notification bus are untouched.
+
+## Oversized Mako border-size preserves source rectangle geometry (2026-10-25)
+
+Pinned Mako v1.11.0 `config.c:584-585` permits any
+nonnegative signed `border-size` independently of the configured
+notification `width` or `height`. Its
+`render.c:102,139-145,199,215-225,260-269` uses that original
+configured value directly for text bounds, notification height,
+the background centerline path and the final Cairo border stroke.
+It never clamps the border to half the notification width or height.
+
+Posthorn previously truncated border size independently in two
+places: text/height measurement used `min(border,width/2)`, and
+painting used `min(border,width/2,height/2)`. This changed the
+height and visible outline of a valid thick-border notification.
+Both limits have been removed. The existing maximum physical SHM
+allocation size remains enforced; this is an exact style/layout
+correction, not an unbounded memory allocation allowance.
+
+A source-derived fixture uses `width=200`, `height=90`,
+`padding=0`, `border-size=110`, `format=%s`, no icon,
+and empty summary/body. Mako measures the resulting popup as
+**200×220 logical pixels**, since it retains the full pair
+of 110px borders, not 200×200 as the previous Posthorn half-width
+clamp did. The regression asserts that measurement and actual
+raster dimensions agree at both 1× and 2× output scales,
+including correct physical pixel-buffer lengths.
+
+- [Pinned Mako config.c and render.c](https://github.com/emersion/mako/blob/v1.11.0/render.c#L99-L225)
+- [Accepted implementation and final test 5bafb1d](https://github.com/sguzman/posthorn/commit/5bafb1d4ebcd83cb550df851eda9729572b0b375)
+- [Fully green Rust / D-Bus / isolated Wayland CI 40250768590](https://github.com/sguzman/posthorn/actions/runs/40250768590):
+  **344 Rust library tests, 90 private D-Bus tests,
+  complete headless compositor suite**.
+
+**Accepted progress:** T105 **89% → 90% (+1 pp)**,
+P1 raw **95.20% → 95.40% (+0.20 pp)**,
+strict 24-task M0 **90.250% → 90.292% (+0.042 pp)**.
+No new acceptance is claimed for T402 at 99%, real Hyprland
+at T503 51%, or opt-in production cutover T504 0%.
+Installed Mako and personal Hyprland configuration remain untouched.
