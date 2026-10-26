@@ -4858,3 +4858,44 @@ actual Hyprland session. T503 physical Hyprland remains 51%;
 T504 explicitly authorized reversible production cutover remains 0%.
 Original installed Mako, public notification bus, and workstation
 configuration were never modified.
+
+## Pinned Mako rounded-popup Pango height-cap executable parity (2026-10-26)
+
+Original Mako v1.11.0 uses `style->height` to set the Pango
+text layout limit in `render.c:139-155` and **only afterward**
+expands the painted popup to satisfy the left and right rounded
+corner-height pairs in `render.c:208-213`. The physical popup
+becoming taller must not give the text a second opportunity to
+reflow beyond the configured maximum.
+
+A private test config sets **height=45, width=180, font=Sans 17,
+padding=4, border-radius=55**, and sends the *same* synthetic
+markup-formatted notification to Posthorn and original pinned
+Mako sequentially, on the same isolated scale-1 Sway display.
+The 55px upper/lower corner radii force a roughly 110px popup
+even though the Pango content is still height-constrained.
+
+| Captured metric | Posthorn | Original Mako |
+| --- | ---: | ---: |
+| Painted background bounds | **178 × 110 px** | **178 × 110 px** |
+| Text-color pixels | **106** | **106** |
+
+The exact glyph-coverage match is important: testing only popup
+height would not detect a renderer that incorrectly displays
+additional lines of text after enlarging the background.
+
+[Implementation of upstream-configured Pango cap](https://github.com/sguzman/posthorn/commit/97cd33df4ff641f46bcca7c09f483d326e6306e8) ·
+[permanent upstream-executable regression](https://github.com/sguzman/posthorn/commit/c9b6b81ec4fb89a596d8418c1d5352e07874f2ad) ·
+[rounded generated-roadmap correction](https://github.com/sguzman/posthorn/commit/64cf19d78612eb75d91e470f4c481c720e507521) ·
+[green source-pinned differential 40355426136](https://github.com/sguzman/posthorn/actions/runs/40355426136),
+which also passed **352 Rust library tests, 100 private D-Bus
+tests, and earlier exact 1×/2× executable comparisons**.
+
+**New independent source-backed acceptance:** T105
+**97% → 98% (+1 pp)**, phase P1 **96.8% → 97.0% (+0.2 pp)**,
+strict 24-task M0 **91.208% → 91.250% (+0.042 pp)**.
+This proves the accepted rounded height-cap fixture, not all
+possible font/rendering layouts. Physical Hyprland T503 remains
+51%; separately authorized reversible production cutover T504
+remains 0%. Live Mako, the public notification bus, and workstation
+configuration were not changed.
