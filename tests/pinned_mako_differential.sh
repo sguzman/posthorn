@@ -1001,7 +1001,11 @@ markup=0
 background-color=#416D98
 text-color=#E5C58B
 EOF_CLI_DESKTOP
+cp "$root/cli-desktop.conf" "$root/cli-desktop-original.conf"
 for impl in posthorn mako; do
+  # Reset the file before each independent daemon run; preserve the
+  # same CLI overrides across startup and Reload.
+  cp "$root/cli-desktop-original.conf" "$root/cli-desktop.conf"
   clear_color '#416D98'
   if [[ "$impl" == posthorn ]]; then
     ./target/debug/posthorn --experimental-private-desktop "$root/cli-desktop.conf" \
@@ -1017,10 +1021,39 @@ for impl in posthorn mako; do
   markup_notify "$bus"
   bounds="$(markup_measure "$impl-cli-desktop" "$bus")"
   echo "$impl physical-2x startup CLI style override: $bounds"
+  # Config values changed on disk must reapply while the CLI width/height
+  # override remains in force. This validates the real D-Bus Reload path
+  # without claiming a production notification service.
+  sed -i 's/^width=144$/width=300/; s/^height=165$/height=180/; s/^background-color=#416D98$/background-color=#2A7F9B/' \
+    "$root/cli-desktop.conf"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  reload_ready=0
+  for _ in {1..60}; do
+    if grim "$root/$impl-cli-reloaded.png" 2>/dev/null; then
+      reload_bounds="$(./target/debug/examples/qa_png_probe \
+        "$root/$impl-cli-reloaded.png" '#2A7F9B' 400 bounds 2>/dev/null || true)"
+      if [[ -n "$reload_bounds" ]]; then reload_ready=1; break; fi
+    fi
+    sleep 0.1
+  done
+  [[ "$reload_ready" == 1 ]] || {
+    echo "$impl failed to repaint after CLI-precedence Reload"
+    cat "$root/daemon.log"; exit 1
+  }
+  read -r cx0 cx1 cy0 cy1 <<< "$reload_bounds"
+  (( cx1-cx0+1 == 410 )) || {
+    echo "$impl lost --width=205 during disk Reload: $reload_bounds"
+    exit 1
+  }
+  echo "$impl physical-2x post-Reload CLI width retention: $reload_bounds"
   kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
   daemon_pid=""
 done
 ./target/debug/examples/qa_png_probe \
   "$root/posthorn-cli-desktop-markup.png" '#E5C58B' 0 identical \
   "$root/mako-cli-desktop-markup.png"
-echo 'Pinned Mako/Posthorn private Wayland CLI startup override raster: MATCH'
+./target/debug/examples/qa_png_probe \
+  "$root/posthorn-cli-reloaded.png" '#2A7F9B' 0 identical \
+  "$root/mako-cli-reloaded.png"
+echo 'Pinned Mako/Posthorn private Wayland CLI startup and Reload override rasters: MATCH'
