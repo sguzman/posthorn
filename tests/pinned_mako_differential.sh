@@ -134,32 +134,36 @@ echo "Pinned Mako hidden bounds: $mako_bounds ($mw x $mh)"
 }
 echo 'Source-pinned Mako/Posthorn hidden-label geometry: MATCH'
 
-# Non-gating observation of upstream Mako's ambiguous max-visible=0
-# synthetic surface. render.c reports width=0 but nonzero height;
-# wayland.c may attempt a zero-width layer-shell configure. Do NOT
-# silently turn this into a passing source-parity claim. Observe the
-# actual pinned executable and record whether the pixel/color remains.
+# Pinned upstream Mako's max-visible=0 must also keep its daemon
+# alive and its hidden-only label absent. This is an executable
+# comparison with the already-accepted private Posthorn zero-visible
+# fixture, NOT an inference from render.c's reported width=0.
 sed -i 's/^max-visible=1$/max-visible=0/' "$root/mako.conf"
-if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
-    org.freedesktop.Notifications /fr/emersion/Mako fr.emersion.Mako Reload \
-    >"$root/hidden-zero-reload.log" 2>&1; then
-  sleep 0.5
-  if ! kill -0 "$daemon_pid" 2>/dev/null; then
-    echo 'UPSTREAM OBSERVATION max-visible=0: Mako exited after successful Reload'
-    cat "$root/daemon.log"
-  elif grim "$root/hidden-zero.png" 2>/dev/null; then
-    bounds="$(./target/debug/examples/qa_png_probe \
-      "$root/hidden-zero.png" '#9361B2' 1 bounds 2>/dev/null || true)"
-    if [[ -n "$bounds" ]]; then
-      echo "UPSTREAM OBSERVATION max-visible=0: hidden-only pixels at $bounds"
-    else
-      echo 'UPSTREAM OBSERVATION max-visible=0: no hidden-only label pixels'
-    fi
-  else
-    echo 'UPSTREAM OBSERVATION max-visible=0: screenshot unavailable'
-  fi
-else
-  echo 'UPSTREAM OBSERVATION max-visible=0: Reload failed; inspect daemon log'
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.freedesktop.Notifications /fr/emersion/Mako fr.emersion.Mako Reload \
+  >"$root/hidden-zero-reload.log" 2>&1 || {
   cat "$root/hidden-zero-reload.log"
   cat "$root/daemon.log"
-fi
+  echo 'Pinned upstream Mako rejected max-visible=0 reload'
+  exit 1
+}
+absent=0
+for _ in {1..35}; do
+  sleep 0.15
+  if ! kill -0 "$daemon_pid" 2>/dev/null; then
+    echo 'Pinned Mako exited after max-visible=0 reload'
+    cat "$root/daemon.log"; exit 1
+  fi
+  if grim "$root/hidden-zero.png" 2>/dev/null &&
+    ./target/debug/examples/qa_png_probe \
+      "$root/hidden-zero.png" '#9361B2' 1 absent >/dev/null 2>&1; then
+    absent=1; break
+  fi
+done
+[[ "$absent" == 1 ]] || {
+  echo 'Pinned Mako unexpectedly painted a hidden-only label'
+  cat "$root/daemon.log"; exit 1
+}
+busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s introspect \
+  org.freedesktop.Notifications /org/freedesktop/Notifications >/dev/null
+echo 'Pinned upstream max-visible=0: daemon alive, bus responsive, hidden-only pixels absent'
