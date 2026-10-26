@@ -551,3 +551,64 @@ for align in center right; do
   daemon_pid=""
   echo "Pinned Mako/Posthorn physical 2x Pango $align alignment: MATCH"
 done
+
+# Source-pinned T205: do not infer scale-2 markup correctness solely
+# from earlier scale-1 comparisons. Pango's physical AttrScale can
+# change wrapping and the literal/malformed fallback glyph footprint.
+# Exercise both branches with the same 2x Sway output and font install.
+cat >"$root/markup-two-x.conf" <<'EOF_TWO_X_MARKUP'
+width=180
+height=200
+font=Sans 17
+margin=0
+padding=4
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%s\n%b
+markup=0
+background-color=#416D98
+text-color=#E5C58B
+EOF_TWO_X_MARKUP
+for variant in literal malformed; do
+  if [[ "$variant" == malformed ]]; then
+    sed -i 's/^markup=0$/markup=1/' "$root/markup-two-x.conf"
+  fi
+  clear_color '#416D98'
+  ./target/debug/posthorn --experimental-private-desktop "$root/markup-two-x.conf" \
+    >"$root/daemon.log" 2>&1 &
+  daemon_pid=$!
+  wait_for_bus org.posthorn.Development
+  if [[ "$variant" == malformed ]]; then
+    markup_notify org.posthorn.Development "$malformed"
+  else
+    markup_notify org.posthorn.Development
+  fi
+  post_pixels="$(markup_measure "posthorn-two-x-$variant" org.posthorn.Development)"
+  post_ink="$(./target/debug/examples/qa_png_probe \
+    "$root/posthorn-two-x-$variant-markup.png" '#E5C58B' 20 bounds)"
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+  clear_color '#416D98'
+  "$mako_binary" -c "$root/markup-two-x.conf" >"$root/daemon.log" 2>&1 &
+  daemon_pid=$!
+  wait_for_bus org.freedesktop.Notifications
+  if [[ "$variant" == malformed ]]; then
+    markup_notify org.freedesktop.Notifications "$malformed"
+  else
+    markup_notify org.freedesktop.Notifications
+  fi
+  mako_pixels="$(markup_measure "mako-two-x-$variant" org.freedesktop.Notifications)"
+  mako_ink="$(./target/debug/examples/qa_png_probe \
+    "$root/mako-two-x-$variant-markup.png" '#E5C58B' 20 bounds)"
+  echo "Posthorn physical 2x $variant: bounds+pixels $post_pixels; ink $post_ink"
+  echo "Pinned Mako physical 2x $variant: bounds+pixels $mako_pixels; ink $mako_ink"
+  [[ "$post_pixels" == "$mako_pixels" && "$post_ink" == "$mako_ink" ]] || {
+    echo "Mako/Posthorn physical 2x $variant markup fallback differs"
+    exit 1
+  }
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+  echo "Pinned Mako/Posthorn physical 2x $variant markup fallback: MATCH"
+done
