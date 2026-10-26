@@ -778,9 +778,11 @@ impl LivePresenter {
     /// output= placement name: Mako's set_font_options reads surface_output.
     /// Before the first enter, no panel geometry may be assumed.
     pub fn output_subpixel(&self)->OutputSubpixel{
-        self.state.entered_output.as_ref()
-            .and_then(|target|self.state.output_subpixels.iter()
-                .find(|(proxy,_)|proxy==target).map(|(_,order)|*order))
+        let Some(target)=self.state.entered_output.as_ref() else{
+            return OutputSubpixel::Unassociated;
+        };
+        self.state.output_subpixels.iter()
+            .find(|(proxy,_)|proxy==target).map(|(_,order)|*order)
             .unwrap_or(OutputSubpixel::Unknown)
     }
 

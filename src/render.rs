@@ -56,15 +56,20 @@ fn set_mako_formatted_text(layout:&pango::Layout,rendered:&str){
 /// independently for each layer surface. Unknown/none use grayscale.
 #[derive(Clone,Copy,Debug,Default,Eq,PartialEq)]
 pub enum OutputSubpixel {
+    /// No wl_surface.enter yet: Mako leaves Cairo's font options alone.
+    Unassociated,
     #[default] Unknown, None,
     HorizontalRgb, HorizontalBgr, VerticalRgb, VerticalBgr,
 }
 fn set_mako_font_options(
     cr:&cairo::Context,subpixel:OutputSubpixel,
 )->Result<(),String>{
+    // Pinned render.c:82-83: without a surface_output Mako returns
+    // without applying any Cairo font options.
+    if subpixel==OutputSubpixel::Unassociated{return Ok(());}
     let mut options=cairo::FontOptions::new().map_err(|e|e.to_string())?;
     let order=match subpixel {
-        OutputSubpixel::Unknown|OutputSubpixel::None=>None,
+        OutputSubpixel::Unassociated|OutputSubpixel::Unknown|OutputSubpixel::None=>None,
         OutputSubpixel::HorizontalRgb=>Some(cairo::SubpixelOrder::Rgb),
         OutputSubpixel::HorizontalBgr=>Some(cairo::SubpixelOrder::Bgr),
         OutputSubpixel::VerticalRgb=>Some(cairo::SubpixelOrder::Vrgb),
@@ -595,6 +600,12 @@ pub fn render_hidden_placeholder_with_subpixel(
 fn pinned_mako_subpixel_font_options_match_all_wayland_orders(){
     let surface=cairo::ImageSurface::create(cairo::Format::ARgb32,16,16).unwrap();
     let context=cairo::Context::new(&surface).unwrap();
+    let mut previous=cairo::FontOptions::new().unwrap();
+    previous.set_antialias(cairo::Antialias::None);
+    context.set_font_options(&previous);
+    set_mako_font_options(&context,OutputSubpixel::Unassociated).unwrap();
+    assert_eq!(context.font_options().unwrap().antialias(),cairo::Antialias::None,
+        "Mako must leave Cairo font options untouched before wl_surface.enter");
     for (order,antialias,expected) in [
         (OutputSubpixel::Unknown,cairo::Antialias::Gray,None),
         (OutputSubpixel::None,cairo::Antialias::Gray,None),
