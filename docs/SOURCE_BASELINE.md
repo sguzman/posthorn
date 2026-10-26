@@ -4696,3 +4696,58 @@ strict 24-task M0 90.958% → 91.000% (+0.042 pp).**
 This narrow differential does not claim all rendering parity,
 full compositor-forced size behavior, or physical Hyprland QA.
 T503 remains 51% and T504 reversible authorized cutover remains 0%.
+
+## Pinned Mako Pango antialias and markup executable parity (2026-10-26)
+
+A direct source-pinned executable differential exposed a reproducible
+text-raster mismatch even when the two implementations produced
+identical notification dimensions. Posthorn used Cairo's implicit font
+antialiasing whereas original Mako v1.11.0
+`render.c:81-96,152-155` explicitly selects
+`CAIRO_ANTIALIAS_GRAY` for outputs reporting
+`WL_OUTPUT_SUBPIXEL_UNKNOWN` or `NONE`.
+
+The isolated Sway compositor reports that unknown/no-subpixel case.
+Posthorn now explicitly selects gray font antialiasing in **both Pango
+height measurement and actual painting**, matching the pinned source.
+An older independently constructed italic-overhang raster reference
+was updated to use the same upstream font options, **without
+relaxing its pixel-for-pixel assertion**. The native upstream
+configuration selects RGB/BGR subpixel antialias on other physical
+outputs, which is **not** claimed as fully verified here.
+
+[Gray option change 13879c0](https://github.com/sguzman/posthorn/commit/13879c0e975f7cab8070448c08ced8f5754f3e7c) ·
+[compile correction 4913a56](https://github.com/sguzman/posthorn/commit/4913a568eea47d236052eacefee084c58eccffac) ·
+[exact independent italic reference e4b2218](https://github.com/sguzman/posthorn/commit/e4b2218f88993ab12fad3f2fafe16788516ece4e).
+
+The independent executable harness compiles **original Mako v1.11.0
+from pinned source commit `91c6b799855762ad1eb8b4498967c270a339be0c`**
+and Posthorn, runs each sequentially on the same disposable
+Sway and private D-Bus session, and sends identical notifications.
+It measures popup geometry and the count of true text-color pixels
+for three distinct existing T205 formatting cases:
+
+| Sender/format case | Posthorn text pixels | Original Mako pixels | Canvas |
+|---|---:|---:|---|
+| Valid bold/italic/underlined body, markup on | 2,318 | 2,318 | 180 × 176 |
+| Literal escaped body tags, markup off | 1,420 | 1,420 | 180 × 176 |
+| Invalid sender body markup, escaped fallback | 1,619 | 1,619 | 180 × 176 |
+
+The first case **previously differed, 1,961 vs 2,318** under
+Cairo's defaults. Explicit grayscale font options remove the
+357-pixel discrepancy without widening tolerance.
+[Markup-off comparison cf7da93](https://github.com/sguzman/posthorn/commit/cf7da93c6d64b961ef0b90e5349e581abdedf9e4) ·
+[malformed markup fallback ee92f04](https://github.com/sguzman/posthorn/commit/ee92f04c595a00ed73bb4b2b58d43a8cfbb41efb) ·
+[full upstream differential and Rust/private D-Bus CI 40344072066](https://github.com/sguzman/posthorn/actions/runs/40344072066) ·
+[full isolated Wayland and Rust CI 40344072350](https://github.com/sguzman/posthorn/actions/runs/40344072350).
+**349 library tests, 100 private D-Bus tests and complete
+isolated Wayland acceptance passed.**
+
+Accepted T205 Pango/formatting increment:
+**86% → 88% (+2 pp)**; P2 **96.8% → 97.2% (+0.4 pp)**;
+strict 24-task M0 **91.000% → 91.083% (+0.083 pp)**.
+This does not claim general font equivalence on RGB/BGR
+wl_output subpixel geometries, physical Hyprland acceptance
+(T503 remains 51%) or the separately authorized reversible
+production Mako cutover (T504 remains 0%). No installed Mako,
+live standard notification bus or workstation configuration touched.
