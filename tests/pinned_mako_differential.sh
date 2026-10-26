@@ -1958,3 +1958,130 @@ done
 diff -u "$root/posthorn-failed-sound.events" "$root/mako-failed-sound.events"
 echo 'Pinned Mako/Posthorn failed category hook exit and subsequent quiet lifecycle: MATCH'
 
+# T502: visual category color and on-notify command selection must
+# remain synchronized across direct-ID replacement and SetMode quiet.
+# One active popup keeps the rendered state unambiguous on scale-2
+# Sway. No real audio is used. Compare entire captured pixels with Mako.
+sound_replace_category(){
+  local bus="$1" old_id="$2" category="$3" reply
+  reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /org/freedesktop/Notifications org.freedesktop.Notifications \
+    Notify 'susssasa{sv}i' \
+    'Pinned sound comparison' "$old_id" '' "Category $category" '' \
+    0 1 category s "$category" 30000)"
+  [[ "$reply" == u\ * ]] || {
+    echo "replacement category $category failed: $reply" >&2;return 1
+  }
+  echo "$reply" | cut -d ' ' -f 2
+}
+capture_category_frame(){
+  local impl="$1" stage="$2" color="$3" exclude="$4" stable=0
+  local frame="$root/$impl-category-$stage.png"
+  local prev="$root/$impl-category-$stage-previous.png"
+  for _ in {1..65};do
+    if grim "$frame" 2>/dev/null &&
+      ./target/debug/examples/qa_png_probe \
+        "$frame" "$color" 400 bounds >/dev/null 2>&1 &&
+      ./target/debug/examples/qa_png_probe \
+        "$frame" "$exclude" 1 absent >/dev/null 2>&1;then
+      if [[ -f "$prev" ]] &&
+        ./target/debug/examples/qa_png_probe \
+          "$frame" "$color" 0 identical "$prev" >/dev/null 2>&1;then
+        stable=$((stable+1))
+      else
+        stable=0
+      fi
+      if (( stable>=3 ));then return 0;fi
+      cp "$frame" "$prev"
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null;then
+      echo "$impl stopped during category raster $stage" >&2
+      cat "$root/daemon.log" >&2;return 1
+    fi
+    sleep 0.12
+  done
+  echo "$impl category raster never settled at $stage ($color)" >&2
+  cat "$root/daemon.log" >&2
+  return 1
+}
+for impl in posthorn mako;do
+  marker="$root/$impl-color-sound.events"
+  config="$root/$impl-color-sound.conf"
+  cat >"$config" <<EOF_COLOR_SOUND
+width=210
+height=90
+font=Sans 17
+margin=0
+padding=4
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%s
+markup=0
+on-notify=none
+[category=success]
+background-color=#305747
+on-notify=exec printf 'success:%s\n' "\$id" >> "$marker"
+[category=warning]
+background-color=#715536
+on-notify=exec printf 'warning:%s\n' "\$id" >> "$marker"
+[mode=quiet]
+on-notify=none
+EOF_COLOR_SOUND
+  clear_color '#305747'
+  clear_color '#715536'
+  if [[ "$impl" == posthorn ]];then
+    ./target/debug/posthorn --experimental-private-desktop \
+      "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+
+  id="$(sound_replace_category "$bus" 0 success)"
+  sound_wait_count "$marker" 1
+  capture_category_frame "$impl" success '#305747' '#715536'
+  [[ "$(tail -n 1 "$marker")" == "success:$id" ]] || exit 1
+
+  replaced="$(sound_replace_category "$bus" "$id" warning)"
+  [[ "$replaced" == "$id" ]] || {
+    echo "$impl changed ID during category replacement" >&2;exit 1
+  }
+  sound_wait_count "$marker" 2
+  capture_category_frame "$impl" warning '#715536' '#305747'
+  [[ "$(tail -n 1 "$marker")" == "warning:$id" ]] || exit 1
+
+  cp "$marker" "$root/$impl-color-sound-before-quiet.events"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetMode s quiet >/dev/null
+  replaced="$(sound_replace_category "$bus" "$id" success)"
+  [[ "$replaced" == "$id" ]] || exit 1
+  capture_category_frame "$impl" quiet '#305747' '#715536'
+  cmp -s "$marker" "$root/$impl-color-sound-before-quiet.events" || {
+    echo "$impl sounded a visually green replacement in quiet" >&2;exit 1
+  }
+
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetMode s default >/dev/null
+  replaced="$(sound_replace_category "$bus" "$id" warning)"
+  [[ "$replaced" == "$id" ]] || exit 1
+  sound_wait_count "$marker" 3
+  capture_category_frame "$impl" resumed '#715536' '#305747'
+  [[ "$(tail -n 1 "$marker")" == "warning:$id" ]] || exit 1
+
+  echo "$impl category color raster, replacement and quiet sound lifecycle: MATCH"
+  kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+diff -u "$root/posthorn-color-sound.events" "$root/mako-color-sound.events"
+for stage in success warning quiet resumed;do
+  ./target/debug/examples/qa_png_probe \
+    "$root/posthorn-category-$stage.png" '#E5C58B' 0 identical \
+    "$root/mako-category-$stage.png"
+  echo "Pinned Mako/Posthorn source color-and-sound $stage pixels: MATCH"
+done
+
