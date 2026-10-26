@@ -4537,3 +4537,37 @@ physical Hyprland T503 and authorized production cutover T504
 remain 51% and 0% respectively.
 No desktop notification bus registration, installed Mako daemon,
 Hyprland config or physical workstation state was modified.
+
+## Real Sway confirms hidden-only zero-width and reversible max-visible Reload (2026-10-26)
+
+Pinned Mako v1.11.0 `render.c:360-361,392-399,424-430,442-484`
+excludes synthetic hidden-count placeholders from `max_width`.
+The prior code correction and its Rust regression ensure that when
+`max-visible=0` all sender notifications remain active but
+no drawable popup is created. This acceptance extends that specific
+source-backed behavior to an actual isolated wlroots compositor.
+
+The guarded 1x private Sway workflow now launches Posthorn on its
+development-only D-Bus name, snapshots the headless output as a
+baseline, sends a real Freedesktop Notify under `max-visible=0`,
+and verifies that a uniquely colored synthetic-only placeholder
+does **not** change the screenshot. It then changes **only the
+disposable config file** to `max-visible=1`, calls Mako's Reload
+control, and confirms that the same previously hidden notification
+becomes visible on screen. Reloading back to `max-visible=0`
+returns the pixel count to baseline without replacing or
+destroying the sender's notification; the fixture finally closes
+the notification explicitly.
+
+[Accepted Sway regression b52da32](https://github.com/sguzman/posthorn/commit/b52da32bbc3fc7a814b648feed5b12f1a5d9123a) ·
+[green two-job CI 40327188322](https://github.com/sguzman/posthorn/actions/runs/40327188322):
+**348 Rust library tests, 100 private D-Bus tests, all isolated
+Wayland checks; explicit `Live Sway hidden-only canvas and reversible
+max-visible Reload: OK`**. No real Hyprland monitor, production
+Mako, speaker or live standard-name notification bus was involved.
+
+Accepted progress: **T105 layout/style 94% → 95%**;
+P1 **96.2% → 96.4%**; strict 24-task M0
+**90.875% → 90.917% (+0.042 percentage points)**.
+T503 physical Hyprland remains 51%; the separately authorized
+reversible Mako cutover T504 remains 0%.
