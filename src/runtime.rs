@@ -842,7 +842,7 @@ mod tests {
         // from notif->style.group_criteria_spec before destroying it.
         // [group-index=1] overrides group-by for a secondary member.
         let runtime=SharedRuntime::new(Config::parse(
-            "group-by=app-name\\n[group-index=1]\\ngroup-by=category\\n"
+            "group-by=app-name\n[group-index=1]\ngroup-by=category\n"
         ).unwrap());
         let now=Instant::now();
         let older=runtime.store.lock().unwrap().push(Request{
@@ -882,7 +882,7 @@ mod tests {
         // The deadline handler eventually calls exactly the same upstream
         // close_notification as a user-initiated dismissal.
         let runtime=SharedRuntime::new(Config::parse(
-            "group-by=app-name\\n[group-index=1]\\ngroup-by=category\\n"
+            "group-by=app-name\n[group-index=1]\ngroup-by=category\n"
         ).unwrap());
         let now=Instant::now();
         let older=runtime.store.lock().unwrap().push(Request{
@@ -918,7 +918,7 @@ mod tests {
         // The initial Notify style cannot match [anchor] because the
         // surface does not exist until after notification insertion.
         let runtime=SharedRuntime::new(Config::parse(
-            "group-by=app-name\\n[anchor=top-right]\\ngroup-by=category\\n"
+            "group-by=app-name\n[anchor=top-right]\ngroup-by=category\n"
         ).unwrap());
         let now=Instant::now();
         let older=runtime.store.lock().unwrap().push(Request{
