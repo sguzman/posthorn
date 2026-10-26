@@ -483,3 +483,71 @@ echo "Mako v1.11.0 radius-expanded height-cap: background $cmw x $cmh; text pixe
   exit 1
 }
 echo 'Pinned Mako/Posthorn radius-expanded configured Pango height-cap: MATCH'
+
+# Compare T205 Pango text-alignment against pinned Mako at actual scale 2.
+# Pixel *counts* alone do not catch misplaced center/right-aligned glyphs:
+# compare the absolute ink bounding rectangles for the same synthetic text.
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+clear_color '#416D98'
+swaymsg -s "$ipc" 'output HEADLESS-1 scale 2' >/dev/null
+alignment_scale_ready=0
+for _ in {1..60}; do
+  if swaymsg -s "$ipc" -t get_outputs >"$root/alignment-outputs.json" &&
+    grep -Eq '"scale":[[:space:]]*2([.]0+)?[,}]' "$root/alignment-outputs.json"; then
+    alignment_scale_ready=1; break
+  fi
+  sleep 0.15
+done
+[[ "$alignment_scale_ready" == 1 ]] || {
+  echo 'Private compositor did not return to scale 2 for Pango alignment'
+  cat "$root/alignment-outputs.json"
+  exit 1
+}
+cat >"$root/alignment.conf" <<'EOF_ALIGN'
+width=180
+height=120
+font=Sans 17
+margin=0
+padding=4
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%s
+markup=0
+text-alignment=center
+background-color=#416D98
+text-color=#E5C58B
+EOF_ALIGN
+for align in center right; do
+  sed -i "s/^text-alignment=.*/text-alignment=$align/" "$root/alignment.conf"
+  clear_color '#416D98'
+  ./target/debug/posthorn --experimental-private-desktop "$root/alignment.conf" \
+    >"$root/daemon.log" 2>&1 &
+  daemon_pid=$!
+  wait_for_bus org.posthorn.Development
+  markup_notify org.posthorn.Development
+  post_placement="$(markup_measure "posthorn-align-$align" org.posthorn.Development)"
+  post_ink="$(./target/debug/examples/qa_png_probe \
+    "$root/posthorn-align-$align-markup.png" '#E5C58B' 20 bounds)"
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+  clear_color '#416D98'
+  "$mako_binary" -c "$root/alignment.conf" >"$root/daemon.log" 2>&1 &
+  daemon_pid=$!
+  wait_for_bus org.freedesktop.Notifications
+  markup_notify org.freedesktop.Notifications
+  mako_placement="$(markup_measure "mako-align-$align" org.freedesktop.Notifications)"
+  mako_ink="$(./target/debug/examples/qa_png_probe \
+    "$root/mako-align-$align-markup.png" '#E5C58B' 20 bounds)"
+  echo "Posthorn 2x $align layout+coverage: $post_placement; text bounds: $post_ink"
+  echo "Mako 2x $align layout+coverage: $mako_placement; text bounds: $mako_ink"
+  [[ "$post_placement" == "$mako_placement" && "$post_ink" == "$mako_ink" ]] || {
+    echo "Pinned Mako/Posthorn 2x $align-aligned Pango geometry differs"
+    exit 1
+  }
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+  echo "Pinned Mako/Posthorn physical 2x Pango $align alignment: MATCH"
+done
