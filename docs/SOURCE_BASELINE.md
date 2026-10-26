@@ -5523,3 +5523,52 @@ strict 24-task M0 92.000% → 92.042%
 source semantics, **not physical audio acceptance**.
 Real Hyprland T503 remains 51%, and the explicitly
 authorized production Mako switch T504 remains 0%.
+
+## Executable category hook ordering, failed command, and color/sound parity (2026-10-26)
+
+The pinned Mako v1.11.0 source applies notification criteria in file
+order and launches `on-notify=exec` asynchronously; an external sound
+command's nonzero exit code does not reject Notify. Posthorn's
+private service now has **three separately observable executable
+comparisons** against the exact original Mako binary. All fixtures use
+temporary files, isolated Sway at physical scale 2, and private D-Bus.
+They never play audio or contact the user's installed daemon.
+
+**Ordered quiet/category criteria during Reload.** Initial
+`[mode=quiet]` before `[category=warning]` allows the later
+category hook to execute even in quiet. Reload changes section order
+to put quiet last, and subsequent warning notifications remain silent.
+SetMode default resumes warning hooks. Both implementations produce
+identical ordered, file-backed hook events without replay on Reload.
+[Fixture 70e98c6](https://github.com/sguzman/posthorn/commit/70e98c63556e29f4ae7201bd0107a510fc6a24c6).
+
+**Failed category hook recovery.** A file-backed category hook
+deliberately terminates with exit status 27 after writing its ID.
+Both binaries continue to accept notifications, execute subsequent
+hooks, suppress them during quiet and resume after quiet. Their
+complete event outputs match byte-for-byte.
+[Fixture 16feca0](https://github.com/sguzman/posthorn/commit/16feca0d642a22708a51fc91cb8dbbac9c62c0e1).
+
+**Color and hook selection through explicit-ID replacement.**
+A success notification paints `#305747` and runs a success hook;
+replacing the same ID with warning paints `#715536` and runs its
+warning hook. A success replacement in quiet paints green without
+a hook, and a warning replacement after quiet resumes the warning
+hook. All four full decoded screenshots match source Mako with
+**zero differing pixels**, as do the complete file-backed
+sound-command event files.
+[Fixture 80b3a21](https://github.com/sguzman/posthorn/commit/80b3a21a16fcc993551e70c46154b7e54b67f40a).
+
+[Green pinned-Mako differential 40390943775](https://github.com/sguzman/posthorn/actions/runs/40390943775) ·
+[green full Rust/isolated Wayland 40390943760](https://github.com/sguzman/posthorn/actions/runs/40390943760).
+The differential passed 355 Rust library tests, 100 isolated private
+D-Bus tests and all retained compositor comparisons.
+
+**Conservative accepted progress:** T502 **88% → 91% (+3 pp)**,
+category-color/sound feature **88% → 91% (+3 pp)**,
+P5 **59.50% → 60.25%**, strict 24-task M0
+**92.042% → 92.167% (+0.125 percentage points)**.
+These are independent pinned-source parity cases, not physical
+speaker/Hyprland acceptance. T503 remains 51%; authorized
+production Mako cutover T504 remains 0%. No installed service,
+public bus, session config or user's real audio hardware was used.
