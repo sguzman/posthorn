@@ -2327,6 +2327,73 @@ async fn app_scoped_category_sound_mute_preserves_other_application_audio()
 }
 
 #[tokio::test]
+async fn nonzero_category_sound_command_exit_does_not_reject_notify()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Mako notification.c:403-435 double-forks on-notify=exec and
+    // never propagates the hook's shell exit status to Notify. A failed
+    // sound player must not stop a notification or poison later hooks.
+    let dir=tempfile::tempdir()?;
+    let marker=dir.path().join("failing-category-sound-events");
+    let config=Config::parse(&format!(
+        "[category=warning]\nbackground-color=#715536\n\
+         on-notify=exec printf 'failure:%s\\n' \"$id\" >> '{}'; exit 27\n\
+         [mode=quiet]\non-notify=none\n",
+        marker.display(),
+    ))?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let send=||{
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from("warning")).unwrap(),
+        )].into();
+        ("failed-sound-player",0u32,"","Still visible","",
+         Vec::<String>::new(),hints,-1i32)
+    };
+    let wait_for=|expected:String|{
+        let marker=marker.clone();
+        async move {
+            tokio::time::timeout(Duration::from_secs(3),async{
+                loop {
+                    if std::fs::read_to_string(&marker).unwrap_or_default()==expected{
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                }
+            }).await
+        }
+    };
+    let first:u32=desktop.call("Notify",&send()).await?;
+    let initial=format!("failure:{first}\n");
+    wait_for(initial.clone()).await?;
+    let first_note=runtime.store.lock().unwrap().active().iter()
+        .find(|note|note.id==first).cloned().ok_or(
+            "the failing sound player must not dismiss the notification"
+        )?;
+    let style=posthorn::desktop::style_for_note(
+        &runtime,&first_note,&["default".to_owned()]);
+    assert_eq!(style["background-color"],"#715536");
+
+    let _:()=ctl.call("SetMode",&("quiet",)).await?;
+    let quiet:u32=desktop.call("Notify",&send()).await?;
+    assert_ne!(quiet,first);
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,initial,
+        "quiet mode must suppress even an otherwise failing sound command");
+    let _:()=ctl.call("SetMode",&("default",)).await?;
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,initial,
+        "mode reapplication must not replay a failed hook");
+    let subsequent:u32=desktop.call("Notify",&send()).await?;
+    wait_for(format!("{initial}failure:{subsequent}\n")).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),3,
+        "both nonzero-exit hooks and quiet mode must retain the notifications");
+    Ok(())
+}
+
+#[tokio::test]
 async fn category_sound_stack_tag_updates_honor_quiet_mode_and_app_scope()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
