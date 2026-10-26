@@ -14,6 +14,10 @@ fn parse_mako_cli_args(arguments:&[String])
     let mut i=0;
     while i<arguments.len(){
         let token=arguments[i].as_str();
+        // Pinned Mako calls GNU getopt_long(): a standalone "--"
+        // terminates option scanning. Trailing operands and option-like
+        // strings are not reinterpreted as config overrides.
+        if token=="--" { break; }
         if token=="-c"||token=="--config" {
             i+=1;
             let value=arguments.get(i).ok_or_else(||
@@ -80,6 +84,45 @@ fn parse_mako_cli_args(arguments:&[String])
     }
     let path=selected_config.or(positional_path);
     Ok((path,overrides))
+}
+
+#[cfg(test)]
+mod cli_terminator_tests {
+    use super::parse_mako_cli_args;
+
+    fn args(tokens: &[&str]) -> Vec<String> {
+        tokens.iter().map(|token| (*token).to_owned()).collect()
+    }
+
+    #[test]
+    fn double_dash_stops_options_and_ignores_trailing_operands() {
+        let (path, overrides) = parse_mako_cli_args(
+            &args(&["--width=321", "--", "--height=99", "unused.conf"])
+        ).unwrap();
+        assert_eq!(path, None);
+        assert_eq!(overrides, vec![("width".into(), "321".into())]);
+    }
+
+    #[test]
+    fn double_dash_preserves_explicit_config_and_prior_override() {
+        let (path, overrides) = parse_mako_cli_args(
+            &args(&["-c", "/tmp/pinned.conf", "--height=104", "--",
+                    "--config=/tmp/ignored.conf", "--width=600"])
+        ).unwrap();
+        assert_eq!(path.as_deref(), Some("/tmp/pinned.conf"));
+        assert_eq!(overrides, vec![("height".into(), "104".into())]);
+    }
+
+    #[test]
+    fn required_option_argument_may_itself_be_two_dashes() {
+        // GNU getopt_long consumes the next argv item as -c's required
+        // argument; in that position "--" is not an option terminator.
+        let (path, overrides) = parse_mako_cli_args(
+            &args(&["-c", "--", "--width=312"])
+        ).unwrap();
+        assert_eq!(path.as_deref(), Some("--"));
+        assert_eq!(overrides, vec![("width".into(), "312".into())]);
+    }
 }
 
 /// Upstream Mako loads the chosen config, then replays style options in
