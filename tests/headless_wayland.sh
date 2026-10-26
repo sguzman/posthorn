@@ -1662,6 +1662,105 @@ fi
 echo "Headless Sway ${test_scale}x + D-Bus popups, compositor pointer at 1x, timer, reload and live modes: OK"
 
 if [[ "$test_scale" == 1 ]]; then
+  # Pinned Mako render.c computes max_width only from real visible
+  # notifications. A hidden-only overflow cannot map a synthetic canvas.
+  # Verify the actual compositor, then expose/hide the SAME private D-Bus
+  # notification via Reload. No production notification bus is involved.
+  kill "$posthorn_pid"
+  wait "$posthorn_pid" 2>/dev/null || true
+  posthorn_pid=""
+  cat > "$root/zero-visible.conf" <<'EOF_ZERO'
+width=100
+height=60
+margin=4
+padding=4
+border-size=0
+icons=0
+max-visible=0
+default-timeout=0
+background-color=#9361B2
+[hidden]
+background-color=#9361B2
+EOF_ZERO
+  grim "$root/zero-visible-baseline.png"
+  ./target/debug/posthorn --experimental-private-desktop "$root/zero-visible.conf" \
+    >"$root/zero-visible-posthorn.log" 2>&1 &
+  posthorn_pid=$!
+  ready=0
+  for _ in {1..60}; do
+    if busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=2s introspect \
+      org.posthorn.Development /org/freedesktop/Notifications >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    if ! kill -0 "$posthorn_pid" 2>/dev/null; then
+      cat "$root/zero-visible-posthorn.log"
+      echo 'Zero-visible private daemon stopped before D-Bus registration'
+      exit 1
+    fi
+    sleep 0.15
+  done
+  [[ "$ready" == 1 ]] || { echo 'Zero-visible private service did not register'; exit 1; }
+  reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Posthorn hidden-only QA' 0 '' 'Hidden warning' '' 0 0 30000)"
+  [[ "$reply" == u\ * ]] || { echo "Hidden-only Notify failed: $reply"; exit 1; }
+  hidden_note_id="${reply#u }"
+  sleep 0.4
+  grim "$root/zero-visible-hidden.png"
+  ./target/debug/examples/qa_png_probe \
+    "$root/zero-visible-hidden.png" '#9361B2' 40 restored \
+    "$root/zero-visible-baseline.png" >/dev/null || {
+      echo 'Hidden-only overflow incorrectly painted a standalone popup'
+      cat "$root/zero-visible-posthorn.log"
+      exit 1
+    }
+  sed -i 's/^max-visible=0$/max-visible=1/' "$root/zero-visible.conf"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  painted=0
+  for _ in {1..35}; do
+    sleep 0.15
+    if grim "$root/zero-visible-now-painted.png" 2>/dev/null &&
+      ./target/debug/examples/qa_png_probe \
+        "$root/zero-visible-now-painted.png" '#9361B2' 500 increase \
+        "$root/zero-visible-baseline.png" >/dev/null 2>&1; then
+      painted=1
+      break
+    fi
+  done
+  [[ "$painted" == 1 ]] || {
+    echo 'Reload max-visible=1 did not reveal the same private notification'
+    cat "$root/zero-visible-posthorn.log"
+    exit 1
+  }
+  sed -i 's/^max-visible=1$/max-visible=0/' "$root/zero-visible.conf"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
+  hidden_again=0
+  for _ in {1..35}; do
+    sleep 0.15
+    if grim "$root/zero-visible-hidden-again.png" 2>/dev/null &&
+      ./target/debug/examples/qa_png_probe \
+        "$root/zero-visible-hidden-again.png" '#9361B2' 40 restored \
+        "$root/zero-visible-baseline.png" >/dev/null 2>&1; then
+      hidden_again=1
+      break
+    fi
+  done
+  [[ "$hidden_again" == 1 ]] || {
+    echo 'Reload max-visible=0 failed to hide the existing private popup'
+    cat "$root/zero-visible-posthorn.log"
+    exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    org.posthorn.Development /org/freedesktop/Notifications \
+    org.freedesktop.Notifications CloseNotification 'u' "$hidden_note_id" >/dev/null
+  echo 'Live Sway hidden-only canvas and reversible max-visible Reload: OK'
+fi
+
+if [[ "$test_scale" == 1 ]]; then
   # Live registry hotplug: the target named output does not exist at daemon
   # startup. Posthorn must keep its private D-Bus name and queued notification,
   # then paint on the new output when the compositor announces it.
