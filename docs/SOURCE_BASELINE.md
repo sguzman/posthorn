@@ -4751,3 +4751,49 @@ wl_output subpixel geometries, physical Hyprland acceptance
 (T503 remains 51%) or the separately authorized reversible
 production Mako cutover (T504 remains 0%). No installed Mako,
 live standard notification bus or workstation configuration touched.
+
+## Compositor output subpixel options and input-region Pango parity (2026-10-26)
+
+Pinned Mako v1.11.0 `render.c:64-96` reads the **actual
+`wl_surface.enter` output**, then sets Cairo font antialiasing to
+`GRAY` when the output reports `UNKNOWN` or `NONE`, and to
+`SUBPIXEL` with `RGB`, `BGR`, `VRGB`, or `VBGR` order for
+the four other `wl_output.geometry` values. If the popup has not
+entered any output, Mako leaves Cairo's font options unchanged.
+The original implementation in Posthorn always selected grayscale.
+
+Posthorn now tracks `wl_output.geometry` subpixel values, removes
+stale geometry on output-global removal, selects antialiasing from the
+**compositor-entered surface** rather than the configured output
+placement request, and invalidates the frame when this value changes.
+Both measured Pango height and painted notification use the same
+Cairo setting. The synthetic hidden placeholder uses the same
+setting; notification hotspots and click routing also measure with
+that exact output-specific setting instead of separately falling back
+to grayscale.
+
+Rust regressions cover all five known panel subpixel values, the
+unknown value, and the pre-enter/no-output case. An independent
+panel-specific hotspot regression checks that every measured input
+rectangle has the actual painted popup height and that a click at its
+last visible row targets the matching notification.
+
+Implementation: [output geometry and Cairo order](https://github.com/sguzman/posthorn/commit/55547fe0d18883e2b94273b45e461485df71894e),
+[compositor-entered output](https://github.com/sguzman/posthorn/commit/1e970848c31432731b5c1482bc6178deb42e273b),
+[pre-enter Cairo behavior](https://github.com/sguzman/posthorn/commit/6f7f54b5ea8ea0f90745ee186ed76c7c144a59f4),
+[input-region parity](https://github.com/sguzman/posthorn/commit/efa1ca34cfd8b766670abfdb3d36ed6eb6e456a4).
+[Exact input-fix Rust CI 40348495332](https://github.com/sguzman/posthorn/actions/runs/40348495332)
+passed **352 Rust library tests, 100 private D-Bus tests, and all isolated
+Sway/Wayland checks**. Source-pinned executable CI for the same
+input-fix commit is tracked independently at
+[40348495009](https://github.com/sguzman/posthorn/actions/runs/40348495009);
+it must not be described as passed until complete.
+
+**Source-backed partial acceptance:** T205 **88% → 89% (+1 pp)**,
+P2 **97.2% → 97.4% (+0.2 pp)**, 24-task M0
+**91.083% → 91.125% (+0.042 pp)**. These source-matched and
+automated synthetic tests do **not** prove real RGB/BGR hardware
+antialias on the user's Hyprland session. T503 physical Hyprland
+remains 51%, and T504 reversible production cutover remains 0%.
+Installed Mako, the public notification bus, and workstation
+configuration remain untouched.
