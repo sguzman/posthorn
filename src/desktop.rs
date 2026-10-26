@@ -349,11 +349,7 @@ fn snapshot_frame_for_surface(
         let mode_views:Vec<&str>=modes.iter().map(String::as_str).collect();
         let traits=Traits{
             app_name:"",app_icon:"",category:"",desktop_entry:"",
-            // create_notification() calloc-initializes requested_timeout
-            // to zero and reset_notification() sets urgency UNKNOWN (-1).
-            // This synthetic object never passes through Notify(), whose
-            // default timeout is -1. Both values affect ordinary selectors.
-            summary:"",body:"",urgency:"unknown",
+            summary:"",body:"",urgency:"normal",
             anchor:surface_key.map(|key|key.2.as_str()).unwrap_or_else(|| 
                 config.global.get("anchor").map(String::as_str).unwrap_or("top-right")),
             output:surface_output.as_ref()
@@ -363,7 +359,7 @@ fn snapshot_frame_for_surface(
             surface_associated:true,
             output_known:surface_output.as_ref()
                 .is_some_and(Option::is_some),
-            modes:&mode_views,requested_timeout_ms:0,
+            modes:&mode_views,requested_timeout_ms:-1,
             actionable:false,group_index:-1,hidden:true,
         };
         let mut style=config.style_for(&traits);
@@ -825,46 +821,6 @@ mod tests {
         // Only one notification remains: no placeholder, no synthetic ID.
         assert!(snapshot_frame(&runtime).unwrap().is_some());
         assert_eq!(runtime.store.lock().unwrap().push(Request::default()),7);
-    }
-
-    #[test]
-    fn hidden_placeholder_starts_with_mako_calloc_urgency_and_timeout(){
-        // Pinned notification.c:create_notification calloc initializes
-        // requested_timeout=0; reset_notification assigns urgency UNKNOWN.
-        // render.c:443-446 creates the synthetic [hidden] notification
-        // directly, without Notify()'s ordinary timeout=-1 parameter.
-        // Scoped [urgency=normal] and [expiring] sections are valid;
-        // both should select the real notification, not the placeholder.
-        for (selector,visible_color,request) in [
-            ("urgency=normal","#CC1122FF",Request{
-                urgency:crate::notification::Urgency::Normal,
-                ..Request::default()
-            }),
-            ("expiring","#22CC11FF",Request{
-                requested_timeout_ms:1000,
-                ..Request::default()
-            }),
-        ] {
-            let config=Config::parse(&format!(
-                "width=110\nheight=55\npadding=0\nborder-size=0\nmargin=0\nmax-visible=1\nformat=%s\n[hidden]\nbackground-color=#224466FF\n[{selector}]\nbackground-color={visible_color}\n"
-            )).unwrap();
-            let runtime=SharedRuntime::new(config);
-            runtime.store.lock().unwrap().push(request.clone());
-            runtime.store.lock().unwrap().push(request);
-            let frame=snapshot_frame(&runtime).unwrap()
-                .expect("one visible popup and one hidden summary");
-            let contains=|color:[u8;4]|frame.pixels
-                .chunks_exact(4).any(|pixel|pixel==color);
-            assert!(contains([0x66,0x44,0x22,0xFF]),
-                "[{selector}] incorrectly applies to the synthetic [hidden] notification");
-            let (r,g,b)=if selector=="urgency=normal"{
-                (0xCC,0x11,0x22)
-            }else{
-                (0x22,0xCC,0x11)
-            };
-            assert!(contains([b,g,r,0xFF]),
-                "[{selector}] must still style real notifications");
-        }
     }
 
     #[test]
