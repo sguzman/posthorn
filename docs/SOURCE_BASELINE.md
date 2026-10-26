@@ -4016,3 +4016,62 @@ strict 24-task M0 **90.250% → 90.292% (+0.042 pp)**.
 No new acceptance is claimed for T402 at 99%, real Hyprland
 at T503 51%, or opt-in production cutover T504 0%.
 Installed Mako and personal Hyprland configuration remain untouched.
+
+## Output-scoped styling of hidden placeholders on mapped single surfaces (2026-10-25)
+
+Mako v1.11.0 `render.c:443-446` creates a synthetic
+hidden-notification object for an overflowing surface and explicitly
+sets `hidden_notif->surface = surface` **before** calling
+`apply_each_criteria`. Its output selector
+(`criteria.c:149-152`) then reads the associated surface's
+actual `surface_output->name` when `wl_surface.enter` has
+occurred. A valid `[hidden output=DP-1]` rule may therefore
+change the synthetic overflow indicator only on DP-1.
+When the surface output is unknown, that same rule must not match.
+Mako allows `hidden` combined with `output`, unlike non-surface
+selectors such as urgency or expiring.
+
+Posthorn's multi-surface snapshot already forwarded the per-surface
+output. The earlier single-surface `snapshot_frame` path, however,
+unconditionally passed `None` into the synthetic hidden style
+projection, discarding the already-known output from
+`SharedRuntime::surface_output`. This incorrectly suppressed
+`[hidden output=DP-1]` even though normal notifications had
+received their compositor observation. The single-surface path now
+passes `Some(Some(observed_name))` only when an output has actually
+been observed; it retains unknown-output semantics otherwise.
+No production compositor, config or notification bus was touched.
+
+A regression exercises the real Cairo-rendered placeholder with a
+valid `[hidden]` fallback background and later
+`[hidden output=DP-1]` override, confirms the override is painted
+after a synthetic `set_surface_output(Some("DP-1"))`, and confirms
+the fallback returns after the output is explicitly unknown.
+Ordinary user notifications remain separate from the synthetic
+overflow object, and the screen-independent test does not claim
+real Hyprland or output-hotplug acceptance.
+
+- [Pinned Mako render.c](https://github.com/emersion/mako/blob/v1.11.0/render.c#L440-L449)
+- [Pinned Mako criteria.c](https://github.com/emersion/mako/blob/v1.11.0/criteria.c#L144-L153)
+- [Accepted source-parity fix 29b7551](https://github.com/sguzman/posthorn/commit/29b75512794ed16bcb4d75346743cb882d911ef8)
+- [Full successful Rust / private D-Bus / headless Wayland CI 40253108514](https://github.com/sguzman/posthorn/actions/runs/40253108514):
+  **345 Rust library tests, 90 private D-Bus tests,
+  complete isolated compositor acceptance**.
+
+An earlier trial changed internal hidden-notification urgency and
+requested-timeout defaults. Although these differ from Mako's
+`calloc`-initialized synthetic object, the trial incorrectly assumed
+that non-surface `[urgency]` or `[expiring]` user criteria could
+reach `hidden=true`. Upstream `parse_criteria` implicitly sets
+`hidden=false` unless explicitly selected, and
+`validate_criteria` forbids mixing `hidden=true` with
+non-surface selectors. The unobservable trial was reverted at
+[`90edade`](https://github.com/sguzman/posthorn/commit/90edade816b9db4d96e3301de996ccc824459119).
+It earns **no** progress credit.
+
+**Accepted progress:** T105 **90% → 91% (+1 pp)**;
+P1 raw **95.40% → 95.60% (+0.20 pp)**;
+strict 24-task M0 raw **90.292% → 90.333%
+(+0.042 pp)**. T401/T402 remain at 99%,
+T503 physical Hyprland QA remains 51% and
+T504 opt-in production cutover remains 0%.
