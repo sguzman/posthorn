@@ -1787,3 +1787,95 @@ done
 diff -u "$root/posthorn-sound.events" "$root/mako-sound.events"
 echo 'Pinned Mako/Posthorn file-backed category hooks and quiet-mode source parity: MATCH'
 
+# T502: quiet mode is an ordered Mako criterion, not an unconditional
+# global mute. A later category rule can override it. Reload reversing
+# those two sections must suppress future hooks without replaying old
+# hooks, while SetMode default must resume them. Test against upstream.
+for impl in posthorn mako; do
+  marker="$root/$impl-ordered-sound.events"
+  config="$root/$impl-ordered-sound.conf"
+  cat >"$config" <<EOF_ORDER_SOUND
+width=185
+height=100
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=8
+default-timeout=0
+format=%s
+on-notify=none
+[mode=quiet]
+on-notify=none
+[category=warning]
+background-color=#715536
+on-notify=exec printf 'warning:%s\n' "\$id" >> "$marker"
+EOF_ORDER_SOUND
+  if [[ "$impl" == posthorn ]];then
+    ./target/debug/posthorn --experimental-private-desktop \
+      "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetMode s quiet >/dev/null
+  id="$(sound_notify_category "$bus" warning)"
+  sound_wait_count "$marker" 1
+  [[ "$(tail -n 1 "$marker")" == "warning:$id" ]] || {
+    echo "$impl failed Mako's later-category override in quiet mode" >&2
+    cat "$marker" >&2;exit 1
+  }
+  cp "$marker" "$root/$impl-ordered-before-reload.events"
+  cat >"$config" <<EOF_QUIET_LAST
+width=185
+height=100
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=8
+default-timeout=0
+format=%s
+on-notify=none
+[category=warning]
+background-color=#715536
+on-notify=exec printf 'warning:%s\n' "\$id" >> "$marker"
+[mode=quiet]
+on-notify=none
+EOF_QUIET_LAST
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null || {
+    echo "$impl rejected ordered criteria Reload" >&2
+    cat "$root/daemon.log" >&2;exit 1
+  }
+  sleep 0.15
+  cmp -s "$marker" "$root/$impl-ordered-before-reload.events" || {
+    echo "$impl replayed sound hooks during Reload" >&2;exit 1
+  }
+  sound_notify_category "$bus" warning >/dev/null
+  sleep 0.35
+  cmp -s "$marker" "$root/$impl-ordered-before-reload.events" || {
+    echo "$impl did not mute with the quiet criterion last" >&2
+    cat "$marker" >&2;exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetMode s default >/dev/null
+  id="$(sound_notify_category "$bus" warning)"
+  sound_wait_count "$marker" 2
+  [[ "$(tail -n 1 "$marker")" == "warning:$id" ]] || {
+    echo "$impl failed to resume ordered warning hook" >&2
+    cat "$marker" >&2;exit 1
+  }
+  echo "$impl ordered quiet/category hook override, Reload and resume: MATCH"
+  kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+diff -u "$root/posthorn-ordered-sound.events" "$root/mako-ordered-sound.events"
+echo 'Pinned Mako/Posthorn source-ordered category/quiet hooks across Reload: MATCH'
+
