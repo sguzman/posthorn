@@ -4255,3 +4255,51 @@ strict M0 across 24 atomic tasks **90.458% → 90.500%
 **51%**, and explicit opt-in production cutover T504 remains
 **0%**. This is deterministic compatibility evidence, not
 physical speaker or real-workstation testing.
+
+## SetModes combinations preserve category sound muting without replay (2026-10-25)
+
+Pinned Mako v1.11.0 `dbus/mako.c:407-442` exposes
+`SetModes(as)`. It calls `set_modes` on the supplied
+mode array, then `reapply_config` against existing notifications.
+Neither operation reexecutes their `on-notify` hooks.
+An active mode criterion such as `[mode=quiet]` with
+`on-notify=none` can coexist with a visual `[mode=focus]`
+background color. A new `Notify` call after the multi-mode
+state is updated, however, must select the currently matching
+category and mode hooks as usual.
+
+The accepted real private D-Bus regression verifies:
+(1) an ordinary category warning executes its file-backed
+sound hook; (2) `SetModes(["focus","quiet","focus"])`
+deduplicates preserving first order, leaving `["focus","quiet"]`;
+(3) a fresh warning notification under both modes preserves the
+focus-mode background while suppressing its configured category
+sound; (4) `SetModes(["focus"])` cannot retroactively replay
+the previous quiet notification sound; (5) a newly posted warning
+after quiet ends executes its hook; (6) `SetModes([])`
+clears all modes but itself emits no sound; and (7) the next
+notification after the empty set still executes its warning hook.
+The active in-memory store retains all four notifications.
+Every sound is represented by a temporary file-backed shell
+command, not by physical speakers or the production daemon.
+
+The first version mistakenly used `VecDeque::to_vec()`
+and failed to compile. It was corrected to
+`iter().cloned().collect::<Vec<_>>()` before any acceptance
+credit. The final commit passed complete CI.
+
+- [Pinned Mako SetModes reapply, without binding replay](https://github.com/emersion/mako/blob/v1.11.0/dbus/mako.c#L302-L350)
+- [Pinned SetModes D-Bus method](https://github.com/emersion/mako/blob/v1.11.0/dbus/mako.c#L407-L444)
+- [Final accepted regression 38adeb9](https://github.com/sguzman/posthorn/commit/38adeb93b7bee34e3498c4b48af9dbe63dddfffa)
+- [Full accepted Rust, private D-Bus, Wayland CI 40260381781](https://github.com/sguzman/posthorn/actions/runs/40260381781):
+  **347 Rust library tests, 93 private D-Bus tests and
+  complete isolated headless compositor acceptance passed**.
+
+**Accepted progress:** T502 **79% → 80% (+1 pp)**;
+category sound feature inventory **79% → 80%**;
+P5 raw **57.25% → 57.50% (+0.25 pp)** (display **58%**);
+strict M0 **90.500% → 90.542% (+0.042 pp)**
+(display **91%**). Real Hyprland T503 remains **51%**;
+opt-in production cutover T504 remains **0%**.
+This test does not validate actual audio playback or user-device
+wake behavior. No live bus, installed Mako or Hyprland config was touched.
