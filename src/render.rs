@@ -86,6 +86,11 @@ impl CornerRadii {
     }
 }
 fn rounded(cr: &cairo::Context, x: f64, y: f64, w: f64, h: f64, radius: CornerRadii) {
+    // Pinned Mako render.c:set_rounded_rectangle returns WITHOUT changing
+    // Cairo's current path when either rectangle dimension is exactly zero.
+    // In particular, width == border-size is a valid style but must not
+    // produce stray rounded-corner arcs or a SOURCE-mode border stroke.
+    if w==0.0 || h==0.0 {return;}
     // Mako's set_rounded_rectangle passes the original radii to Cairo.
     // Clamping to half the rectangle changes large-radius borders/icons.
     // The style parser already prevents negative radii reaching this path.
@@ -1371,6 +1376,35 @@ mod tests {
             &[0,0,255,255],"Mako selects the unscaled category asset at 1x");
         assert_eq!(&hidpi.pixels[index(&hidpi)..index(&hidpi)+4],
             &[0,255,0,255],"Mako reads @2 from a later category at 2x");
+    }
+
+    #[test]
+    fn zero_width_rounded_path_does_not_paint_ghost_border(){
+        // Pinned render.c:38-41 returns early for zero path dimensions.
+        // width=border-size leaves background width exactly zero, yet
+        // previously our Cairo arc sequence could paint a ghost outline.
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","48"),("height","96"),("padding","0"),
+            ("border-size","48"),("border-radius","9"),
+            ("icons","0"),("format","%s"),
+            ("background-color","#224466FF"),
+            ("border-color","#DD4422FF"),
+        ]{
+            style.insert(key.into(),value.into());
+        }
+        let mut store=crate::notification::NotificationStore::new(0);
+        let id=store.push(crate::notification::Request::default());
+        let note=store.active().iter().find(|n|n.id==id).unwrap();
+        let frame=render_notification(note,&style).unwrap();
+        assert_eq!((frame.width,frame.height),(48,96));
+        assert!(frame.pixels.chunks_exact(4).all(|p|p[3]==0),
+            "Mako does not construct or stroke an exactly zero-width path");
+
+        // The normal non-degenerate path must still paint an opaque border.
+        style.insert("border-size".into(),"2".into());
+        let positive=render_notification(note,&style).unwrap();
+        assert!(positive.pixels.chunks_exact(4).any(|p|p[3]>0));
     }
 
     #[test]
