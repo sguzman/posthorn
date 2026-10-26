@@ -167,3 +167,104 @@ done
 busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s introspect \
   org.freedesktop.Notifications /org/freedesktop/Notifications >/dev/null
 echo 'Pinned upstream max-visible=0: daemon alive, bus responsive, hidden-only pixels absent'
+
+# Cross-binary T205 Pango/format comparison. Both daemons must use
+# Mako's summary/body format string with literal XML characters in the
+# summary and valid markup within the body; rendered geometry and text
+# coverage are compared on the SAME Sway output and font installation.
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+cat >"$root/markup.conf" <<'EOF_MARKUP'
+width=180
+height=200
+font=Sans 17
+margin=0
+padding=4
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%s\n%b
+markup=1
+background-color=#416D98
+text-color=#E5C58B
+EOF_MARKUP
+clear_color(){
+  local color="$1" cleared=0
+  for _ in {1..50}; do
+    if grim "$root/markup-cleared.png" 2>/dev/null &&
+      ./target/debug/examples/qa_png_probe \
+        "$root/markup-cleared.png" "$color" 1 absent >/dev/null 2>&1; then
+      cleared=1; break
+    fi
+    sleep 0.1
+  done
+  [[ "$cleared" == 1 ]] || { echo "popup $color persisted after daemon exit"; exit 1; }
+}
+markup_measure(){
+  local label="$1" name="$2" bounds="" count_line="" text_pixels=""
+  local image="$root/$label-markup.png"
+  for _ in {1..45}; do
+    if grim "$image" 2>/dev/null; then
+      bounds="$(./target/debug/examples/qa_png_probe \
+        "$image" '#416D98' 400 bounds 2>/dev/null || true)"
+      count_line="$(./target/debug/examples/qa_png_probe \
+        "$image" '#E5C58B' 20 present 2>/dev/null || true)"
+      if [[ -n "$bounds" && -n "$count_line" ]]; then
+        text_pixels="${count_line#matching pixels: }"
+        text_pixels="${text_pixels%%;*}"
+        echo "$bounds $text_pixels"
+        return 0
+      fi
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then cat "$root/daemon.log" >&2; return 1; fi
+    sleep 0.15
+  done
+  echo "missing or malformed markup output: $label" >&2
+  cat "$root/daemon.log" >&2
+  return 1
+}
+markup_notify(){
+  local name="$1" response
+  response="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$name" /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Pinned Mako markup differential' 0 '' \
+    'Fish & Chips <ready>' \
+    '<b>Bold &amp; ready</b> with <i>italic words</i> and <u>underlined detail</u>' \
+    0 0 30000)"
+  [[ "$response" == u\ * ]] || { echo "markup Notify failed: $response"; exit 1; }
+}
+clear_color '#416D98'
+./target/debug/posthorn --experimental-private-desktop "$root/markup.conf" \
+  >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.posthorn.Development
+markup_notify org.posthorn.Development
+post_markup="$(markup_measure posthorn org.posthorn.Development)"
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+clear_color '#416D98'
+"$mako_binary" -c "$root/markup.conf" >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.freedesktop.Notifications
+markup_notify org.freedesktop.Notifications
+mako_markup="$(markup_measure mako org.freedesktop.Notifications)"
+read -r p0 p1 p2 p3 pc <<< "$post_markup"
+read -r m0 m1 m2 m3 mc <<< "$mako_markup"
+pw=$((p1-p0+1)); ph=$((p3-p2+1))
+mw=$((m1-m0+1)); mh=$((m3-m2+1))
+echo "Posthorn Pango markup: background $pw x $ph; text pixels $pc"
+echo "Mako v1.11.0 Pango markup: background $mw x $mh; text pixels $mc"
+(( pw>=160 && mw>=160 && ph>=40 && mh>=40 && pc>=20 && mc>=20 )) || {
+  echo 'Markup layout or text unexpectedly absent'; exit 1;
+}
+(( (pw-mw)<=2 && (mw-pw)<=2 && (ph-mh)<=2 && (mh-ph)<=2 )) || {
+  echo 'Pinned Mako/Posthorn Pango format geometry differs'; exit 1;
+}
+pixel_slack=$((mc/20+20))
+(( (pc-mc)<=pixel_slack && (mc-pc)<=pixel_slack )) || {
+  echo "Pinned Mako/Posthorn text coverage differs by more than $pixel_slack pixels"
+  exit 1
+}
+echo 'Pinned Mako/Posthorn Pango markup and format geometry: MATCH'
