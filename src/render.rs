@@ -1519,13 +1519,17 @@ mod tests {
         note.body.clear();
         for scale in [1u32,2] {
             let measured=measure_notification_height(&note,&style).unwrap();
-            assert_eq!(measured,220,
-                "two true 110px borders, not two clamped 100px borders");
+            // Pinned render.c computes a SIGNED Pango text cap:
+            // 90 - (2*110) = -130. After clipping an empty text block to
+            // -130, final height is -130 + 220 = configured height 90.
+            // The 110px border remains unmodified in Cairo geometry.
+            assert_eq!(measured,90,
+                "Mako preserves signed text cap with an oversized border");
             let frame=render_notification_group_scaled(&note,&style,0,scale).unwrap();
-            assert_eq!((frame.width,frame.height),(200*scale,220*scale),
+            assert_eq!((frame.width,frame.height),(200*scale,90*scale),
                 "physical framebuffer dimensions must follow {scale}x");
             assert_eq!(frame.pixels.len(),
-                200usize*220usize*4usize*(scale as usize).pow(2));
+                200usize*90usize*4usize*(scale as usize).pow(2));
         }
     }
 
