@@ -1098,6 +1098,44 @@ done
   "$root/mako-cli-rejected.png"
 echo 'Pinned Mako/Posthorn private Wayland CLI startup, valid Reload, and rejected Reload rasters: MATCH'
 
+# T501: getopt_long's standalone "--" stops option parsing. Check the
+# actual source-pinned Mako executable and Posthorn on the same Sway output:
+# --width=205 before the terminator must apply, while a later width=777
+# and a nonexistent --config must be ignored. This also proves that the
+# private daemon starts and paints, not merely that an argv parser returns.
+for impl in posthorn mako; do
+  cp "$root/cli-desktop-original.conf" "$root/cli-desktop.conf"
+  clear_color '#416D98'
+  if [[ "$impl" == posthorn ]]; then
+    ./target/debug/posthorn --experimental-private-desktop \
+      -c "$root/cli-desktop.conf" --width=205 -- \
+      --width=777 --config=/definitely/not/a/mako/config \
+      >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$root/cli-desktop.conf" --width=205 -- \
+      --width=777 --config=/definitely/not/a/mako/config \
+      >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  markup_notify "$bus"
+  bounds="$(markup_measure "$impl-cli-terminator" "$bus")"
+  read -r x0 x1 y0 y1 <<<"$bounds"
+  (( x1-x0+1 == 410 )) || {
+    echo "$impl did not honor GNU option terminator (expected width 410): $bounds"
+    exit 1
+  }
+  echo "$impl GNU -- terminator: pre-terminator width retained, trailing options ignored"
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+./target/debug/examples/qa_png_probe \
+  "$root/posthorn-cli-terminator-markup.png" '#E5C58B' 0 identical \
+  "$root/mako-cli-terminator-markup.png"
+echo 'Pinned Mako/Posthorn GNU getopt_long option terminator, actual 2x raster: MATCH'
+
 # T104: verify config.c's recursive include processing in the actual
 # graphical daemon. The include target can be a symlink, children may
 # include other children, and the parent may override the included
