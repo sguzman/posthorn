@@ -800,3 +800,86 @@ echo "Pinned Mako real 2x format placeholders: $mako_substitutions"
   "$root/posthorn-substitutions-markup.png" '#E5C58B' 0 identical \
   "$root/mako-substitutions-markup.png"
 echo 'Pinned Mako/Posthorn real 2x all ordinary notification format placeholders: MATCH'
+
+# Hidden placeholder substitutions are not ordinary notification
+# substitutions. Pinned notification.c:format_hidden_text separately
+# resolves %h and %t; keep the visible summary constant while increasing
+# the hidden count and compare entire decoded 2x compositor frames.
+cat >"$root/hidden-substitutions.conf" <<'EOF_HIDDEN_SUBS'
+width=140
+height=100
+font=Sans 17
+margin=0
+padding=4
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%s
+background-color=#416D98
+text-color=#E5C58B
+[hidden]
+width=180
+height=100
+format=Hidden %h of %t
+background-color=#9361B2
+text-color=#E5C58B
+EOF_HIDDEN_SUBS
+hidden_notify(){
+  local bus="$1" title="$2" response
+  response="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+    'Pinned Mako hidden format differential' 0 '' "$title" '' 0 0 30000)"
+  [[ "$response" == u\ * ]] || {
+    echo "hidden Notify failed: $response"; exit 1
+  }
+}
+hidden_two_post=""
+hidden_three_post=""
+hidden_two_mako=""
+hidden_three_mako=""
+for impl in posthorn mako; do
+  clear_color '#9361B2'
+  if [[ "$impl" == posthorn ]]; then
+    ./target/debug/posthorn --experimental-private-desktop "$root/hidden-substitutions.conf" \
+      >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$root/hidden-substitutions.conf" >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  hidden_notify "$bus" 'First hidden'
+  hidden_notify "$bus" 'Constant visible'
+  two_bounds="$(capture_bounds "$impl-hidden-two")"
+  hidden_notify "$bus" 'Constant visible'
+  three_bounds="$(capture_bounds "$impl-hidden-three")"
+  echo "$impl scale-2 hidden substitutions after two: $two_bounds"
+  echo "$impl scale-2 hidden substitutions after three: $three_bounds"
+  if [[ "$impl" == posthorn ]]; then
+    hidden_two_post="$two_bounds"; hidden_three_post="$three_bounds"
+  else
+    hidden_two_mako="$two_bounds"; hidden_three_mako="$three_bounds"
+  fi
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+[[ "$hidden_two_post" == "$hidden_two_mako" &&
+   "$hidden_three_post" == "$hidden_three_mako" ]] || {
+  echo 'Pinned Mako/Posthorn real 2x hidden %h/%t popup bounds differ'
+  exit 1
+}
+for count in two three; do
+  ./target/debug/examples/qa_png_probe \
+    "$root/posthorn-hidden-$count.png" '#9361B2' 0 identical \
+    "$root/mako-hidden-$count.png"
+done
+if ./target/debug/examples/qa_png_probe \
+  "$root/posthorn-hidden-two.png" '#9361B2' 0 identical \
+  "$root/posthorn-hidden-three.png" >/dev/null 2>&1; then
+  echo 'Changing the hidden count did not change the source-pinned placeholder raster'
+  exit 1
+fi
+echo 'Pinned Mako/Posthorn exact scale-2 hidden %h/%t format and changed-count raster: MATCH'
