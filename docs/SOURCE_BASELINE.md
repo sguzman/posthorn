@@ -4571,3 +4571,42 @@ P1 **96.2% → 96.4%**; strict 24-task M0
 **90.875% → 90.917% (+0.042 percentage points)**.
 T503 physical Hyprland remains 51%; the separately authorized
 reversible Mako cutover T504 remains 0%.
+
+## Hidden-count placeholder preserves configured Pango width before clipping (2026-10-26)
+
+Pinned Mako v1.11.0 `render.c:442-484` creates a hidden
+pseudo-notification, applies its own `[hidden]` style, and calls
+`render_notification()` using that style's original width. The
+returned `rendered_width` is **only** `max_width` accumulated
+from real notifications (`render.c:424-430`). The compositor
+therefore clips the hidden pseudo-notification to the real canvas,
+but the hidden text's **wrapping and height** were already measured
+using the full hidden style width.
+
+Posthorn previously reduced a wider `[hidden] width` to the
+real canvas width *before* invoking Pango. This could wrap a
+wide single-line overflow label into several lines and increase
+the final stack height, contradicting Mako. The correction
+preserves the hidden style and uses the existing
+`compose_mako_stack_with_visible_count` crop to clip the painted
+pixels, rather than changing glyph layout constraints.
+
+[Implementation 7ba8436](https://github.com/sguzman/posthorn/commit/7ba843695a9ef09e5d7c806de85c81eb15a41279) ·
+[negative-control raster regression 07ccdc9](https://github.com/sguzman/posthorn/commit/07ccdc919a7eb8c630c6f6863b1fe481f2a7f4f3) ·
+[fully green two-job CI 40328202952](https://github.com/sguzman/posthorn/actions/runs/40328202952):
+**349 Rust library tests, 100 private D-Bus tests, and the complete
+isolated Wayland acceptance suite passed**.
+
+The new
+`desktop::tests::wider_hidden_placeholder_uses_full_pango_width_then_clips_to_real_canvas`
+renders the same long hidden message at both its configured wide
+width and the former narrow substitute. It proves that narrowing
+causes additional wrapping, then compares the entire composed
+frame pixel-for-pixel with the source-matched original-width
+hidden bitmap cropped to the real notification canvas.
+
+**T105 layout/style 95% → 96%; P1 96.4% → 96.6%;
+strict 24-task M0 90.917% → 90.958% (+0.042 pp).**
+These are private raster and compositor tests, not physical
+Hyprland acceptance. Real T503 remains 51%, separately
+authorized production Mako cutover T504 remains 0%.

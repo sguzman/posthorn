@@ -368,7 +368,7 @@ fn snapshot_frame_for_surface(
             modes:&mode_views,requested_timeout_ms:-1,
             actionable:false,group_index:-1,hidden:true,
         };
-        let mut style=config.style_for(&traits);
+        let style=config.style_for(&traits);
         if !style.get("invisible").is_some_and(|x|x=="1"||x=="true"){
             // Pinned Mako render.c:442-484 lays out the synthetic hidden
             // notification at its FULL configured width, then reports a
