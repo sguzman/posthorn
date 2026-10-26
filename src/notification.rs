@@ -81,6 +81,11 @@ pub struct Notification {
     /// Group membership assigned by Mako's insertion/close passes.
     pub group_index:i32,
     pub group_count:usize,
+    /// The actual pinned Mako group_notifications pass has assigned this
+    /// count, including the singleton count of 1. A fresh ungrouped C
+    /// notification instead has group_count=0 until such a pass occurs.
+    /// Distinct from grouping_applied, which tracks local ordering replay.
+    pub source_group_count_set:bool,
     /// Direct NotificationStore fixtures may be unscheduled; render those
     /// with the compatibility replay rather than claiming stored grouping.
     pub grouping_applied:bool,
@@ -133,7 +138,8 @@ impl Notification {
             desktop_entry: request.desktop_entry, tag: request.tag, urgency: request.urgency,
             progress: request.progress, requested_timeout_ms: request.requested_timeout_ms,
             actions: request.actions,
-            group_index:-1,group_count:1,grouping_applied:false,
+            group_index:-1,group_count:1,source_group_count_set:false,
+            grouping_applied:false,
             surface_associated:false,surface_anchor:None,
             surface_spec:None,surface_output_override:None }
     }
@@ -323,13 +329,15 @@ impl NotificationStore {
         if let Some(index)=direct_replace {
             let id=self.active[index].id;
             let old=&self.active[index];
-            let (group_index,group_count,grouping_applied,surface_associated,surface_anchor,surface_spec,surface_output_override)=
-                (old.group_index,old.group_count,old.grouping_applied,
+            let (group_index,group_count,source_group_count_set,grouping_applied,surface_associated,surface_anchor,surface_spec,surface_output_override)=
+                (old.group_index,old.group_count,old.source_group_count_set,
+                 old.grouping_applied,
                  old.surface_associated,old.surface_anchor.clone(),
                  old.surface_spec.clone(),old.surface_output_override.clone());
             self.active[index]=Notification::from_request(id,request);
             self.active[index].group_index=group_index;
             self.active[index].group_count=group_count;
+            self.active[index].source_group_count_set=source_group_count_set;
             self.active[index].grouping_applied=grouping_applied;
             // reset_notification leaves the prior surface association.
             self.active[index].surface_associated=surface_associated;
@@ -368,6 +376,7 @@ impl NotificationStore {
         for note in &mut self.active {
             note.group_index=-1;
             note.group_count=1;
+            note.source_group_count_set=false;
             note.grouping_applied=false;
         }
     }
@@ -375,13 +384,9 @@ impl NotificationStore {
     pub fn regroup_new_notification(
         &mut self,target_id:u32,spec:&crate::grouping::GroupSpec
     ){
-        // Pinned Mako notification.c:insert_notification does not call
-        // group_notifications at all if create_criteria_from_notification
-        // returns NULL for group-by=none. A newly created C notification
-        // consequently keeps group_count=0 for the %g placeholder.
-        // Preserve this "not grouped" state rather than incorrectly
-        // treating every Notify as a singleton grouping pass.
-        if spec.disabled{return;}
+        // This local flag preserves ordering after each Notify, even when
+        // no group-by criterion was active. The distinct
+        // source_group_count_set flag models Mako's actual C grouping pass.
         if let Some(target)=self.active.iter_mut().find(|n|n.id==target_id){
             target.grouping_applied=true;
         }
@@ -412,6 +417,7 @@ impl NotificationStore {
                 .find(|note|selected.contains(&note.id)){
                 note.group_index=-1;
                 note.group_count=1;
+                note.source_group_count_set=true;
             }
             return;
         }
@@ -429,6 +435,7 @@ impl NotificationStore {
         for (offset,mut notification) in matched.into_iter().enumerate(){
             notification.group_index=offset as i32;
             notification.group_count=count;
+            notification.source_group_count_set=true;
             others.insert(before_first+offset,notification);
         }
         self.active=others;
@@ -509,12 +516,15 @@ mod tests {
         store.regroup_new_notification(
             id,&crate::grouping::GroupSpec::parse("none").unwrap());
         let note=store.active().iter().find(|n|n.id==id).unwrap();
-        assert!(!note.grouping_applied,
-            "Mako skips group_notifications entirely for group-by=none");
+        assert!(note.grouping_applied,
+            "local grouping-order snapshot records each Notify");
+        assert!(!note.source_group_count_set,
+            "Mako skips its C group_notifications pass for group-by=none");
         store.regroup_new_notification(
             id,&crate::grouping::GroupSpec::parse("app-name").unwrap());
         let note=store.active().iter().find(|n|n.id==id).unwrap();
-        assert!(note.grouping_applied,
+        assert!(note.grouping_applied);
+        assert!(note.source_group_count_set,
             "Mako runs group_notifications for enabled group-by even with one match");
         assert_eq!((note.group_index,note.group_count),(-1,1));
     }

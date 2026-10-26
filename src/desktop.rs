@@ -117,7 +117,7 @@ impl VisibleMember {
     /// an actual grouping pass, a fresh C notification has count zero.
     /// The former >=2 shortcut erased the source's singleton count.
     pub fn formatted_group_count(&self)->usize{
-        if self.notification.grouping_applied||self.group_count>=2{
+        if self.notification.source_group_count_set||self.group_count>=2{
             self.group_count
         }else{
             0
@@ -941,7 +941,8 @@ mod tests {
         let note=store.active()[0].clone();
         let mk=|applied:bool,count:usize|{
             let mut n=note.clone();
-            n.grouping_applied=applied;
+            n.grouping_applied=true;
+            n.source_group_count_set=applied;
             VisibleMember{
                 notification:n,group_count:count,
                 group_index:if applied{0}else{-1},
