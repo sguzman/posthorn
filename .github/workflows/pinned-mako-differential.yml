@@ -21,6 +21,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build private Posthorn binary and screenshot probe
         run: cargo build --bin posthorn --example qa_png_probe
+      - name: Validate Rust library and private D-Bus tests
+        run: |
+          cargo test --all-targets
+          dbus-run-session -- cargo test --tests --features dbus-integration -- --test-threads=1
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          python3 tools/render_roadmap.py
+          git diff --exit-code -- docs/ROADMAP.md
       - name: Compile exact source-pinned Mako v1.11.0
         run: |
           git clone --quiet https://github.com/emersion/mako.git /tmp/posthorn-upstream-mako
