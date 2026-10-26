@@ -4204,3 +4204,54 @@ physical speakers/audio-pipeline testing. T503 physical Hyprland
 QA remains **51%** and T504 opt-in reversible production
 cutover remains **0%**. No installed notification daemon,
 live bus or user configuration was touched.
+
+## App-scoped stack tag replacement and quiet category sound (2026-10-25)
+
+Pinned Mako v1.11.0 `dbus/xdg.c:362-371` calls
+`get_tagged_notification(state, tag, app_name)` for
+`x-dunst-stack-tag` and
+`x-canonical-private-synchronous`. A matching tag from
+the **same app_name** replaces the previous notification while
+retaining its D-Bus ID; the internally created replacement object
+still consumes a new allocation ID. A different application
+using that same tag must not replace the original notification.
+In either case, the new object rematches its category/mode rules
+and executes its configured `on-notify` binding
+(`dbus/xdg.c:385-430`). Mako's `SetMode` updates the modes
+and reapplies existing styles, but does **not** rerun existing
+on-notify hooks (`dbus/mako.c:302-350`).
+
+A new isolated real private D-Bus regression checks all these
+cases using a temporary output file as a safe fake sound target:
+(1) the first tagged success notification runs its category
+sound; (2) a same-app tagged warning update runs the warning
+sound but preserves the ID; (3) another same-app tagged update
+under quiet mode produces **no** sound while preserving the
+active notification; (4) exiting quiet mode does not replay the
+suppressed sound; (5) a later same-app tagged success update
+resumes sound; and (6) a different app with the same tag creates
+its own ID and invokes its category sound. Every stage verifies
+the exact command output and checks active notification count.
+No live audio output, production bus, or installed Mako process
+was used. This tests a distinct new-object replacement path from
+the previously accepted direct-ID replacement regression.
+
+The first fixture commit had overescaped Rust source string
+separators. The corrected fixture was committed before the
+accepted run and only the passing corrected result is credited.
+
+- [Pinned Mako source for app-scoped stack tag replacement](https://github.com/emersion/mako/blob/v1.11.0/dbus/xdg.c#L362-L371)
+- [Pinned Mako's Notify hook decision and execution](https://github.com/emersion/mako/blob/v1.11.0/dbus/xdg.c#L385-L430)
+- [Corrected accepted regression bed938fe](https://github.com/sguzman/posthorn/commit/bed938feca84235efe9898ce2a1f07a62e39fede)
+- [Full accepted Rust / private D-Bus / headless Wayland CI 40259507644](https://github.com/sguzman/posthorn/actions/runs/40259507644):
+  **347 Rust library tests, 92 private D-Bus tests,
+  and the entire isolated Wayland suite passed**.
+
+**Accepted progress:** T502 **78% → 79% (+1 pp)**;
+category sound feature inventory **78% → 79%**;
+P5 raw **57.00% → 57.25% (+0.25 pp)**;
+strict M0 across 24 atomic tasks **90.458% → 90.500%
+(+0.042 pp)**. Physical Hyprland acceptance T503 remains
+**51%**, and explicit opt-in production cutover T504 remains
+**0%**. This is deterministic compatibility evidence, not
+physical speaker or real-workstation testing.
