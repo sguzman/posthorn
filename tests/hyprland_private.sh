@@ -40,6 +40,13 @@ if [[ "$#" != 1 || "$1" != '--inside' ]]; then
     org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetId)" ||
     die 'could not inspect original D-Bus GUID'
   [[ "$parent_bus_id" == s\ * ]] || die 'unexpected original D-Bus GUID'
+  # Phase A read-only inventory is allowed by this private QA guard.
+  # Its safe classification is not permission for a production cutover.
+  inventory="$(bash tests/read_only_owner_inventory.sh)" ||
+    die 'read-only Mako owner/supervisor inventory refused or failed'
+  [[ "$inventory" == *'owner_executable=mako'* &&
+     "$inventory" == *'rollback_controller_verified=no'* ]] ||
+    die 'Phase A owner inventory returned unexpected content'
   cargo build --quiet --bin posthorn --example qa_png_probe
   # The child gets a new DBUS_SESSION_BUS_ADDRESS but retains WAYLAND_DISPLAY.
   child_status=0
