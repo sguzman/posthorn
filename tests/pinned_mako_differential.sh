@@ -1136,6 +1136,41 @@ done
   "$root/mako-cli-terminator-markup.png"
 echo 'Pinned Mako/Posthorn GNU getopt_long option terminator, actual 2x raster: MATCH'
 
+# GNU getopt_long also honors POSIXLY_CORRECT. With the variable set,
+# scanning stops at the first positional operand, preserving width=144
+# from the config and ignoring the later --width=777. Without this guard
+# Posthorn previously applied the later option and diverged from Mako.
+for impl in posthorn mako; do
+  cp "$root/cli-desktop-original.conf" "$root/cli-desktop.conf"
+  clear_color '#416D98'
+  if [[ "$impl" == posthorn ]]; then
+    POSIXLY_CORRECT=1 ./target/debug/posthorn --experimental-private-desktop \
+      -c "$root/cli-desktop.conf" ignored-operand --width=777 \
+      >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    POSIXLY_CORRECT=1 "$mako_binary" -c "$root/cli-desktop.conf" \
+      ignored-operand --width=777 >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  markup_notify "$bus"
+  bounds="$(markup_measure "$impl-cli-posix-order" "$bus")"
+  read -r x0 x1 y0 y1 <<<"$bounds"
+  (( x1-x0+1 == 288 )) || {
+    echo "$impl failed POSIXLY_CORRECT operand stopping (expected width 288): $bounds"
+    exit 1
+  }
+  echo "$impl POSIXLY_CORRECT: later options ignored after first positional operand"
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+./target/debug/examples/qa_png_probe \
+  "$root/posthorn-cli-posix-order-markup.png" '#E5C58B' 0 identical \
+  "$root/mako-cli-posix-order-markup.png"
+echo 'Pinned Mako/Posthorn GNU POSIXLY_CORRECT option-order raster: MATCH'
+
 # T104: verify config.c's recursive include processing in the actual
 # graphical daemon. The include target can be a symlink, children may
 # include other children, and the parent may override the included

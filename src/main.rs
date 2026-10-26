@@ -8,6 +8,16 @@ use std::process::ExitCode;
 fn parse_mako_cli_args(arguments:&[String])
     ->Result<(Option<String>,Vec<(String,String)>),String>
 {
+    parse_mako_cli_args_with_mode(arguments, env::var_os("POSIXLY_CORRECT").is_some())
+}
+
+// GNU getopt_long stops at the first non-option when POSIXLY_CORRECT is
+// present, and otherwise permutes options following non-option operands.
+// The explicit positional config path is a Posthorn development convenience;
+// -c/--config always takes precedence over it.
+fn parse_mako_cli_args_with_mode(arguments:&[String],stop_at_operand:bool)
+    ->Result<(Option<String>,Vec<(String,String)>),String>
+{
     let mut positional_path:Option<String>=None;
     let mut selected_config:Option<String>=None;
     let mut overrides:Vec<(String,String)>=Vec::new();
@@ -77,6 +87,7 @@ fn parse_mako_cli_args(arguments:&[String])
             }
         }else if positional_path.is_none() && !token.starts_with('-'){
             positional_path=Some(token.into());
+            if stop_at_operand { break; }
         }else{
             return Err(format!("unexpected argument '{token}'"));
         }
@@ -92,6 +103,25 @@ mod cli_terminator_tests {
 
     fn args(tokens: &[&str]) -> Vec<String> {
         tokens.iter().map(|token| (*token).to_owned()).collect()
+    }
+
+    #[test]
+    fn posixly_correct_stops_at_first_operand() {
+        let (path, overrides) = super::parse_mako_cli_args_with_mode(
+            &args(&["-c", "/tmp/pinned.conf", "--width=205", "ignored",
+                    "--width=777"]), true
+        ).unwrap();
+        assert_eq!(path.as_deref(), Some("/tmp/pinned.conf"));
+        assert_eq!(overrides, vec![("width".into(), "205".into())]);
+    }
+
+    #[test]
+    fn gnu_permutation_accepts_options_after_operand_by_default() {
+        let (path, overrides) = super::parse_mako_cli_args_with_mode(
+            &args(&["-c", "/tmp/pinned.conf", "ignored", "--width=777"]), false
+        ).unwrap();
+        assert_eq!(path.as_deref(), Some("/tmp/pinned.conf"));
+        assert_eq!(overrides, vec![("width".into(), "777".into())]);
     }
 
     #[test]
