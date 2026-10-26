@@ -1671,3 +1671,119 @@ for stage in grouped split regrouped; do
     "$root/mako-group-replace-$stage.png"
   echo "Pinned Mako/Posthorn grouped ID replacement $stage: MATCH"
 done
+
+# T502: Mako category sounds use on-notify=exec, not a separate audio
+# protocol. Compare actual file-backed hook side effects against Mako
+# without playing audio, touching the desktop or owning the public bus.
+sound_notify_category(){
+  local bus="$1" category="$2" reply
+  reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /org/freedesktop/Notifications org.freedesktop.Notifications \
+    Notify 'susssasa{sv}i' \
+    'Pinned sound comparison' 0 '' "Category $category" '' \
+    0 1 category s "$category" 30000)"
+  [[ "$reply" == u\ * ]] || {
+    echo "category $category Notify failed: $reply" >&2;return 1
+  }
+  echo "$reply" | cut -d ' ' -f 2
+}
+sound_wait_count(){
+  local marker="$1" wanted="$2" count=0
+  for _ in {1..70}; do
+    if [[ -f "$marker" ]];then
+      count="$(grep -c '^' "$marker" || true)"
+    else
+      count=0
+    fi
+    if ((count==wanted));then return 0;fi
+    if ((count>wanted));then
+      echo "unexpected extra sound hook: $count, expected $wanted" >&2
+      cat "$marker" >&2;return 1
+    fi
+    if ! kill -0 "$daemon_pid" 2>/dev/null;then
+      echo "daemon stopped before sound hook $wanted" >&2
+      cat "$root/daemon.log" >&2;return 1
+    fi
+    sleep 0.05
+  done
+  echo "sound hooks did not reach $wanted events" >&2
+  [[ ! -f "$marker" ]] || cat "$marker" >&2
+  return 1
+}
+for impl in posthorn mako; do
+  marker="$root/$impl-sound.events"
+  cat >"$root/$impl-sound.conf" <<EOF_SOUND
+width=185
+height=100
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=8
+default-timeout=0
+format=%s
+markup=0
+on-notify=none
+[category=success]
+background-color=#305747
+on-notify=exec printf 'success:%s\n' "\$id" >> "$marker"
+[category=failure]
+background-color=#684148
+on-notify=exec printf 'failure:%s\n' "\$id" >> "$marker"
+[category=warning]
+background-color=#715536
+on-notify=exec printf 'warning:%s\n' "\$id" >> "$marker"
+[mode=quiet]
+on-notify=none
+EOF_SOUND
+  if [[ "$impl" == posthorn ]];then
+    ./target/debug/posthorn --experimental-private-desktop \
+      "$root/$impl-sound.conf" >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$root/$impl-sound.conf" \
+      >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  count=0
+  for category in success failure warning; do
+    id="$(sound_notify_category "$bus" "$category")"
+    count=$((count+1))
+    sound_wait_count "$marker" "$count"
+    [[ "$(tail -n 1 "$marker")" == "$category:$id" ]] || {
+      echo "$impl selected wrong category hook for $category" >&2
+      cat "$marker" >&2;exit 1
+    }
+  done
+  cp "$marker" "$root/$impl-sound-before-quiet.events"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetMode s quiet >/dev/null || {
+    echo "$impl rejected quiet mode";cat "$root/daemon.log";exit 1
+  }
+  sound_notify_category "$bus" warning >/dev/null
+  sleep 0.35
+  cmp -s "$marker" "$root/$impl-sound-before-quiet.events" || {
+    echo "$impl ran a category sound in quiet mode" >&2
+    diff -u "$root/$impl-sound-before-quiet.events" "$marker" >&2 || true
+    exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetMode s default >/dev/null || {
+    echo "$impl rejected default mode";cat "$root/daemon.log";exit 1
+  }
+  id="$(sound_notify_category "$bus" warning)"
+  sound_wait_count "$marker" 4
+  [[ "$(tail -n 1 "$marker")" == "warning:$id" ]] || {
+    echo "$impl failed to resume warning hook after quiet" >&2
+    cat "$marker" >&2;exit 1
+  }
+  echo "$impl category sounds: 3 routed hooks, quiet suppressed, 1 resumed"
+  kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+diff -u "$root/posthorn-sound.events" "$root/mako-sound.events"
+echo 'Pinned Mako/Posthorn file-backed category hooks and quiet-mode source parity: MATCH'
+
