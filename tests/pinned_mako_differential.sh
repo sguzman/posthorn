@@ -366,7 +366,7 @@ swaymsg -s "$ipc" 'output HEADLESS-1 scale 2' >/dev/null
 scaled_ready=0
 for _ in {1..60}; do
   if swaymsg -s "$ipc" -t get_outputs >"$root/two-x-outputs.json" &&
-      grep -Eq '"scale":[[:space:]]*2(\\.0+)?[,}]' "$root/two-x-outputs.json"; then
+      grep -Eq '"scale":[[:space:]]*2([.]0+)?[,}]' "$root/two-x-outputs.json"; then
     scaled_ready=1; break
   fi
   sleep 0.15
