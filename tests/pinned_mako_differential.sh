@@ -2277,3 +2277,87 @@ done
 diff -u "$root/posthorn-reload-sound.events" "$root/mako-reload-sound.events"
 echo 'Pinned Mako/Posthorn atomic category sound Reload retention: MATCH'
 
+# T502: application-specific sound suppression must override a generic
+# category hook, without suppressing another application's category
+# notification. Quiet mode is a separate final ordered criterion.
+# The pinned Mako executable is our reference; all hook outputs are
+# disposable files and no audio is played.
+sound_notify_app(){
+  local bus="$1" app="$2" category="$3" reply
+  reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /org/freedesktop/Notifications org.freedesktop.Notifications \
+    Notify 'susssasa{sv}i' "$app" 0 '' "App $app" '' \
+    0 1 category s "$category" 30000)"
+  [[ "$reply" == u\ * ]] || {
+    echo "$app category $category Notify failed: $reply" >&2;return 1
+  }
+  echo "$reply" | cut -d ' ' -f 2
+}
+for impl in posthorn mako;do
+  marker="$root/$impl-app-sound.events"
+  config="$root/$impl-app-sound.conf"
+  cat >"$config" <<EOF_APP_SOUND
+width=195
+height=100
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=8
+default-timeout=0
+format=%s
+on-notify=none
+[category=warning]
+background-color=#715536
+on-notify=exec printf 'warning:%s\n' "\$id" >> "$marker"
+[app-name=MutedApp]
+on-notify=none
+[mode=quiet]
+on-notify=none
+EOF_APP_SOUND
+  if [[ "$impl" == posthorn ]];then
+    ./target/debug/posthorn --experimental-private-desktop \
+      "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$config" >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  first="$(sound_notify_app "$bus" 'ChimeApp' warning)"
+  sound_wait_count "$marker" 1
+  [[ "$(tail -n 1 "$marker")" == "warning:$first" ]] || exit 1
+  cp "$marker" "$root/$impl-app-before-mute.events"
+  sound_notify_app "$bus" 'MutedApp' warning >/dev/null
+  sound_notify_app "$bus" 'ChimeApp' success >/dev/null
+  sleep 0.35
+  cmp -s "$marker" "$root/$impl-app-before-mute.events" || {
+    echo "$impl ignored per-app or per-category sound suppression" >&2
+    cat "$marker" >&2;exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetMode s quiet >/dev/null
+  sound_notify_app "$bus" 'ChimeApp' warning >/dev/null
+  sleep 0.35
+  cmp -s "$marker" "$root/$impl-app-before-mute.events" || {
+    echo "$impl played an allowed-app hook during quiet" >&2;exit 1
+  }
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako SetMode s default >/dev/null
+  resumed="$(sound_notify_app "$bus" 'ChimeApp' warning)"
+  sound_wait_count "$marker" 2
+  [[ "$(tail -n 1 "$marker")" == "warning:$resumed" ]] || exit 1
+  sound_notify_app "$bus" 'MutedApp' warning >/dev/null
+  sleep 0.25
+  [[ "$(grep -c '^' "$marker")" == 2 ]] || {
+    echo "$impl allowed a muted app after leaving quiet" >&2;exit 1
+  }
+  echo "$impl per-app category sound suppression and global quiet: MATCH"
+  kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+diff -u "$root/posthorn-app-sound.events" "$root/mako-app-sound.events"
+echo 'Pinned Mako/Posthorn app-specific category sound suppression: MATCH'
+
