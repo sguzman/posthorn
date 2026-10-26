@@ -4142,13 +4142,19 @@ The tests also exercise 1x and 2x physical rasters.
 - [Pinned Mako render.c:139-155,192-199](https://github.com/emersion/mako/blob/v1.11.0/render.c#L139-L199)
 - [Signed text layout correction ce4e61b](https://github.com/sguzman/posthorn/commit/ce4e61b95ade36186b3a60c46dc0f7b88da6bb33)
 - [Corrected older border regression 0133812](https://github.com/sguzman/posthorn/commit/01338124d864c44918ca3a79c0c42b51102f17e7)
-- [Rust + private D-Bus regression CI 40256739010](https://github.com/sguzman/posthorn/actions/runs/40256739010):
-  **347 Rust library tests and 90 private D-Bus tests passed**.
-  The headless Wayland acceptance job was still pending when
-  this correction to the written evidence was committed.
+- [Accepted full Rust / private D-Bus / isolated Wayland CI 40256739010](https://github.com/sguzman/posthorn/actions/runs/40256739010):
+  **347 Rust library tests, 90 private D-Bus tests, and the complete
+  headless compositor acceptance suite passed**.
 
 The prior 200×220 source assertion was **incorrect** even though
 the old CI was green. It must not be cited as Mako parity evidence.
-The thick-border no-half-width-clamp change remains relevant, but
-the combined border and Pango measurement behavior is only credited
-after the complete new acceptance gate is green.
+The thick-border no-half-width-clamp change remains relevant;
+the now accepted signed text-limit behavior restores the correct
+joint measurement and rendering semantics.
+
+**Accepted progress:** T105 **92% → 93% (+1 pp)**;
+P1 raw **95.80% → 96.00% (+0.20 pp)**;
+strict M0 (24 tasks) raw **90.375% → 90.417%
+(+0.042 pp)**. T503 physical Hyprland acceptance
+remains 51% and T504 opt-in production cutover remains 0%.
+No production notification bus or personal desktop was modified.
