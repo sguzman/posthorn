@@ -132,6 +132,14 @@ pub async fn run_private_service_from_path_with_cli_overrides(
     run_private_service_instance(conn,runtime).await
 }
 
+pub async fn run_private_service_from_defaults_with_cli_overrides(
+    overrides:&[(String,String)],
+)->Result<(),Box<dyn std::error::Error+Send+Sync>>{
+    let runtime=SharedRuntime::from_mako_defaults_with_cli_overrides(overrides)?;
+    let (conn,runtime)=open_private_runtime(runtime).await?;
+    run_private_service_instance(conn,runtime).await
+}
+
 async fn run_private_service_instance(conn:Connection,runtime:SharedRuntime)
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {

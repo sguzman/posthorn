@@ -134,9 +134,13 @@ async fn main() -> ExitCode {
                     }
                 }
             }
-            Ok((None,_))=>{
-                eprintln!("posthorn --experimental-private-service requires a config path");
-                ExitCode::FAILURE
+            Ok((None,overrides))=>{
+                match posthorn::service::run_private_service_from_defaults_with_cli_overrides(
+                    &overrides
+                ).await {
+                    Ok(())=>ExitCode::SUCCESS,
+                    Err(error)=>{eprintln!("Posthorn private service default config failed: {error}");ExitCode::FAILURE}
+                }
             }
             Err(error)=>{
                 eprintln!("posthorn private CLI: {error}");
@@ -171,9 +175,20 @@ async fn main() -> ExitCode {
                     }
                 }
             }
-            Ok((None,_))=>{
-                eprintln!("Posthorn private desktop requires a config path");
-                ExitCode::FAILURE
+            Ok((None,overrides))=>{
+                let result=if multi{
+                    posthorn::desktop::run_private_multi_desktop_from_defaults_with_cli_overrides(
+                        &overrides
+                    ).await
+                }else{
+                    posthorn::desktop::run_private_desktop_from_defaults_with_cli_overrides(
+                        &overrides
+                    ).await
+                };
+                match result{
+                    Ok(())=>ExitCode::SUCCESS,
+                    Err(error)=>{eprintln!("Posthorn private desktop default config failed: {error}");ExitCode::FAILURE}
+                }
             }
             Err(error)=>{
                 eprintln!("Posthorn private desktop CLI: {error}");
@@ -197,9 +212,9 @@ async fn main() -> ExitCode {
             println!("Posthorn (development stage; NOT a desktop notification daemon)\n\
                      Usage:\n\
                      \tposthorn --check-config [PATH] [--MAKO-OPTION VALUE...]\n\
-                     \tposthorn --experimental-private-service PATH [--MAKO-OPTION VALUE...]\n\
-                     \tposthorn --experimental-private-desktop PATH [--MAKO-OPTION VALUE...]\n\
-                     \tposthorn --experimental-private-multi-desktop PATH [--MAKO-OPTION VALUE...]\n\
+                     \tposthorn --experimental-private-service [PATH] [--MAKO-OPTION VALUE...]\n\
+                     \tposthorn --experimental-private-desktop [PATH] [--MAKO-OPTION VALUE...]\n\
+                     \tposthorn --experimental-private-multi-desktop [PATH] [--MAKO-OPTION VALUE...]\n\
                      \tposthorn --experimental-popup-preview PATH\n\
                      \tposthorn --version\n\
                      \tposthorn --help\n\

@@ -34,6 +34,8 @@ pub struct SharedRuntime {
     /// Scale observed by the Wayland presenter for the NEXT Notify icon.
     icon_creation_scale: Arc<AtomicU32>,
     source_path: Option<Arc<PathBuf>>,
+    /// Implicit HOME/XDG selection must be re-done on every Reload.
+    rediscover_default_config: bool,
     /// Original Mako CLI style args are replayed after each disk reload.
     cli_overrides: Arc<Vec<(String,String)>>,
     revision: Arc<AtomicU64>,
@@ -54,6 +56,7 @@ impl SharedRuntime {
             known_surface_specs: Arc::new(Mutex::new(Vec::new())),
             icon_creation_scale: Arc::new(AtomicU32::new(1)),
             source_path: None,
+            rediscover_default_config:false,
             cli_overrides: Arc::new(Vec::new()),
             revision: Arc::new(AtomicU64::new(0)),
             modes: Arc::new(Mutex::new(vec!["default".into()])),
@@ -141,12 +144,31 @@ impl SharedRuntime {
         Ok(runtime)
     }
 
-    /// Reload only a source-backed instance. Parse before taking the write
-    /// lock; invalid or missing files never displace the working config.
+    /// Private development runtime with pinned config.c default discovery.
+    /// The search path is deliberately not frozen for subsequent Reload.
+    pub fn from_mako_defaults_with_cli_overrides(
+        overrides:&[(String,String)]
+    )->Result<Self,crate::config::ConfigError>{
+        let (mut config,_)=Config::from_mako_defaults()?;
+        for (key,value) in overrides{
+            config.apply_cli_override(key,value)?;
+        }
+        let mut runtime=Self::new(config);
+        runtime.rediscover_default_config=true;
+        runtime.cli_overrides=Arc::new(overrides.to_vec());
+        Ok(runtime)
+    }
+
+    /// Re-run pinned Mako default discovery at Reload if no -c was set.
+    /// A missing/bad new file must not displace the last working style.
     pub fn reload(&self)->Result<(),String>{
-        let path=self.source_path.as_ref()
-            .ok_or("reload requires a configuration file path")?;
-        let mut updated=Config::from_path(path).map_err(|e|e.to_string())?;
+        let mut updated=if self.rediscover_default_config{
+            Config::from_mako_defaults().map_err(|e|e.to_string())?.0
+        }else{
+            let path=self.source_path.as_ref()
+                .ok_or("reload requires a configuration file path")?;
+            Config::from_path(path).map_err(|e|e.to_string())?
+        };
         // Upstream reload_config -> parse_config_arguments repeats the
         // post-file getopt pass. Validate before the active-config write
         // lock, so any invalid source remains wholly non-disruptive.

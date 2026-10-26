@@ -731,6 +731,16 @@ pub async fn run_private_desktop_from_path_with_cli_overrides(
     run_private_desktop_instance(conn,runtime).await
 }
 
+/// No path supplied: discover the same isolated HOME/XDG config as Mako.
+pub async fn run_private_desktop_from_defaults_with_cli_overrides(
+    overrides:&[(String,String)],
+)->Result<(),Box<dyn std::error::Error+Send+Sync>>{
+    let runtime=SharedRuntime::from_mako_defaults_with_cli_overrides(overrides)?;
+    initialize_icon_creation_scale(&runtime)?;
+    let (conn,runtime)=crate::service::open_private_runtime(runtime).await?;
+    run_private_desktop_instance(conn,runtime).await
+}
+
 /// Private-bus-only multi-surface acceptance path. Does not register
 /// org.freedesktop.Notifications or replace the installed Mako daemon.
 pub async fn run_private_multi_desktop_from_path(path:&std::path::Path)
@@ -742,6 +752,15 @@ pub async fn run_private_multi_desktop_from_path_with_cli_overrides(
     path:&std::path::Path,overrides:&[(String,String)],
 )->Result<(),Box<dyn std::error::Error+Send+Sync>>{
     let runtime=SharedRuntime::from_path_with_cli_overrides(path,overrides)?;
+    initialize_icon_creation_scale(&runtime)?;
+    let (conn,runtime)=crate::service::open_private_runtime(runtime).await?;
+    run_private_desktop_instance_with_mode(conn,runtime,true).await
+}
+
+pub async fn run_private_multi_desktop_from_defaults_with_cli_overrides(
+    overrides:&[(String,String)],
+)->Result<(),Box<dyn std::error::Error+Send+Sync>>{
+    let runtime=SharedRuntime::from_mako_defaults_with_cli_overrides(overrides)?;
     initialize_icon_creation_scale(&runtime)?;
     let (conn,runtime)=crate::service::open_private_runtime(runtime).await?;
     run_private_desktop_instance_with_mode(conn,runtime,true).await
