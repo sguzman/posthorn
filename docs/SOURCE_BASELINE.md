@@ -4519,10 +4519,14 @@ The follow-up refactor
 centralizes the same zero-visible rule in
 `compose_mako_stack_with_visible_count` so callers beyond the
 desktop snapshot cannot accidentally invent a synthetic-only canvas.
-Its Wayland job passed at
-[CI 40324626395](https://github.com/sguzman/posthorn/actions/runs/40324626395);
-its independent Rust job was still awaiting dependency installation
-at this checkpoint, so full-CI success on the refactor is **not yet claimed**.
+Its complete Rust, private D-Bus and isolated Wayland CI passed at
+[CI 40324626395](https://github.com/sguzman/posthorn/actions/runs/40324626395).
+The progress-ledger and roadmap integration commit
+[8300a5d](https://github.com/sguzman/posthorn/commit/8300a5dbff33da9671d6b8ab351224e9b457a52f)
+passed its own exact-commit two-job
+[CI 40325386623](https://github.com/sguzman/posthorn/actions/runs/40325386623):
+**348 Rust library tests, 100 private D-Bus tests, and all isolated
+Wayland acceptance checks passed**.
 
 Accepted progress credit is for the already green geometry fix:
 **T105 layout/style 93% → 94%**;
