@@ -2594,3 +2594,81 @@ kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
 daemon_pid=""
 echo 'Pinned original Mako remained public owner and handled Notify after trial collision refusal: MATCH'
 
+# T504 readiness only: prove a complete *isolated* reversible ownership
+# sequence, not a workstation rollback controller. The original pinned
+# Mako first releases its name normally, the short authorized Posthorn
+# trial accepts Notify and self-expires, and precisely the same Mako
+# executable/config then reacquires the public name and handles Notify.
+# All processes, compositor surfaces and notifications are disposable.
+name_is_owned(){
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
+    org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+    NameHasOwner s org.freedesktop.Notifications
+}
+[[ "$(name_is_owned)" == 'b false' ]] || {
+  echo 'Mako collision fixture left an unexpected public owner' >&2;exit 1
+}
+POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 \
+POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS=8 \
+POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+  ./target/debug/posthorn --reversible-production-trial \
+    -c "$root/mako-collision.conf" >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.freedesktop.Notifications
+trial_owner="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+  GetNameOwner s org.freedesktop.Notifications)"
+[[ "$trial_owner" != "$before_owner" ]] || {
+  echo 'Bounded Posthorn trial unexpectedly reused the original Mako D-Bus owner' >&2
+  exit 1
+}
+trial_reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.freedesktop.Notifications /org/freedesktop/Notifications \
+  org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+  'Isolated handoff only' 0 '' 'Bounded Posthorn trial' '' 0 0 30000)"
+[[ "$trial_reply" == u\ * ]] || {
+  echo 'Bounded Posthorn trial did not handle a real standard Notify' >&2;exit 1
+}
+released=0
+for _ in {1..95};do
+  if [[ "$(name_is_owned)" == 'b false' ]];then
+    released=1;break
+  fi
+  sleep 0.12
+done
+[[ "$released" == 1 ]] || {
+  echo 'Bounded Posthorn trial did not release the standard name on expiry' >&2
+  cat "$root/daemon.log" >&2;exit 1
+}
+trial_status=0
+wait "$daemon_pid" || trial_status=$?
+daemon_pid=""
+[[ "$trial_status" == 0 ]] || {
+  echo "Bounded Posthorn trial failed on exit ($trial_status)" >&2
+  cat "$root/daemon.log" >&2;exit 1
+}
+grep -q 'reversible trial deadline reached' "$root/daemon.log" || {
+  echo 'Posthorn ownership ended without a verified trial deadline' >&2
+  cat "$root/daemon.log" >&2;exit 1
+}
+"$mako_binary" -c "$root/mako-collision.conf" \
+  >"$root/daemon.log" 2>&1 &
+daemon_pid=$!
+wait_for_bus org.freedesktop.Notifications
+restored_owner="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+  GetNameOwner s org.freedesktop.Notifications)"
+[[ "$restored_owner" != "$trial_owner" ]] || {
+  echo 'Original Mako was not restored as a different D-Bus connection' >&2;exit 1
+}
+restored_reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.freedesktop.Notifications /org/freedesktop/Notifications \
+  org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+  'Pinned Mako restored' 0 '' 'Post-trial original Mako' '' 0 0 30000)"
+[[ "$restored_reply" == u\ * ]] || {
+  echo 'Restored original Mako failed the next real Notify' >&2;exit 1
+}
+kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+echo 'Pinned Mako -> bounded Posthorn -> original Mako reacquisition and Notify: MATCH'
+
