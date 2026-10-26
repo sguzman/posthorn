@@ -3929,3 +3929,50 @@ complete physical Hyprland or actual application menu activation
 parity. T503 remains **51%**, T504 remains **0%**. The installed
 Mako daemon, workstation bus, and personal Hyprland config remain
 untouched.
+
+## Pinned Mako post-multiply progress-width clamp (2026-10-25)
+
+Pinned Mako v1.11.0 `render.c:215,239-245` computes the
+progress rectangle width as
+`(notification_width - 2 * border_size) * progress / 100`,
+then checks the result against the larger
+`notification_width - border_size` background width.
+If the provisional result exceeds that background width, the
+upstream renderer resets the width to the original interior width.
+It does **not** clamp `progress` to 100 before multiplication.
+
+Posthorn formerly preclamped sender progress percentages, so
+the Cairo path geometry for values slightly above 100 diverged.
+For width 120, border 4, upstream widths for percentages
+100, 101, 102, 103, 104, 105 are respectively
+112, 113, 114, 115, 116, 112 logical pixels. The last
+border stroke may mask some of this extra width; the correction
+is an exact-path geometry fix and is **not** counted as additional
+visual or physical compositor acceptance.
+
+A source-derived regression validates percentages -20, -1, 0, 1,
+50, 99, 100, 101 through 105 and 170 at a nonzero border,
+plus the borderless 100/101 boundary. Existing pixel and
+headless compositor tests remain intact.
+
+- [Pinned Mako render.c](https://github.com/emersion/mako/blob/v1.11.0/render.c#L215-L245)
+- [Source-compatible implementation 17269ad](https://github.com/sguzman/posthorn/commit/17269ad4ecfdfb2ca6a522880eb68de74bf661ec)
+- [Accepted full Rust, private D-Bus and headless Wayland CI 40250367748](https://github.com/sguzman/posthorn/actions/runs/40250367748):
+  **343 Rust library tests and 90 private D-Bus tests passed**.
+
+An earlier attempted close/expiration-grouping change (commits
+`e57119f`, `bd6ef88`, `d3b1c7c`) relied on
+`group-by` inside `[group-index]`/`[anchor]` sections.
+Mako's actual `validate_criteria` forbids that configuration,
+so the attempted change was reverted at
+[`0bf47aa`](https://github.com/sguzman/posthorn/commit/0bf47aafb6d464dc2034573dab36d4bba5a88677)
+and the full revert suite passed
+[CI 40249938901](https://github.com/sguzman/posthorn/actions/runs/40249938901).
+The reverted experiment earns **zero** progress credit.
+
+**Accepted progress:** T105 **88% → 89% (+1 pp)**,
+P1 raw **95.00% → 95.20% (+0.20 pp)**,
+strict M0 across 24 tasks **90.208% → 90.250%
+(+0.042 pp)**. Displayed M0 stays 90%, P1 stays 95%.
+This does not complete T402 or establish physical Hyprland
+acceptance; installed Mako and the real notification bus are untouched.
