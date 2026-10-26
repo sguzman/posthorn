@@ -201,7 +201,9 @@ done
 [[ "$released" == 1 ]] || { echo 'Trial failed to release standard name on exit' >&2;exit 1; }
 # A separately armed trial MUST release the public bus name at the
 # monotonic lifetime boundary even without an external controller kill.
-POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS=3 \
+# Keep a live notification present while the deadline expires, so
+# automatic shutdown must also remove its compositor layer surface.
+POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS=8 \
   POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
   ./target/debug/posthorn --reversible-production-trial -c "$root/config" \
   >"$root/auto-expire.log" 2>&1 &
@@ -215,8 +217,26 @@ for _ in {1..40};do
   sleep 0.10
 done
 [[ "$acquired" == 1 ]] || { echo 'Short trial never acquired its name' >&2;exit 1; }
+reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+  org.freedesktop.Notifications /org/freedesktop/Notifications \
+  org.freedesktop.Notifications Notify 'susssasa{sv}i' \
+  'Isolated TTL cleanup' 0 '' 'Active until trial deadline' '' 0 0 30000)"
+[[ "$reply" == u\ * ]] || { echo 'TTL trial failed to accept a notification' >&2;exit 1; }
+timeout_popup=0
+for _ in {1..50};do
+  if timeout 4s grim "$root/deadline-active.png" >/dev/null 2>&1 &&
+     ./target/debug/examples/qa_png_probe "$root/deadline-active.png" \
+       '#6F42A8' 300 increase "$root/baseline.png" >/dev/null 2>&1;then
+    timeout_popup=1;break
+  fi
+  sleep 0.10
+done
+[[ "$timeout_popup" == 1 ]] || {
+  echo 'Timed trial failed to paint its active notification before deadline' >&2
+  cat "$root/auto-expire.log" >&2;exit 1
+}
 expired=0
-for _ in {1..80};do
+for _ in {1..140};do
   if [[ "$(name_has_owner org.freedesktop.Notifications)" == 'b false' ]];then
     expired=1;break
   fi
@@ -229,4 +249,17 @@ grep -q 'reversible trial deadline reached' "$root/auto-expire.log" || {
   echo 'Name vanished without expected monotonic trial deadline' >&2
   cat "$root/auto-expire.log" >&2;exit 1
 }
-echo 'PASS: trial refuses unbounded lifetime, releases its name on deadline, and refuses collisions'
+cleared=0
+for _ in {1..35};do
+  if timeout 4s grim "$root/deadline-cleared.png" >/dev/null 2>&1 &&
+     ./target/debug/examples/qa_png_probe "$root/deadline-cleared.png" \
+       '#6F42A8' 60 restored "$root/baseline.png" >/dev/null 2>&1;then
+    cleared=1;break
+  fi
+  sleep 0.12
+done
+[[ "$cleared" == 1 ]] || {
+  echo 'Expired trial left its live notification visible on Sway' >&2
+  cat "$root/auto-expire.log" >&2;exit 1
+}
+echo 'PASS: bounded public-name trial expires with a painted popup, releases D-Bus, clears Wayland, and refuses collisions'
