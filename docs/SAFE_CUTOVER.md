@@ -57,6 +57,22 @@ Any failed invariant leaves the existing setup unchanged. Do not
 silently substitute a different notification daemon or omit failed
 physical-device checks.
 
+The guarded `tests/read_only_owner_inventory.sh` helper prepares a
+**minimal, non-mutating** identity report for delegated real-Hyprland
+automation. It requires private-QA authorization and refuses an armed
+production-trial environment. It verifies the original public bus owner
+is a running `mako` executable and identifies its PID; it considers
+a systemd user-service supervisor verified only if the unit's
+`MainPID` matches that exact process. Unknown/ambiguous supervision
+remains `unverified`. It rechecks D-Bus ownership before returning.
+The output omits notification messages, personal config, process
+arguments, environment, cgroup paths and monitor serials.
+
+This helper does not inventory the whole workstation, verify or
+launch a rollback mechanism, stop Mako, or authorize cutover.
+It has not been run on the actual workstation. Unknown supervisor
+ownership blocks Phase B until a restart/rollback plan is proven.
+
 ## Prepared CLI capability (not authorization)
 
 The development binary has a **non-default** `--reversible-production-trial`
