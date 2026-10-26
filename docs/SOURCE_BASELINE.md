@@ -4075,3 +4075,37 @@ strict 24-task M0 raw **90.292% → 90.333%
 (+0.042 pp)**. T401/T402 remain at 99%,
 T503 physical Hyprland QA remains 51% and
 T504 opt-in production cutover remains 0%.
+
+## Pinned Mako zero-sized rounded path suppression (2026-10-25)
+
+Pinned Mako v1.11.0 `render.c:38-41` begins
+`set_rounded_rectangle` with a guard: if its width or height is
+exactly zero, it immediately returns **without modifying the
+current Cairo path**. This affects the background, progress clip,
+and final SOURCE-mode border stroke, all of which use a copy of
+the same path. It is observable for a valid `width=48`,
+`border-size=48` config, where
+`notif_background_width = width - border-size = 0`.
+The remaining configured height, radius and border color do not
+authorize painting a rounded path with a zero width.
+
+Posthorn previously unconditionally emitted its four Cairo arcs,
+even if `w == 0` or `h == 0`. It now performs the same exact
+early return. Its normal nondegenerate rectangle path is unchanged.
+The regression renders an empty notification with width 48,
+height 96, padding 0, border-size 48 and border-radius 9. It
+asserts a 48×96 framebuffer with **every alpha byte zero**.
+It then reduces border-size to 2 and asserts a visible opaque
+border, ensuring the guard only affects the zero-dimension case.
+
+- [Pinned Mako render.c:38-41](https://github.com/emersion/mako/blob/v1.11.0/render.c#L38-L41)
+- [Accepted correction and regression 961b9f2](https://github.com/sguzman/posthorn/commit/961b9f224915efecb78ee1b7409c51da8379a292)
+- [Full successful Rust / private D-Bus / isolated Wayland CI 40255300005](https://github.com/sguzman/posthorn/actions/runs/40255300005): **346 Rust library tests, 90 private D-Bus tests, and complete headless compositor acceptance**.
+
+**Accepted progress:** T105 **91% → 92% (+1 pp)**,
+P1 raw **95.60% → 95.80% (+0.20 pp)**,
+strict 24-task M0 **90.333% → 90.375%
+(+0.042 pp)**. T402 remains 99%, T503
+physical Hyprland QA remains 51%, and T504
+production cutover remains 0%. No real notification
+service, user configuration, audio routing or live bus was changed.
