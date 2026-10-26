@@ -1788,7 +1788,7 @@ EOF_HIDDEN_CLAMP
     reply="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
       org.posthorn.Development /org/freedesktop/Notifications \
       org.freedesktop.Notifications Notify 'susssasa{sv}i' \
-      'Posthorn narrow-surface QA' 0 '' "$title" '' 0 0 -1)"
+      'Posthorn narrow-surface QA' 0 '' "$title" '' 0 0 30000)"
     [[ "$reply" == u\ * ]] || {
       echo "Narrow-surface private Notify failed: $reply"
       exit 1
