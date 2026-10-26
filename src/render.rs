@@ -832,6 +832,9 @@ mod tests {
                 let reference=cairo::ImageSurface::create(cairo::Format::ARgb32,
                     frame.width as i32,frame.height as i32).unwrap();
                 let context=cairo::Context::new(&reference).unwrap();
+                // Match upstream render.c:81-96 and the real renderer:
+                // unknown-subpixel outputs explicitly use grayscale glyphs.
+                set_unknown_subpixel_font_options(&context).unwrap();
                 let layout=pangocairo::functions::create_layout(&context);
                 layout.set_font_description(Some(
                     &pango::FontDescription::from_string("DejaVu Sans Oblique 44")
