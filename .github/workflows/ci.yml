@@ -49,6 +49,7 @@ jobs:
           grep -q 'nested QA must not run on the original session bus' "$output"
       - name: Verify guarded read-only owner inventory defaults to refusal
         run: |
+          bash -n tests/hyprland_private.sh
           bash -n tests/read_only_owner_inventory.sh
           output="$(mktemp)"
           trap 'rm -f "$output"' EXIT
