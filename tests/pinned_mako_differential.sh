@@ -1259,3 +1259,112 @@ for variant in reloaded rejected; do
     "$root/mako-include-$variant.png"
 done
 echo 'Pinned Mako/Posthorn nested include Reload and missing-file rejection: MATCH'
+
+
+# Pinned config.c:get_default_config_path selects ~/.mako/config before
+# XDG_CONFIG_HOME/mako/config when no -c exists, and reload_config reruns
+# the lookup. In a completely disposable HOME/XDG pair, delete the
+# higher-priority file after startup and require the still-running daemon
+# to switch to the lower-priority file on real fr.emersion.Mako.Reload.
+# The explicit --width=205 flag must remain active across that switch.
+mkdir -p "$root/default-home/.mako" "$root/default-xdg/mako"
+cat >"$root/default-home/.mako/config" <<'EOF_DEFAULT_LEGACY'
+width=148
+height=90
+font=Sans 17
+margin=0
+padding=5
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%s
+markup=0
+background-color=#416D98
+text-color=#E5C58B
+EOF_DEFAULT_LEGACY
+cat >"$root/default-xdg/mako/config" <<'EOF_DEFAULT_XDG'
+width=176
+height=132
+font=Sans 17
+margin=0
+padding=12
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%s
+markup=0
+background-color=#2A7F9B
+text-color=#E5C58B
+EOF_DEFAULT_XDG
+for impl in posthorn mako; do
+  cp "$root/default-home/.mako/config" "$root/default-legacy-original.conf"
+  if [[ "$impl" == posthorn ]]; then
+    HOME="$root/default-home" XDG_CONFIG_HOME="$root/default-xdg" \
+      ./target/debug/posthorn --experimental-private-desktop --width=205 \
+      >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    HOME="$root/default-home" XDG_CONFIG_HOME="$root/default-xdg" \
+      "$mako_binary" --width 205 >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  markup_notify "$bus"
+  initial_default="$(markup_measure "$impl-default-legacy" "$bus")"
+  echo "$impl default lookup legacy-first: $initial_default"
+  read -r ix0 ix1 iy0 iy1 icount <<<"$initial_default"
+  (( ix1-ix0+1 == 410 && icount > 250 )) || {
+    echo "$impl did not honor the default legacy config and CLI width"
+    exit 1
+  }
+  rm "$root/default-home/.mako/config"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null || {
+    echo "$impl rejected XDG fallback after deleting the legacy default"
+    cat "$root/daemon.log";exit 1
+  }
+  stable_default=0
+  accepted_default=0
+  for _ in {1..60}; do
+    if grim "$root/$impl-default-xdg.png" 2>/dev/null; then
+      xdg_bounds="$(./target/debug/examples/qa_png_probe \
+        "$root/$impl-default-xdg.png" '#2A7F9B' 400 bounds 2>/dev/null || true)"
+      if [[ -n "$xdg_bounds" ]]; then
+        if [[ -f "$root/$impl-default-prev.png" ]] &&
+          ./target/debug/examples/qa_png_probe \
+            "$root/$impl-default-xdg.png" '#2A7F9B' 0 identical \
+            "$root/$impl-default-prev.png" >/dev/null 2>&1; then
+          stable_default=$((stable_default+1))
+        else
+          stable_default=0
+        fi
+        if (( stable_default >= 3 )); then accepted_default=1;break;fi
+        cp "$root/$impl-default-xdg.png" "$root/$impl-default-prev.png"
+      fi
+    fi
+    sleep 0.15
+  done
+  [[ "$accepted_default" == 1 ]] || {
+    echo "$impl did not settle on the XDG config after default path re-discovery"
+    cat "$root/daemon.log";exit 1
+  }
+  read -r x0 x1 y0 y1 <<<"$xdg_bounds"
+  (( x1-x0+1 == 410 )) || {
+    echo "$impl lost the explicit width override on default path re-selection"
+    exit 1
+  }
+  echo "$impl default lookup switched to XDG on Reload: $xdg_bounds"
+  kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+  cp "$root/default-legacy-original.conf" "$root/default-home/.mako/config"
+done
+./target/debug/examples/qa_png_probe \
+  "$root/posthorn-default-legacy-markup.png" '#E5C58B' 0 identical \
+  "$root/mako-default-legacy-markup.png"
+./target/debug/examples/qa_png_probe \
+  "$root/posthorn-default-xdg.png" '#2A7F9B' 0 identical \
+  "$root/mako-default-xdg.png"
+echo 'Pinned Mako/Posthorn private implicit legacy/XDG config selection and Reload: MATCH'
