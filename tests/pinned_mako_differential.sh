@@ -1029,16 +1029,32 @@ for impl in posthorn mako; do
   busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
     "$bus" /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null
   reload_ready=0
+  stable_frames=0
   for _ in {1..60}; do
     if grim "$root/$impl-cli-reloaded.png" 2>/dev/null; then
       reload_bounds="$(./target/debug/examples/qa_png_probe \
         "$root/$impl-cli-reloaded.png" '#2A7F9B' 400 bounds 2>/dev/null || true)"
-      if [[ -n "$reload_bounds" ]]; then reload_ready=1; break; fi
+      if [[ -n "$reload_bounds" ]]; then
+        # The first frame containing the NEW background can precede a
+        # rebuilt layer surface with its final Pango bounds. Requiring
+        # 3 consecutive identical fully decoded compositor frames
+        # proves completion without hiding a stable geometry defect.
+        if [[ -f "$root/$impl-cli-previous.png" ]] &&
+            ./target/debug/examples/qa_png_probe \
+              "$root/$impl-cli-reloaded.png" '#2A7F9B' 0 identical \
+              "$root/$impl-cli-previous.png" >/dev/null 2>&1; then
+          stable_frames=$((stable_frames+1))
+        else
+          stable_frames=0
+        fi
+        if (( stable_frames >= 3 )); then reload_ready=1; break; fi
+        cp "$root/$impl-cli-reloaded.png" "$root/$impl-cli-previous.png"
+      fi
     fi
-    sleep 0.1
+    sleep 0.15
   done
   [[ "$reload_ready" == 1 ]] || {
-    echo "$impl failed to repaint after CLI-precedence Reload"
+    echo "$impl did not reach a stable post-Reload compositor raster"
     cat "$root/daemon.log"; exit 1
   }
   read -r cx0 cx1 cy0 cy1 <<< "$reload_bounds"
