@@ -4491,3 +4491,45 @@ T503 physical Hyprland remains **51%**, and T504 explicitly
 authorized reversible live Mako cutover remains **0%**.
 No production Mako, user notification D-Bus name or desktop
 configuration was modified.
+
+## Zero-visible Mako overflow cannot invent popup width (2026-10-26)
+
+Pinned Mako v1.11.0 `render.c:360-361,392-399,424-430,442-484`
+computes `max_width` only from *visible real notifications*. The
+synthetic hidden-count notification contributes height, but it does not
+increase that width. When `max-visible=0`, all real notes are hidden;
+the synthetic placeholder cannot establish a drawable canvas by itself.
+
+Posthorn previously gave such a placeholder its own nonzero popup width,
+displaying a visual element absent from the pinned Mako canvas geometry.
+The fix preserves creation/ID consumption of the hidden pseudo-notification
+but returns no drawable frame when the real visible count is zero. The
+same invariant also applies at 2x scale.
+
+Implementation and regression:
+`src/desktop.rs::all_hidden_notifications_do_not_create_synthetic_only_canvas`,
+[cf52987](https://github.com/sguzman/posthorn/commit/cf5298734fc79368adb113f38bbea699d17aa336),
+[47b5127](https://github.com/sguzman/posthorn/commit/47b5127e4d7d56f3bf6d42833b141ea109b66c39).
+[Both-job successful CI 40324367009](https://github.com/sguzman/posthorn/actions/runs/40324367009)
+validates the geometry fix and ID-lifetime regression alongside the full
+isolated Sway suite.
+
+The follow-up refactor
+[3fe3be8](https://github.com/sguzman/posthorn/commit/3fe3be8d932d2ef8b63c58c92a900c96fad4f336)
+centralizes the same zero-visible rule in
+`compose_mako_stack_with_visible_count` so callers beyond the
+desktop snapshot cannot accidentally invent a synthetic-only canvas.
+Its Wayland job passed at
+[CI 40324626395](https://github.com/sguzman/posthorn/actions/runs/40324626395);
+its independent Rust job was still awaiting dependency installation
+at this checkpoint, so full-CI success on the refactor is **not yet claimed**.
+
+Accepted progress credit is for the already green geometry fix:
+**T105 layout/style 93% → 94%**;
+P1 task average **96.0% → 96.2%**;
+strict 24-task M0 **90.833% → 90.875% (+0.042 percentage points)**.
+T204 grouping/visibility remains 99%, T402 renderer remains 99%, and
+physical Hyprland T503 and authorized production cutover T504
+remain 51% and 0% respectively.
+No desktop notification bus registration, installed Mako daemon,
+Hyprland config or physical workstation state was modified.
