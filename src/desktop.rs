@@ -846,7 +846,7 @@ mod tests {
             }),
         ] {
             let config=Config::parse(&format!(
-                "width=110\\nheight=55\\npadding=0\\nborder-size=0\\nmargin=0\\nmax-visible=1\\nformat=%s\\n[hidden]\\nbackground-color=#224466FF\\n[{selector}]\\nbackground-color={visible_color}\\n"
+                "width=110\nheight=55\npadding=0\nborder-size=0\nmargin=0\nmax-visible=1\nformat=%s\n[hidden]\nbackground-color=#224466FF\n[{selector}]\nbackground-color={visible_color}\n"
             )).unwrap();
             let runtime=SharedRuntime::new(config);
             runtime.store.lock().unwrap().push(request.clone());
