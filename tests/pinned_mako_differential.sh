@@ -805,6 +805,12 @@ echo 'Pinned Mako/Posthorn real 2x all ordinary notification format placeholders
 # substitutions. Pinned notification.c:format_hidden_text separately
 # resolves %h and %t; keep the visible summary constant while increasing
 # the hidden count and compare entire decoded 2x compositor frames.
+# The immediately preceding ordinary-placeholder comparison leaves its
+# pinned Mako instance alive; release that private CI bus name before
+# trying to launch this fixture's own fresh Mako process.
+kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+daemon_pid=""
+clear_color '#416D98'
 cat >"$root/hidden-substitutions.conf" <<'EOF_HIDDEN_SUBS'
 width=140
 height=100
