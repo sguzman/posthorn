@@ -1669,6 +1669,74 @@ async fn category_sound_command_routing_and_quiet_mode_preserve_notifications()
 }
 
 #[tokio::test]
+async fn category_sound_direct_replacements_follow_current_mode_without_replay()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    // Pinned dbus/xdg.c:106-113 resets an existing ID on a direct
+    // replacement, and :385-430 rematches category/mode and executes
+    // on-notify again. SetMode by itself is NOT a Notify: changing
+    // modes never retroactively runs an old category sound command.
+    let dir=tempfile::tempdir()?;
+    let marker=dir.path().join("replacement-sound-events");
+    let config=Config::parse(&format!(
+        "[category=success]\non-notify=exec printf 'success:%s\\n' \"$id\" >> '{}'\n\
+         [category=warning]\non-notify=exec printf 'warning:%s\\n' \"$id\" >> '{}'\n\
+         [mode=quiet]\non-notify=none\n",
+        marker.display(),marker.display(),
+    ))?;
+    let (conn,runtime)=open_private_service(config).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let send=|replaces_id:u32,category:&str|{
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".to_owned(),
+            OwnedValue::try_from(zbus::zvariant::Value::from(category)).unwrap()
+        )].into();
+        ("category-replacement",replaces_id,"","Sound category","",
+         Vec::<String>::new(),hints,-1i32)
+    };
+    let check=|expected:String|{
+        let marker=marker.clone();
+        async move {
+            tokio::time::timeout(Duration::from_secs(3),async{
+                loop {
+                    if std::fs::read_to_string(&marker).unwrap_or_default()==expected{
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                }
+            }).await
+        }
+    };
+
+    let id:u32=desktop.call("Notify",&send(0,"success")).await?;
+    check(format!("success:{id}\n")).await?;
+    let replaced:u32=desktop.call("Notify",&send(id,"warning")).await?;
+    assert_eq!(replaced,id,"direct replacement must retain its notification ID");
+    let before_quiet=format!("success:{id}\nwarning:{id}\n");
+    check(before_quiet.clone()).await?;
+
+    let _:()=ctl.call("SetMode",&("quiet",)).await?;
+    let quiet:u32=desktop.call("Notify",&send(id,"success")).await?;
+    assert_eq!(quiet,id);
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,before_quiet,
+        "direct replacement in quiet mode must not play a category sound");
+    assert_eq!(runtime.store.lock().unwrap().active().len(),1,
+        "quiet mode must keep the replaced notification active");
+
+    let _:()=ctl.call("SetMode",&("default",)).await?;
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,before_quiet,
+        "leaving quiet mode cannot replay a previously suppressed sound");
+    let resumed:u32=desktop.call("Notify",&send(id,"warning")).await?;
+    assert_eq!(resumed,id);
+    check(format!("{before_quiet}warning:{id}\n")).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn stack_tag_replacement_consumes_mako_notification_counter_over_private_dbus()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
