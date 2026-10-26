@@ -375,6 +375,13 @@ impl NotificationStore {
     pub fn regroup_new_notification(
         &mut self,target_id:u32,spec:&crate::grouping::GroupSpec
     ){
+        // Pinned Mako notification.c:insert_notification does not call
+        // group_notifications at all if create_criteria_from_notification
+        // returns NULL for group-by=none. A newly created C notification
+        // consequently keeps group_count=0 for the %g placeholder.
+        // Preserve this "not grouped" state rather than incorrectly
+        // treating every Notify as a singleton grouping pass.
+        if spec.disabled{return;}
         if let Some(target)=self.active.iter_mut().find(|n|n.id==target_id){
             target.grouping_applied=true;
         }
@@ -494,6 +501,22 @@ mod tests {
     use super::*;
     fn req(app: &str, text: &str) -> Request {
         Request { app_name: app.into(), summary: text.into(), ..Request::default() }
+    }
+    #[test]
+    fn disabled_group_by_does_not_create_a_singleton_grouping_pass(){
+        let mut store=NotificationStore::new(4);
+        let id=store.push(req("app","hello"));
+        store.regroup_new_notification(
+            id,&crate::grouping::GroupSpec::parse("none").unwrap());
+        let note=store.active().iter().find(|n|n.id==id).unwrap();
+        assert!(!note.grouping_applied,
+            "Mako skips group_notifications entirely for group-by=none");
+        store.regroup_new_notification(
+            id,&crate::grouping::GroupSpec::parse("app-name").unwrap());
+        let note=store.active().iter().find(|n|n.id==id).unwrap();
+        assert!(note.grouping_applied,
+            "Mako runs group_notifications for enabled group-by even with one match");
+        assert_eq!((note.group_index,note.group_count),(-1,1));
     }
     #[test]
     fn regroup_reorders_list_but_never_reverses_matching_members() {
