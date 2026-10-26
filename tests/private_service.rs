@@ -2078,6 +2078,87 @@ async fn invalid_reload_retains_last_good_category_sound_and_quiet_mode()
 }
 
 #[tokio::test]
+async fn category_sound_and_quiet_mode_follow_mako_config_section_order()
+    -> Result<(),Box<dyn std::error::Error+Send+Sync>>
+{
+    use posthorn::service::open_private_service_from_path;
+    // Pinned Mako criteria.c:421-438 applies every matching section in
+    // configuration order. A category rule *after* [mode=quiet] therefore
+    // overrides quiet's on-notify=none, while reversing the two sections
+    // mutes it. Posthorn must not introduce an unconditional global mute.
+    let dir=tempfile::tempdir()?;
+    let path=dir.path().join("config");
+    let marker=dir.path().join("ordered-category-sound-events");
+    let category=format!(
+        "[category=warning]\nbackground-color=#715536\n\
+         on-notify=exec printf 'warning:%s\\n' \"$id\" >> '{}'\n",
+        marker.display(),
+    );
+    let quiet="[mode=quiet]\non-notify=none\n";
+    std::fs::write(&path,format!("{quiet}{category}"))?;
+    let (conn,runtime)=open_private_service_from_path(&path).await?;
+    let desktop=Proxy::new(&conn,PRIVATE_BUS_NAME,OBJECT_PATH,BUS_NAME).await?;
+    let ctl=Proxy::new(&conn,PRIVATE_BUS_NAME,CONTROL_PATH,CONTROL_INTERFACE).await?;
+    let notify=||{
+        let hints:HashMap<String,OwnedValue>=[(
+            "category".into(),
+            OwnedValue::try_from(zbus::zvariant::Value::from("warning")).unwrap(),
+        )].into();
+        ("ordered-quiet-sound",0u32,"","Warning","",
+         Vec::<String>::new(),hints,-1i32)
+    };
+    let wait_for=|expected:String|{
+        let marker=marker.clone();
+        async move{
+            tokio::time::timeout(Duration::from_secs(3),async{
+                loop{
+                    if std::fs::read_to_string(&marker).unwrap_or_default()==expected {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                }
+            }).await
+        }
+    };
+
+    let _:()=ctl.call("SetMode",&("quiet",)).await?;
+    let first:u32=desktop.call("Notify",&notify()).await?;
+    let initial=format!("warning:{first}\n");
+    wait_for(initial.clone()).await?;
+    let original=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==first).cloned().ok_or("ordered warning missing")?;
+    let original_style=posthorn::desktop::style_for_note(
+        &runtime,&original,&["quiet".to_owned()]);
+    assert!(original_style["on-notify"].contains("warning:"),
+        "later category rule must override preceding quiet-mode hook");
+    assert_eq!(original_style["background-color"],"#715536");
+
+    std::fs::write(&path,format!("{category}{quiet}"))?;
+    let _:()=ctl.call("Reload",&()).await?;
+    let second:u32=desktop.call("Notify",&notify()).await?;
+    let quiet_note=runtime.store.lock().unwrap().active().iter()
+        .find(|n|n.id==second).cloned().ok_or("quiet warning missing")?;
+    let quiet_style=posthorn::desktop::style_for_note(
+        &runtime,&quiet_note,&["quiet".to_owned()]);
+    assert_eq!(quiet_style["on-notify"],"none",
+        "later quiet-mode section must override category sound");
+    assert_eq!(quiet_style["background-color"],"#715536");
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,initial,
+        "reordered quiet rule must mute the next warning without replay");
+
+    std::fs::write(&path,format!("{quiet}{category}"))?;
+    let _:()=ctl.call("Reload",&()).await?;
+    tokio::time::sleep(Duration::from_millis(130)).await;
+    assert_eq!(std::fs::read_to_string(&marker)?,initial,
+        "restoring later category priority cannot replay existing hooks");
+    let third:u32=desktop.call("Notify",&notify()).await?;
+    wait_for(format!("{initial}warning:{third}\n")).await?;
+    assert_eq!(runtime.store.lock().unwrap().active().len(),3);
+    Ok(())
+}
+
+#[tokio::test]
 async fn category_sound_stack_tag_updates_honor_quiet_mode_and_app_scope()
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
