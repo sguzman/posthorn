@@ -43,7 +43,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🖌️ T402 — Text, icons, colors, borders, progress and layout — `██████████ 99%`
 - 🖱️ T403 — Pointer, touch, button bindings and XDG activation — `██████████ 99%`
 
-### 🎛️ P5 — CLI and exact workstation parity — `██████░░░░ 59%`
+### 🎛️ P5 — CLI and exact workstation parity — `██████░░░░ 58%`
 
 - ⌨️ T501 — Port makoctl operations with compatibility tests — `██████████ 99%`
 - 🔔 T502 — Reproduce category colors, per-category sounds and quiet mode — `████████░░ 84%`
