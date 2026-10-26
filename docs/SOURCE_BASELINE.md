@@ -4303,3 +4303,33 @@ strict M0 **90.500% → 90.542% (+0.042 pp)**
 opt-in production cutover T504 remains **0%**.
 This test does not validate actual audio playback or user-device
 wake behavior. No live bus, installed Mako or Hyprland config was touched.
+
+## Restored category notification does not replay sound hooks (2026-10-25)
+
+Pinned Mako v1.11.0's `dbus/mako.c:120-141` restores the first
+archived notification by reinitializing its style, applying criteria and
+reinserting the existing object. It does **not** call
+`notification_execute_binding` (`notification.c:381-436`).
+Only a subsequent Freedesktop `Notify` can execute the configured
+category `on-notify=exec` again.
+
+A private-D-Bus regression
+(`tests/private_service.rs::restoring_archived_category_notification_does_not_replay_sound_hook`)
+checks the full sequence: the first warning notification runs its file-backed
+sound command; quiet mode is entered; the message is dismissed to history
+and restored; the category background is preserved but the current quiet
+mode overrides `on-notify`; restoration and leaving quiet never replay the
+sound; finally an explicit direct-ID warning replacement executes the sound
+again while preserving the restored ID.
+
+[Accepted implementation 0a4758a](https://github.com/sguzman/posthorn/commit/0a4758a96fa1d3abd62427b4106e656d7bebfa7e) ·
+[successful Rust/private-D-Bus/Wayland CI 40261769648](https://github.com/sguzman/posthorn/actions/runs/40261769648):
+**347 Rust library tests, 94 private D-Bus tests, and every isolated
+headless Wayland acceptance check passed.**
+
+**T502 80% → 81%; category sound feature 80% → 81%;
+P5 57.50% → 57.75% (display 58%);
+strict 24-task M0 90.542% → 90.583% (display 91%).**
+Physical Hyprland T503 stays 51% and authorized reversible
+cutover T504 stays 0%. No speaker, production notification bus,
+live Mako daemon or workstation configuration was touched.
