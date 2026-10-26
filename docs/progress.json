@@ -109,7 +109,7 @@
               "id": "T205",
               "emoji": "🔤",
               "name": "Pango markup/escaping, format specifiers and actions",
-              "progress": 97
+              "progress": 98
             }
           ]
         },
@@ -134,7 +134,7 @@
               "id": "T303",
               "emoji": "🔄",
               "name": "Correct startup, bus ownership and config reload behavior",
-              "progress": 87
+              "progress": 88
             }
           ]
         },

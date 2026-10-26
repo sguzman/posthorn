@@ -5125,3 +5125,79 @@ This acceptance does not prove grouped non-default
 physical Hyprland T503 (51%), or production
 Mako cutover T504 (0%). Installed Mako and the
 real session's public notification bus are untouched.
+
+## Mutable grouped %g and private desktop CLI Reload exact source parity (2026-10-26)
+
+Two existing MVP gaps have source-pinned cross-executable acceptance
+in the **same isolated compositor and private D-Bus session**. The
+original Mako v1.11.0 is compiled at the repository's pinned hash;
+the user's installed Mako and public notification name are untouched.
+
+### Notification grouped count: first member and transition to two
+
+Mako's `notification.c:group_notifications` only writes the C
+`group_count` field after a successful criteria grouping pass,
+**including a singleton count of one**. An ungrouped notification
+retains a zero field even though Posthorn's internal grouping
+projection uses one as the singleton group-length sentinel.
+
+Posthorn now records the **source field-assigned state** independently
+of its scheduled grouping/order replay. The flag is initialized false,
+set on actual regrouping matches (even one), cleared on grouping reset,
+and preserved through explicit-ID replacement. Both popup formatting
+and Pango-measured pointer geometry use that source-visible state.
+
+The fixture uses `group-by=app-name`, `format=Group size: %g / %s`,
+and an invisible secondary member, forcing the same visible leader to
+change from a real one-member group to a two-member group:
+
+| Original Mako/Posthorn 2× group state | Identical full-image bounds | Text-color pixels, both | Decoded difference |
+| --- | --- | ---: | ---: |
+| First matching notification | `860 1279 0 177` | 6,387 | **0 pixels** |
+| Second same-app notification | `860 1279 0 193` | 9,833 | **0 pixels** |
+
+The earlier attempted shortcut that conflated `grouping_applied`
+with source group-count initialization failed a replacement
+regression. The separated flag fixed both the former ungrouped
+markup differential and this grouped source case. **354 Rust
+library tests** and **100 private D-Bus tests** passed on the
+successful source-pinned comparison.
+
+[Source group metadata correction 38f78d5](https://github.com/sguzman/posthorn/commit/38f78d5f20c29530910cdc9b6d514dea23fbe870).
+
+### Real private Wayland CLI startup and Reload
+
+The explicit development-only presenter now parses Mako-compatible
+CLI overrides in original argument order, applies them *after*
+the selected config file, and retains them across the real
+`fr.emersion.Mako.Reload` D-Bus call. The normal production
+`org.freedesktop.Notifications` ownership path remains disabled.
+
+A fixture sets `width=144`, `height=165`, then overrides
+those to `--width=205 --height=103`; it next changes the
+disk config to `width=300`, `height=180` and a different
+background and reloads each daemon independently.
+The screenshot comparison waits for **three successive stable
+decoded frames** after the changed background is visible.
+This caught and eliminated a transient comparison against an
+incompletely repainted Mako surface.
+
+| Exact source-pinned scale-2 render | Both full-image bounds | Decoded difference |
+| --- | --- | ---: |
+| CLI startup | `870 1279 0 123` | **0 pixels** |
+| Post-Reload, CLI width retained | `870 1279 0 123` | **0 pixels** |
+
+[CLI-enabled private presenter 7449d1f](https://github.com/sguzman/posthorn/commit/7449d1fe0e90c901de3b81de76814207f2a92904) ·
+[Reload acceptance fixture 8f67c60](https://github.com/sguzman/posthorn/commit/8f67c6037b6f5983af11564853e252361ef7cc97) ·
+[stable compositor comparison f3eee9c](https://github.com/sguzman/posthorn/commit/f3eee9c39cbaee89837bde083a4466a130b35581) ·
+[successful pinned-original-Mako CI 40373410919](https://github.com/sguzman/posthorn/actions/runs/40373410919) ·
+[Rust and Wayland CI 40373411172](https://github.com/sguzman/posthorn/actions/runs/40373411172).
+
+**Conservative independent source-backed credit:** T205
+**97% → 98% (+1 pp)**; T303 **87% → 88% (+1 pp)**.
+P2 **99.0% → 99.2%**, P3 **95.0% → 95.333%**,
+strict 24-task M0 **91.500% → 91.583% (+0.083 pp)**.
+
+Remaining user-workstation physical Hyprland T503 is **51%**;
+authorized reversible production Mako cutover T504 is **0%**.
+These tests establish only the tested isolated source cases.

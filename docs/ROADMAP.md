@@ -29,13 +29,13 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 - 🗃️ T202 — Bounded in-memory history, close and restore — `██████████ 100%`
 - ⏳ T203 — Timeout selection and timer/event scheduling — `██████████ 99%`
 - 🔗 T204 — Grouping, sorting, hidden placeholder and visibility — `██████████ 99%`
-- 🔤 T205 — Pango markup/escaping, format specifiers and actions — `██████████ 97%`
+- 🔤 T205 — Pango markup/escaping, format specifiers and actions — `██████████ 98%`
 
 ### 🚌 P3 — D-Bus protocol and control surface — `██████████ 95%`
 
 - 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `██████████ 99%`
 - 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `██████████ 99%`
-- 🔄 T303 — Correct startup, bus ownership and config reload behavior — `█████████░ 87%`
+- 🔄 T303 — Correct startup, bus ownership and config reload behavior — `█████████░ 88%`
 
 ### 🪟 P4 — Wayland protocol and rendering — `██████████ 99%`
 
