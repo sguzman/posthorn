@@ -808,6 +808,31 @@ mod tests {
     }
 
     #[test]
+    fn all_hidden_notifications_do_not_create_synthetic_only_canvas(){
+        // Pinned Mako render.c:360-361,424-430,472-484 only increases
+        // max_width for real visible notifications. With max-visible=0,
+        // the synthetic hidden-count popup contributes height, but no
+        // drawable layer-shell width. Creating a full-width placeholder
+        // in that case would be a Posthorn-only visual regression.
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=96\nheight=60\nmargin=3\nmax-visible=0\n\
+             [hidden]\nbackground-color=#E5923C\n"
+        ).unwrap());
+        let first=runtime.store.lock().unwrap().push(Request::default());
+        let second=runtime.store.lock().unwrap().push(Request::default());
+        assert_eq!((first,second),(1,2));
+        assert!(snapshot_frame(&runtime).unwrap().is_none(),
+            "hidden-count alone must not invent a nonzero Mako surface width");
+        assert!(snapshot_frame_scaled(&runtime,2).unwrap().is_none(),
+            "HiDPI cannot turn zero real-visible width into a popup");
+        assert_eq!(runtime.store.lock().unwrap().active().len(),2,
+            "synthetic hidden redraw cannot remove real D-Bus entries");
+        let third=runtime.store.lock().unwrap().push(Request::default());
+        assert_eq!(third,5,
+            "two zero-visible redraws still allocate synthetic IDs 3 and 4");
+    }
+
+    #[test]
     fn hidden_placeholder_redraw_consumes_mako_id_but_not_active_slot() {
         let runtime=SharedRuntime::new(Config::parse(
             "width=90\nheight=30\nmax-visible=1\n"
