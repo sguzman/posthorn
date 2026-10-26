@@ -42,20 +42,30 @@ if env -u POSTHORN_PRODUCTION_TRIAL_AUTHORIZED \
   echo 'Unarmed public-name trial incorrectly succeeded' >&2;exit 1
 fi
 grep -q 'explicit authorization required' "$root/unarmed.log"
-if POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 \
+if POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS=60 \
   POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS=unix:path=/wrong-socket \
   ./target/debug/posthorn --reversible-production-trial -c "$root/config" \
   >"$root/wrong-bus.log" 2>&1;then
   echo 'Mismatched public-name bus pin was accepted' >&2;exit 1
 fi
 grep -q 'session bus does not match controller pin' "$root/wrong-bus.log"
-if POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 POSTHORN_HYPRLAND_QA=1 \
+if POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS=60 POSTHORN_HYPRLAND_QA=1 \
   POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
   ./target/debug/posthorn --reversible-production-trial -c "$root/config" \
   >"$root/private-qa.log" 2>&1;then
   echo 'Private Hyprland QA bypassed the public-name gate' >&2;exit 1
 fi
 grep -q 'private QA cannot own the public name' "$root/private-qa.log"
+# Even with an authorized, correctly pinned bus, an unbounded trial
+# must refuse before touching the compositor or acquiring D-Bus names.
+if env -u POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS \
+  POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 \
+  POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+  ./target/debug/posthorn --reversible-production-trial -c "$root/config" \
+  >"$root/unbounded.log" 2>&1;then
+  echo 'Unbounded trial unexpectedly passed its lifetime guard' >&2;exit 1
+fi
+grep -q 'bounded trial lifetime' "$root/unbounded.log"
 
 export XDG_RUNTIME_DIR="$root/runtime"
 mkdir -p "$XDG_RUNTIME_DIR"
@@ -91,7 +101,7 @@ name_has_owner(){
 [[ "$(name_has_owner org.freedesktop.Notifications)" == 'b false' ]] || {
   echo 'CI bus already has a notification daemon' >&2;exit 1
 }
-POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 \
+POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS=60 \
   POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
   ./target/debug/posthorn --reversible-production-trial -c "$root/config" \
   >"$root/trial.log" 2>&1 &
@@ -124,7 +134,7 @@ owner_pid="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
 # Returning a timeout status would indicate a queued/hung contender,
 # not a real DoNotQueue refusal. Fail rather than accept it as safety.
 contender_status=0
-POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 \
+POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS=60 \
   POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
   timeout 5s ./target/debug/posthorn --reversible-production-trial \
   -c "$root/config" >"$root/contender.log" 2>&1 || contender_status=$?
@@ -189,4 +199,34 @@ for _ in {1..40};do
   sleep 0.1
 done
 [[ "$released" == 1 ]] || { echo 'Trial failed to release standard name on exit' >&2;exit 1; }
-echo 'PASS: separately armed public-name trial, no queue/replace, paint/close, and automatic release'
+# A separately armed trial MUST release the public bus name at the
+# monotonic lifetime boundary even without an external controller kill.
+POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS=3 \
+  POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+  ./target/debug/posthorn --reversible-production-trial -c "$root/config" \
+  >"$root/auto-expire.log" 2>&1 &
+trial_pid=$!
+acquired=0
+for _ in {1..40};do
+  if [[ "$(name_has_owner org.freedesktop.Notifications)" == 'b true' ]];then
+    acquired=1;break
+  fi
+  kill -0 "$trial_pid" 2>/dev/null || { cat "$root/auto-expire.log" >&2;exit 1; }
+  sleep 0.10
+done
+[[ "$acquired" == 1 ]] || { echo 'Short trial never acquired its name' >&2;exit 1; }
+expired=0
+for _ in {1..80};do
+  if [[ "$(name_has_owner org.freedesktop.Notifications)" == 'b false' ]];then
+    expired=1;break
+  fi
+  sleep 0.10
+done
+[[ "$expired" == 1 ]] || { echo 'Short trial did not release public name on deadline' >&2;cat "$root/auto-expire.log" >&2;exit 1; }
+wait "$trial_pid" || { echo 'Deadline trial returned failure' >&2;cat "$root/auto-expire.log" >&2;exit 1; }
+trial_pid=""
+grep -q 'reversible trial deadline reached' "$root/auto-expire.log" || {
+  echo 'Name vanished without expected monotonic trial deadline' >&2
+  cat "$root/auto-expire.log" >&2;exit 1
+}
+echo 'PASS: trial refuses unbounded lifetime, releases its name on deadline, and refuses collisions'

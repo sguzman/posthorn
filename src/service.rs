@@ -87,6 +87,22 @@ pub(crate) async fn open_private_runtime(
 /// Standard-name registration exclusively for the separately gated
 /// reversible trial. The existing registration refuses to queue or
 /// displace an owned name, and all D-Bus objects are ready beforehand.
+/// Convert a user-supplied trial lifetime to a strictly finite limit.
+pub fn parse_production_trial_seconds(raw:&str)->Option<u64>{
+    let seconds=raw.parse::<u64>().ok()?;
+    (1..=600).contains(&seconds).then_some(seconds)
+}
+
+/// Lower-level trial callers may not bypass the CLI lifetime guard.
+pub(crate) fn production_trial_lifetime()->zbus::Result<Duration>{
+    let raw=std::env::var("POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS")
+        .map_err(|_|zbus::Error::Failure("bounded production-trial lifetime missing".into()))?;
+    let seconds=parse_production_trial_seconds(&raw).ok_or_else(||
+        zbus::Error::Failure("production-trial lifetime must be 1-600 seconds".into())
+    )?;
+    Ok(Duration::from_secs(seconds))
+}
+
 pub(crate) async fn open_standard_trial_runtime(runtime:SharedRuntime)
     ->zbus::Result<(Connection,SharedRuntime)>{
     // The second gate prevents bypass via a direct library helper call.
@@ -104,6 +120,8 @@ pub(crate) async fn open_standard_trial_runtime(runtime:SharedRuntime)
             "public-name trial requires separate authorization and matching bus pin".into(),
         ));
     }
+    // Reject missing/unbounded duration before even attempting ownership.
+    production_trial_lifetime()?;
     open_named_runtime(runtime,BUS_NAME).await
 }
 
@@ -174,5 +192,19 @@ async fn run_private_service_instance(conn:Connection,runtime:SharedRuntime)
     loop {
         timer.tick().await;
         tick_expirations(&conn, &runtime).await?;
+    }
+}
+
+#[cfg(test)]
+mod production_trial_guard_tests {
+    use super::parse_production_trial_seconds;
+    #[test]
+    fn reject_missing_oversized_and_noncanonical_trial_limits(){
+        for invalid in ["","0","601","18446744073709551616","-3","nan","30s"," 20"]{
+            assert_eq!(parse_production_trial_seconds(invalid),None,"{invalid}");
+        }
+        for accepted in [1,2,30,600]{
+            assert_eq!(parse_production_trial_seconds(&accepted.to_string()),Some(accepted));
+        }
     }
 }

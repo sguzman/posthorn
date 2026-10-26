@@ -806,6 +806,16 @@ async fn run_private_desktop_instance_with_mode(
     });
     let mut timer=tokio::time::interval(Duration::from_millis(25));
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Monotonic Tokio sleep is not reset by D-Bus traffic, Reload, or
+    // notification events. The public-name trial always expires, even if
+    // its supervising controller fails before an explicit shutdown.
+    let lifetime=if production_trial {
+        crate::service::production_trial_lifetime()?
+    } else {
+        Duration::from_secs(1)
+    };
+    let deadline=tokio::time::sleep(lifetime);
+    tokio::pin!(deadline);
     if production_trial {
         eprintln!("Posthorn separately armed reversible trial: standard D-Bus name");
     } else {
@@ -813,6 +823,10 @@ async fn run_private_desktop_instance_with_mode(
     }
     loop {
         tokio::select! {
+            _ = &mut deadline, if production_trial => {
+                eprintln!("Posthorn reversible trial deadline reached; releasing standard notification name");
+                return Ok(());
+            }
             click=clicks.recv() => {
                 if let Some(event)=click {
                     if click_target_is_current(&runtime,&event.target,event.instance)? {

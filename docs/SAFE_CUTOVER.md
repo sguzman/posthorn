@@ -67,6 +67,16 @@ unless both `POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1` and
 `DBUS_SESSION_BUS_ADDRESS` are supplied by an authorized automated
 controller. It explicitly refuses private Hyprland QA mode.
 
+A third mandatory guard, `POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS`,
+must contain a finite integer from **1 to 600 seconds**. Missing,
+malformed, zero or excessive durations are rejected before registration.
+The daemon uses a monotonic deadline that is not extended by incoming
+notifications or Reload, and releases its D-Bus name when the deadline
+expires even if the controller has stopped responding. This is a
+second line of defense, **not** a substitute for restoring Mako:
+a real workstation switch still requires a separately supervised,
+machine-local rollback mechanism.
+
 The D-Bus name request uses `DoNotQueue`: an existing Mako owner cannot
 be displaced and Posthorn cannot wait behind it to acquire the name
 later. An isolated headless Sway and `dbus-run-session` test checks

@@ -165,6 +165,12 @@ async fn main() -> ExitCode {
             eprintln!("Posthorn trial refused: session bus does not match controller pin");
             return ExitCode::FAILURE;
         }
+        if !env::var("POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS").ok()
+            .and_then(|value|posthorn::service::parse_production_trial_seconds(&value))
+            .is_some(){
+            eprintln!("Posthorn trial refused: bounded trial lifetime of 1-600 seconds required");
+            return ExitCode::FAILURE;
+        }
         return match parse_mako_cli_args(&arguments[1..]){
             Ok((Some(path),opts))=>match posthorn::desktop::
                 run_standard_trial_desktop_from_path_with_cli_overrides(
