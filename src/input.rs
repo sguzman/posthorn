@@ -125,7 +125,7 @@ fn positioned_targets(
             .and_then(|v|crate::config::parse_nonnegative_mako(v))
             .unwrap_or(300) as u32;
         let height=crate::render::measure_notification_height_group_at_output_scale(
-            n,&style,if entry.group_count>=2{entry.group_count}else{0},
+            n,&style,entry.formatted_group_count(),
             pixel_scale,icon_scale,subpixel,
         ).map_err(error)?;
         dimensions.push((width,height));

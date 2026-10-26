@@ -111,6 +111,19 @@ pub struct VisibleMember {
     pub group_count:usize,
     pub group_index:i32,
 }
+impl VisibleMember {
+    /// Pinned Mako notification.c:group_notifications sets group_count
+    /// even for ONE matching member when group-by is enabled. Without
+    /// an actual grouping pass, a fresh C notification has count zero.
+    /// The former >=2 shortcut erased the source's singleton count.
+    pub fn formatted_group_count(&self)->usize{
+        if self.notification.grouping_applied||self.group_count>=2{
+            self.group_count
+        }else{
+            0
+        }
+    }
+}
 
 pub fn visible_members(runtime:&SharedRuntime)
     -> io::Result<Vec<(Notification,usize)>>
@@ -344,7 +357,7 @@ fn snapshot_frame_for_surface(
             .and_then(scale_margin)
             .unwrap_or(PopupMargins::uniform(10*scale)));
         frames.push(render_notification_group_with_output_subpixel(
-            note,&style,if entry.group_count>=2{entry.group_count}else{0},
+            note,&style,entry.formatted_group_count(),
             pixel_scale,icon_lookup_scale,subpixel
         ).map_err(other)?);
     }
@@ -919,6 +932,25 @@ mod tests {
             "hidden bitmap must be laid out at surface width before painting");
         assert_ne!(actual.height,incorrectly_wide.height,
             "negative control must reject unclamped [hidden] height");
+    }
+
+    #[test]
+    fn source_group_singleton_format_differs_from_truly_ungrouped(){
+        let mut store=crate::notification::NotificationStore::new(4);
+        store.push(crate::notification::Request::default());
+        let note=store.active()[0].clone();
+        let mk=|applied:bool,count:usize|{
+            let mut n=note.clone();
+            n.grouping_applied=applied;
+            VisibleMember{
+                notification:n,group_count:count,
+                group_index:if applied{0}else{-1},
+            }
+        };
+        assert_eq!(mk(false,1).formatted_group_count(),0);
+        assert_eq!(mk(true,1).formatted_group_count(),1,
+            "pinned Mako group_notifications(count=1) must retain %g=1");
+        assert_eq!(mk(true,2).formatted_group_count(),2);
     }
 
     #[test]
