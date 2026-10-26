@@ -278,6 +278,22 @@ pub fn render_notification_group_scaled(
     )
 }
 
+/// Pinned Mako render.c:215,239-245: evaluate the sender's raw
+/// progress first, then compare the resulting rectangle against the
+/// *background* width (width - border), not the inner progress width.
+/// Narrow values above 100% can therefore briefly overshoot the inner
+/// span before the larger result snaps back to that span. The final
+/// Cairo border can mask this overlap, but the path geometry must agree.
+/// Use i64 to avoid importing C signed-overflow undefined behavior.
+fn mako_progress_width(width:u32,border:u32,progress:i32)->i64 {
+    let background=i64::from(width)-i64::from(border);
+    let inner=background-i64::from(border);
+    let raw=inner.saturating_mul(i64::from(progress))/100;
+    if raw<0 {0}
+    else if raw>background {inner}
+    else {raw}
+}
+
 /// Mako selects themed icons using the largest scale on *any* attached output,
 /// not necessarily the output presenting the popup. Painting and text still
 /// rasterize at the actual popup output's pixel scale.
@@ -343,9 +359,7 @@ pub fn render_notification_group_with_icon_scale(
         context.clip();
         context.set_operator(operator);
         set_color(&context,color);
-        let logical_width=i64::from(width).saturating_sub(2*(border as i64));
-        let progress_width=logical_width.saturating_mul(i64::from(note.progress.min(100)))
-            / 100;
+        let progress_width=mako_progress_width(width,border as u32,note.progress);
         // render.c uses y=b and height=notification_height-b. The
         // background-path clip and subsequent border stroke bound it.
         context.rectangle(border,border,progress_width as f64,
@@ -1354,6 +1368,22 @@ mod tests {
             &[0,0,255,255],"Mako selects the unscaled category asset at 1x");
         assert_eq!(&hidpi.pixels[index(&hidpi)..index(&hidpi)+4],
             &[0,255,0,255],"Mako reads @2 from a later category at 2x");
+    }
+
+    #[test]
+    fn raw_progress_above_100_uses_pinned_mako_post_multiply_clamp(){
+        // render.c compares against width-border, not width-2*border.
+        // Preclamping to 100 incorrectly loses the 101..104 sliver.
+        for (percent,expected) in [
+            (-20,0),(-1,0),(0,0),(1,1),(50,56),(99,110),
+            (100,112),(101,113),(102,114),(103,115),(104,116),
+            (105,112),(170,112),
+        ] {
+            assert_eq!(mako_progress_width(120,4,percent),expected,
+                "C post-multiply clipping differs for {percent}%");
+        }
+        assert_eq!(mako_progress_width(120,0,100),120);
+        assert_eq!(mako_progress_width(120,0,101),120);
     }
 
     #[test]
