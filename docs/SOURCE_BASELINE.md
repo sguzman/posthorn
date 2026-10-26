@@ -5023,3 +5023,40 @@ Neither disposable compositor comparison nor its test harness
 counts as physical Hyprland T503 (51%), a real RGB/BGR panel
 test, or T504 authorized live Mako cutover (0%). The
 installed daemon and production D-Bus session are unchanged.
+
+## Exact 2× Pango final-format template fallback (2026-10-26)
+
+The final **formatted template**, not merely an individual
+notification body substitution, is validated by Pango before
+painting. In pinned Mako v1.11.0, an unmatched opening
+`<b>` in `format=<b>Alert: %s` leaves the entire
+substituted template visible literally. Valid
+`format=<b>Alert: %s</b>` is interpreted as markup.
+Posthorn already had an isolated renderer unit test;
+the guarded executable differential now confirms **both
+branches against original Mako** on a genuine 2× Sway output
+using private D-Bus and identical synthetic notifications.
+
+| Format | Both popup bounds | Both text-color counts | Entire decoded image differences |
+| --- | --- | ---: | ---: |
+| Valid paired bold tags | `896 1279 0 181` | 8,037 | **0** |
+| Invalid unmatched opening tag | `896 1279 0 181` | 6,438 | **0** |
+
+The different color counts also establish that the two
+Pango branches paint **materially different content**,
+while still matching Mako byte-for-byte at the pixel level
+after independent compositor capture.
+
+[Fixture `dbbc8f1`](https://github.com/sguzman/posthorn/commit/dbbc8f1a3783a0f66232e6536ade74d797fd0e2c) ·
+[green pinned upstream 40361560398](https://github.com/sguzman/posthorn/actions/runs/40361560398) ·
+[green Rust and isolated Wayland CI 40361560161](https://github.com/sguzman/posthorn/actions/runs/40361560161).
+The pinned comparison passed **352 Rust library tests,
+100 private D-Bus tests**, and all prior 2× Pango fixtures.
+
+**Source-backed T205 acceptance:** **94% → 95% (+1 pp)**,
+P2 **98.4% → 98.6% (+0.2 pp)**, strict 24-task M0
+**91.375% → 91.417% (+0.042 pp)**.
+Only these specifically tested 2× Pango cases are
+accepted. Physical Hyprland T503 remains 51%, reversible
+production Mako cutover T504 remains 0%; neither
+production daemon nor real session bus was changed.
