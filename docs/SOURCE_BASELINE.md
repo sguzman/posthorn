@@ -5572,3 +5572,45 @@ These are independent pinned-source parity cases, not physical
 speaker/Hyprland acceptance. T503 remains 51%; authorized
 production Mako cutover T504 remains 0%. No installed service,
 public bus, session config or user's real audio hardware was used.
+
+
+## Source-pinned rejected/valid category sound Reload preserves hook identity (2026-10-26)
+
+Pinned Mako v1.11.0 `config.c:reload_config` builds a new
+configuration before replacing the live one. The existing
+`on-notify=exec` category hook must remain active after a
+failed Reload, and a subsequent valid Reload must install
+the new hook without replaying events from prior notifications.
+
+The permanent guarded test uses disposable configuration files
+and harmless file-backed `warning` hook commands on two
+independent isolated scale-2 Sway/private D-Bus daemons:
+Posthorn and the exact original Mako binary.
+
+- Initially `on-notify=exec` writes `old:<notification-id>`.
+- Replacing the file with `width=invalid` makes Reload return
+  Mako-compatible InvalidConfig. The following warning Notify
+  still executes the **old** hook, proving atomic last-good
+  command retention.
+- Replacing the file with valid `on-notify=exec` writing
+  `new:<notification-id>` allows Reload. Reload alone
+  emits no hook; the following warning Notify executes
+  the **new** hook exactly once.
+- Both implementations' complete hook event files compare
+  byte-for-byte, with matching sender-assigned IDs. There
+  is no physical sound output.
+
+[Executable regression 10429d9](https://github.com/sguzman/posthorn/commit/10429d9e69ee8966a0368c3140cf88f9c6b60269) ·
+[green original-Mako differential 40392229215](https://github.com/sguzman/posthorn/actions/runs/40392229215) ·
+[green Rust/isolated Wayland CI 40392229491](https://github.com/sguzman/posthorn/actions/runs/40392229491).
+
+**Accepted T502 91% → 92% (+1 pp), category-sound
+feature 91% → 92%, P5 60.25% → 60.50%
+(display 60% under nearest-even integer rounding);
+strict 24-task M0 92.167% → 92.208% (+0.042 pp).**
+The separate tagged/app-scoped source comparisons remain
+uncredited until their own complete source-pinned acceptance.
+Real Hyprland T503 remains 51%, and explicitly authorized
+production cutover T504 remains 0%. Installed Mako,
+public bus, personal configuration and physical speakers
+were not accessed.
