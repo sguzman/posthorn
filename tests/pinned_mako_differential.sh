@@ -980,3 +980,47 @@ for count in one two; do
     "$root/mako-group-$count-markup.png"
 done
 echo 'Pinned Mako/Posthorn exact 2x mutable %g group-count raster: MATCH'
+
+# Startup CLI/style precedence through the actual PRIVATE Wayland desktop,
+# not only --check-config or the headless D-Bus service. Both daemons load
+# a width=144 config, then overwrite width to 205 and height to 103 from
+# argv. The original pinned Mako parses -c and long args through getopt;
+# Posthorn's explicitly private presenter must honor the same sequence.
+cat >"$root/cli-desktop.conf" <<'EOF_CLI_DESKTOP'
+width=144
+height=165
+font=Sans 17
+margin=0
+padding=4
+border-size=0
+icons=0
+max-visible=1
+default-timeout=0
+format=%s
+markup=0
+background-color=#416D98
+text-color=#E5C58B
+EOF_CLI_DESKTOP
+for impl in posthorn mako; do
+  clear_color '#416D98'
+  if [[ "$impl" == posthorn ]]; then
+    ./target/debug/posthorn --experimental-private-desktop "$root/cli-desktop.conf" \
+      --width=205 --height=103 >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    "$mako_binary" -c "$root/cli-desktop.conf" --width 205 --height 103 \
+      >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  markup_notify "$bus"
+  bounds="$(markup_measure "$impl-cli-desktop" "$bus")"
+  echo "$impl physical-2x startup CLI style override: $bounds"
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+./target/debug/examples/qa_png_probe \
+  "$root/posthorn-cli-desktop-markup.png" '#E5C58B' 0 identical \
+  "$root/mako-cli-desktop-markup.png"
+echo 'Pinned Mako/Posthorn private Wayland CLI startup override raster: MATCH'

@@ -144,8 +144,45 @@ async fn main() -> ExitCode {
             }
         };
     }
-    // Every other experimental mode expects exactly its documented path.
-    // Do not silently swallow Mako CLI arguments on a different mode.
+    // Both private Wayland presenters now exercise the same pinned Mako
+    // startup and reload CLI override order as the headless service.
+    // This is deliberately BEFORE the generic arg-count guard. Neither
+    // private mode can acquire org.freedesktop.Notifications.
+    if matches!(arguments.first().map(String::as_str),
+        Some("--experimental-private-desktop"|
+             "--experimental-private-multi-desktop")) {
+        let multi=arguments[0]=="--experimental-private-multi-desktop";
+        return match parse_mako_cli_args(&arguments[1..]){
+            Ok((Some(path),overrides))=>{
+                let result=if multi{
+                    posthorn::desktop::run_private_multi_desktop_from_path_with_cli_overrides(
+                        Path::new(&path),&overrides
+                    ).await
+                }else{
+                    posthorn::desktop::run_private_desktop_from_path_with_cli_overrides(
+                        Path::new(&path),&overrides
+                    ).await
+                };
+                match result{
+                    Ok(())=>ExitCode::SUCCESS,
+                    Err(error)=>{
+                        eprintln!("Posthorn private desktop failed: {error}");
+                        ExitCode::FAILURE
+                    }
+                }
+            }
+            Ok((None,_))=>{
+                eprintln!("Posthorn private desktop requires a config path");
+                ExitCode::FAILURE
+            }
+            Err(error)=>{
+                eprintln!("Posthorn private desktop CLI: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    // Other experimental modes still expect exactly their documented
+    // argument count, and cannot silently absorb unrelated Mako flags.
     if arguments.len()>2{
         eprintln!("unexpected extra Posthorn arguments");
         return ExitCode::FAILURE;
@@ -161,8 +198,8 @@ async fn main() -> ExitCode {
                      Usage:\n\
                      \tposthorn --check-config [PATH] [--MAKO-OPTION VALUE...]\n\
                      \tposthorn --experimental-private-service PATH [--MAKO-OPTION VALUE...]\n\
-                     \tposthorn --experimental-private-desktop PATH\n\
-                     \tposthorn --experimental-private-multi-desktop PATH\n\
+                     \tposthorn --experimental-private-desktop PATH [--MAKO-OPTION VALUE...]\n\
+                     \tposthorn --experimental-private-multi-desktop PATH [--MAKO-OPTION VALUE...]\n\
                      \tposthorn --experimental-popup-preview PATH\n\
                      \tposthorn --version\n\
                      \tposthorn --help\n\
@@ -208,23 +245,6 @@ async fn main() -> ExitCode {
             match result {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => { eprintln!("Experimental Wayland preview: {e}"); ExitCode::FAILURE }
-            }
-        }
-        (Some("--experimental-private-desktop"), Some(path)) => {
-            match posthorn::desktop::run_private_desktop_from_path(Path::new(&path)).await {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(err) => { eprintln!("Posthorn private desktop failed: {err}"); ExitCode::FAILURE }
-            }
-        }
-        (Some("--experimental-private-multi-desktop"), Some(path)) => {
-            match posthorn::desktop::run_private_multi_desktop_from_path(
-                Path::new(&path)
-            ).await {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(err) => {
-                    eprintln!("Posthorn private multi-surface desktop failed: {err}");
-                    ExitCode::FAILURE
-                }
             }
         }
         _ => {

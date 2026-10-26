@@ -703,7 +703,16 @@ pub async fn run_private_desktop(config: crate::config::Config)
 pub async fn run_private_desktop_from_path(path:&std::path::Path)
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
-    let runtime=SharedRuntime::from_path(path)?;
+    run_private_desktop_from_path_with_cli_overrides(path,&[]).await
+}
+
+/// Private Wayland parity path: apply pinned Mako's CLI overrides *after*
+/// the source config, and preserve them for live Reload. This entrypoint
+/// still owns only org.posthorn.Development, never the production bus.
+pub async fn run_private_desktop_from_path_with_cli_overrides(
+    path:&std::path::Path,overrides:&[(String,String)],
+)->Result<(),Box<dyn std::error::Error+Send+Sync>>{
+    let runtime=SharedRuntime::from_path_with_cli_overrides(path,overrides)?;
     initialize_icon_creation_scale(&runtime)?;
     let (conn,runtime)=crate::service::open_private_runtime(runtime).await?;
     run_private_desktop_instance(conn,runtime).await
@@ -714,7 +723,12 @@ pub async fn run_private_desktop_from_path(path:&std::path::Path)
 pub async fn run_private_multi_desktop_from_path(path:&std::path::Path)
     -> Result<(),Box<dyn std::error::Error+Send+Sync>>
 {
-    let runtime=SharedRuntime::from_path(path)?;
+    run_private_multi_desktop_from_path_with_cli_overrides(path,&[]).await
+}
+pub async fn run_private_multi_desktop_from_path_with_cli_overrides(
+    path:&std::path::Path,overrides:&[(String,String)],
+)->Result<(),Box<dyn std::error::Error+Send+Sync>>{
+    let runtime=SharedRuntime::from_path_with_cli_overrides(path,overrides)?;
     initialize_icon_creation_scale(&runtime)?;
     let (conn,runtime)=crate::service::open_private_runtime(runtime).await?;
     run_private_desktop_instance_with_mode(conn,runtime,true).await
