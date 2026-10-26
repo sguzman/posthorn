@@ -804,12 +804,13 @@ mod tests {
         let actions=vec![("default".into(),"Open".into())];
         // These tests launch only a synthetic shell, never a notification
         // daemon or either the production or private D-Bus service.
+        let signal_script=format!("printf 'Open\\n'; kill -TERM {pid}{pid}",pid='$');
         for (script,expected) in [
             ("exit 7","No action selected"),
             ("printf 'Open\\n'; exit 7","Menu failed with exit code 7"),
             ("printf 'Not listed\\n'","Action not found"),
             ("printf '\\377\\n'","Action not found"),
-            ("printf 'Open\\n'; kill -TERM $","Menu failed with signal 15"),
+            (signal_script.as_str(),"Menu failed with signal 15"),
         ] {
             let program=vec!["sh".to_owned(),"-c".to_owned(),script.to_owned()];
             let err=choose_from_menu(&program,&actions).unwrap_err();
