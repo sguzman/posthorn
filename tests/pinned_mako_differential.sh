@@ -1357,6 +1357,42 @@ for impl in posthorn mako; do
     exit 1
   }
   echo "$impl default lookup switched to XDG on Reload: $xdg_bounds"
+
+  # T104/T303: deleting BOTH implicit candidates must make Reload select
+  # Mako's built-in style, not retain a deleted configuration path.
+  # This is a third stage of the same disposable HOME/XDG fixture.
+  rm "$root/default-xdg/mako/config"
+  busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
+    "$bus" /fr/emersion/Mako fr.emersion.Mako Reload >/dev/null || {
+    echo "$impl rejected built-in fallback after both implicit files vanished"
+    cat "$root/daemon.log";exit 1
+  }
+  stable_builtin=0
+  accepted_builtin=0
+  for _ in {1..60}; do
+    if grim "$root/$impl-default-builtin.png" 2>/dev/null; then
+      builtin_bounds="$(./target/debug/examples/qa_png_probe \
+        "$root/$impl-default-builtin.png" '#285577' 400 bounds 2>/dev/null || true)"
+      if [[ -n "$builtin_bounds" ]]; then
+        if [[ -f "$root/$impl-default-builtin-prev.png" ]] &&
+          ./target/debug/examples/qa_png_probe \
+            "$root/$impl-default-builtin.png" '#285577' 0 identical \
+            "$root/$impl-default-builtin-prev.png" >/dev/null 2>&1; then
+          stable_builtin=$((stable_builtin+1))
+        else
+          stable_builtin=0
+        fi
+        if (( stable_builtin >= 3 )); then accepted_builtin=1;break;fi
+        cp "$root/$impl-default-builtin.png" "$root/$impl-default-builtin-prev.png"
+      fi
+    fi
+    sleep 0.15
+  done
+  [[ "$accepted_builtin" == 1 ]] || {
+    echo "$impl did not settle on Mako built-in style after both implicit files vanished"
+    cat "$root/daemon.log";exit 1
+  }
+  echo "$impl default lookup switched to Mako built-ins on Reload: $builtin_bounds"
   kill "$daemon_pid";wait "$daemon_pid" 2>/dev/null || true
   daemon_pid=""
   cp "$root/default-legacy-original.conf" "$root/default-home/.mako/config"
@@ -1367,4 +1403,7 @@ done
 ./target/debug/examples/qa_png_probe \
   "$root/posthorn-default-xdg.png" '#2A7F9B' 0 identical \
   "$root/mako-default-xdg.png"
-echo 'Pinned Mako/Posthorn private implicit legacy/XDG config selection and Reload: MATCH'
+./target/debug/examples/qa_png_probe \
+  "$root/posthorn-default-builtin.png" '#285577' 0 identical \
+  "$root/mako-default-builtin.png"
+echo 'Pinned Mako/Posthorn implicit legacy/XDG/built-in config rediscovery and Reload: MATCH'
