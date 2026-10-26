@@ -13,7 +13,7 @@ use crate::runtime::SharedRuntime;
 use crate::wayland::PointerClick;
 use crate::desktop::{style_for_note_index,visible_members_indexed,stack_alignment};
 use crate::wayland::PopupMargins;
-use crate::render::mako_stack_geometry;
+use crate::render::{mako_stack_geometry,OutputSubpixel};
 use crate::dbus::{BUS_NAME,OBJECT_PATH};
 use zbus::Connection;
 
@@ -35,7 +35,7 @@ fn ordered_visible(runtime:&SharedRuntime)
 pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
     -> io::Result<Option<(u32,NotifyBinding)>>
 {
-    hit_test_impl(runtime,click,None,1)
+    hit_test_impl(runtime,click,None,1,OutputSubpixel::Unknown)
 }
 
 /// The desktop renderer chooses themed icon assets at the maximum output
@@ -43,7 +43,16 @@ pub fn hit_test(runtime:&SharedRuntime,click:PointerClick)
 pub fn hit_test_with_icon_scale(
     runtime:&SharedRuntime,click:PointerClick,icon_scale:u32,
 )->io::Result<Option<(u32,NotifyBinding)>>{
-    hit_test_impl(runtime,click,None,icon_scale)
+    hit_test_impl(runtime,click,None,icon_scale,OutputSubpixel::Unknown)
+}
+
+/// The live desktop's click resolver must use the same compositor font
+/// geometry as the rendered frame and its wl_surface input region.
+pub fn hit_test_with_output_subpixel(
+    runtime:&SharedRuntime,click:PointerClick,icon_scale:u32,
+    subpixel:OutputSubpixel,
+)->io::Result<Option<(u32,NotifyBinding)>>{
+    hit_test_impl(runtime,click,None,icon_scale,subpixel)
 }
 
 /// Hit-test in the coordinate system of one independently rendered Mako
@@ -53,14 +62,21 @@ pub fn hit_test_on_surface(
     runtime:&SharedRuntime,click:PointerClick,
     surface_key:&(String,String,String),
 )->io::Result<Option<(u32,NotifyBinding)>>{
-    hit_test_impl(runtime,click,Some(surface_key),1)
+    hit_test_impl(runtime,click,Some(surface_key),1,OutputSubpixel::Unknown)
 }
 
 pub fn hit_test_on_surface_with_icon_scale(
     runtime:&SharedRuntime,click:PointerClick,
     surface_key:&(String,String,String),icon_scale:u32,
 )->io::Result<Option<(u32,NotifyBinding)>>{
-    hit_test_impl(runtime,click,Some(surface_key),icon_scale)
+    hit_test_impl(runtime,click,Some(surface_key),icon_scale,OutputSubpixel::Unknown)
+}
+pub fn hit_test_on_surface_with_output_subpixel(
+    runtime:&SharedRuntime,click:PointerClick,
+    surface_key:&(String,String,String),icon_scale:u32,
+    subpixel:OutputSubpixel,
+)->io::Result<Option<(u32,NotifyBinding)>>{
+    hit_test_impl(runtime,click,Some(surface_key),icon_scale,subpixel)
 }
 
 /// Surface-local rectangles in unscaled Wayland logical coordinates. The
@@ -74,6 +90,7 @@ pub struct InputRect {
 fn positioned_targets(
     runtime:&SharedRuntime,
     surface_key:Option<&(String,String,String)>,icon_scale:u32,
+    subpixel:OutputSubpixel,
 )->io::Result<Vec<(u32,crate::config::Options,InputRect)>>{
     let config=runtime.config();
     let (all_notes,modes)=ordered_visible(runtime)?;
@@ -92,9 +109,9 @@ fn positioned_targets(
         let width=style.get("width")
             .and_then(|v|crate::config::parse_nonnegative_mako(v))
             .unwrap_or(300) as u32;
-        let height=crate::render::measure_notification_height_group_with_icon_scale(
+        let height=crate::render::measure_notification_height_group_with_output_subpixel(
             n,&style,if entry.group_count>=2{entry.group_count}else{0},
-            icon_scale,
+            icon_scale,subpixel,
         ).map_err(error)?;
         dimensions.push((width,height));
         styles.push(style);
@@ -125,13 +142,23 @@ pub fn input_rectangles_with_icon_scale(
     runtime:&SharedRuntime,
     surface_key:Option<&(String,String,String)>,icon_scale:u32,
 )->io::Result<Vec<InputRect>>{
-    Ok(positioned_targets(runtime,surface_key,icon_scale)?.into_iter()
+    input_rectangles_with_output_subpixel(
+        runtime,surface_key,icon_scale,OutputSubpixel::Unknown
+    )
+}
+pub fn input_rectangles_with_output_subpixel(
+    runtime:&SharedRuntime,
+    surface_key:Option<&(String,String,String)>,icon_scale:u32,
+    subpixel:OutputSubpixel,
+)->io::Result<Vec<InputRect>>{
+    Ok(positioned_targets(runtime,surface_key,icon_scale,subpixel)?.into_iter()
         .map(|(_,_,rect)|rect).collect())
 }
 
 fn hit_test_impl(
     runtime:&SharedRuntime,click:PointerClick,
     surface_key:Option<&(String,String,String)>,icon_scale:u32,
+    subpixel:OutputSubpixel,
 )->io::Result<Option<(u32,NotifyBinding)>>{
     if !click.x.is_finite()||!click.y.is_finite()||click.x<0.0||click.y<0.0 {
         return Ok(None);
@@ -143,7 +170,7 @@ fn hit_test_impl(
         274=>"on-button-middle",
         _=>return Ok(None),
     };
-    for (id,style,rect) in positioned_targets(runtime,surface_key,icon_scale)? {
+    for (id,style,rect) in positioned_targets(runtime,surface_key,icon_scale,subpixel)? {
         if click.y<f64::from(rect.y) ||
            click.y>=f64::from(rect.y)+f64::from(rect.height) ||
            click.x<f64::from(rect.x) ||
@@ -333,6 +360,38 @@ mod tests {
     use crate::notification::Request;
     fn click(x:f64,y:f64,button:u32)->PointerClick{
         PointerClick{x,y,button,serial:3}
+    }
+    #[test]
+    fn panel_subpixel_measurement_matches_painted_hitbox(){
+        let runtime=SharedRuntime::new(Config::parse(
+            "width=160\nheight=200\nfont=Sans 18\nformat=%s\n             margin=0\npadding=4\nborder-size=0\nicons=0\n"
+        ).unwrap());
+        let id=runtime.store.lock().unwrap().push(Request{
+            summary:"A long sentence should wrap at the popup edge".into(),
+            ..Request::default()
+        });
+        runtime.schedule_without_hook(id,std::time::Instant::now()).unwrap();
+        let note=runtime.store.lock().unwrap().active()[0].clone();
+        let modes=runtime.modes().lock().unwrap().clone();
+        let style=crate::desktop::style_for_note_index(&runtime,&note,&modes,-1);
+        for subpixel in [
+            OutputSubpixel::Unassociated,OutputSubpixel::Unknown,
+            OutputSubpixel::HorizontalRgb,OutputSubpixel::HorizontalBgr,
+            OutputSubpixel::VerticalRgb,OutputSubpixel::VerticalBgr,
+        ]{
+            let rendered=crate::render::render_notification_group_with_output_subpixel(
+                &note,&style,0,1,1,subpixel
+            ).unwrap();
+            let rects=input_rectangles_with_output_subpixel(
+                &runtime,None,1,subpixel
+            ).unwrap();
+            assert_eq!(rects.len(),1);
+            assert_eq!(rects[0].height as u32,rendered.height,"{subpixel:?}");
+            let click=click((rects[0].x+4) as f64,
+                (rects[0].y+rects[0].height-1) as f64,273);
+            assert_eq!(hit_test_with_output_subpixel(&runtime,click,1,subpixel)
+                .unwrap().unwrap().0,id,"{subpixel:?}");
+        }
     }
     #[test]
     fn compositor_input_hotspots_match_click_geometry_not_stack_canvas(){

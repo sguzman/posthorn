@@ -223,8 +223,20 @@ pub fn measure_notification_height_group(
 pub fn measure_notification_height_group_with_icon_scale(
     note:&Notification,style:&Options,group_count:usize,icon_scale:u32,
 )->Result<u32,String>{
+    measure_notification_height_group_with_output_subpixel(
+        note,style,group_count,icon_scale,OutputSubpixel::Unknown
+    )
+}
+
+/// Use the same Pango/Cairo options for pointer hotspots and the painted
+/// notification. Otherwise a panel-specific glyph layout can drift from the
+/// compositor wl_surface input region.
+pub fn measure_notification_height_group_with_output_subpixel(
+    note:&Notification,style:&Options,group_count:usize,icon_scale:u32,
+    subpixel:OutputSubpixel,
+)->Result<u32,String>{
     let icon=load_note_icon_scaled(note,style,icon_scale.max(1));
-    measure_height_with_icon(note,style,icon.as_ref(),group_count)
+    measure_height_with_icon_subpixel(note,style,icon.as_ref(),group_count,subpixel)
 }
 
 fn icon_fit_limit(note:&Notification,style:&Options)->u32{
