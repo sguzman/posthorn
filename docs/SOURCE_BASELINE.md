@@ -5396,3 +5396,47 @@ The same verified pinned-Mako workflow additionally compares grouped notificatio
 [Built-in fallback fixture 6370ac2](https://github.com/sguzman/posthorn/commit/6370ac2b9aee74470fd2c5bf6b74ec7e48035438) · [isolated fixture restoration e7c9cf0](https://github.com/sguzman/posthorn/commit/e7c9cf0fbdf22ffd5e331d516a6fb62cad9d7818) · [grouped replacement test 9ca40eb](https://github.com/sguzman/posthorn/commit/9ca40ebbd7762eba98ccfe7215db66c47833caea) · [pinned differential 40383427830](https://github.com/sguzman/posthorn/actions/runs/40383427830) · [Rust/Wayland 40383427898](https://github.com/sguzman/posthorn/actions/runs/40383427898). **355 Rust library tests, 100 private D-Bus tests, full headless Sway, and original Mako executable comparisons passed** on the same `9ca40eb` commit.
 
 Accepted atomic progress: **T104 97% → 98%, T303 90% → 91%**, strict 24-task M0 **91.833% → 91.917% (+0.083 percentage points)**. P1 **97.8% → 98.0%**, P3 **96.000% → 96.333%**. These hosted tests do not count toward physical Hyprland T503 (still 51%) or the separately authorized reversible live Mako switch T504 (still 0%).
+
+## Reappearing implicit HOME config and atomic rejected Reload parity (2026-10-26)
+
+Pinned Mako v1.11.0 `config.c:get_default_config_path` searches the legacy
+`~/.mako/config` before the XDG candidate on every config parse;
+`reload_config` creates a fresh temporary config and keeps the old
+one on parsing failure. Posthorn's private daemon follows these
+same transitions when no explicit `-c` was passed.
+
+The source-pinned executable test now exercises a four-stage
+lifecycle under a disposable `HOME`/`XDG_CONFIG_HOME`, isolated
+scale-2 Sway compositor, and separate test D-Bus name for each binary:
+
+1. Startup selects the legacy candidate; removing it and issuing
+   `fr.emersion.Mako.Reload` switches the active popup to XDG.
+2. Removing XDG too and reloading selects Mako built-in defaults.
+3. Recreating the higher-priority legacy file with invalid
+   `width=invalid` **rejects** Reload, leaves the private service
+   responsive and retains an unchanged built-in screenshot.
+4. Recreating the original valid legacy file and reloading returns
+   the existing notification to the **exact original** raster.
+
+The original Mako binary and Posthorn independently passed every
+stage. Both invalid-Reload retention screenshots and restored
+legacy screenshots matched their own earlier expected frames
+with **zero decoded pixel differences**. Corresponding screenshots
+across Mako and Posthorn also had **zero differences**.
+The built-in fallback retained physical background bounds
+`854 1255 24 171`, and the existing `--width=205` override
+remained applied after each valid rediscovery.
+
+[Source-pinned reappearance fixture 1fc6497](https://github.com/sguzman/posthorn/commit/1fc649765b977f99243745af463d5b72574f60b0) ·
+[Invalid-candidate atomicity regression 1eb991f](https://github.com/sguzman/posthorn/commit/1eb991f6115d174ed018a521ce8c60d4290beffa) ·
+[Corrected invalid fixture ec68e3e](https://github.com/sguzman/posthorn/commit/ec68e3e08acbf72c8d8158d138559a86170df071) ·
+[Green exact pinned-Mako differential 40386242117](https://github.com/sguzman/posthorn/actions/runs/40386242117) ·
+[Green Rust/Wayland CI 40386242051](https://github.com/sguzman/posthorn/actions/runs/40386242051).
+
+**Accepted T303 91% → 92% (+1 pp); P3 96.333% →
+96.667% (rounded 97%); strict 24-task M0 91.917% →
+91.958% (+0.042 percentage points).** T104 remains 98%;
+these are bounded Reload acceptance cases, not proof of
+universal file/path behavior. Physical Hyprland T503
+remains 51%, production cutover T504 remains 0%. Neither
+installed Mako nor the user's real session was touched.
