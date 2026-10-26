@@ -4418,3 +4418,76 @@ Combined accepted delta: **T502 82% → 84%; category-sound feature
 T503 physical Hyprland remains at 51%; T504 reversible, explicitly
 authorized production cutover remains 0%. Installed Mako, live bus,
 desktop configuration and hardware audio remain untouched.
+
+## Category sound expiry and history restoration do not replay hooks (2026-10-25)
+
+Pinned Mako v1.11.0 `dbus/xdg.c:84-91` performs timer expiry by
+closing the notification with `MAKO_NOTIFICATION_CLOSE_EXPIRED`.
+Only the original `handle_notify` calls
+`notification_execute_binding` (`dbus/xdg.c:430`).
+The control `RestoreNotification` handler
+(`dbus/mako.c:120-141`) reinserts the archived object without
+arming another timeout or running its `on-notify=exec` again.
+
+A private D-Bus integration regression
+(`tests/private_service.rs::category_sound_expiration_and_history_restore_do_not_replay_hooks`)
+verifies the first category sound command, original timer, the
+`NotificationClosed(id,Expired=1)` signal, archival to history,
+sound-free expiry, quiet-mode restoration preserving category color,
+no replacement expiration timer, quiet Notify suppression, no sound on
+leaving quiet, and fresh sound only on a subsequent Notify.
+
+[Accepted commit d5b93c0](https://github.com/sguzman/posthorn/commit/d5b93c00459efd5cdff3eb64a6f23911313356f8) ·
+[green two-job CI 40265334892](https://github.com/sguzman/posthorn/actions/runs/40265334892):
+**347 library tests, 98 private D-Bus tests, complete isolated Wayland suite**.
+
+## App-scoped category sound muting preserves other senders (2026-10-25)
+
+Pinned Mako `criteria.c:421-438` applies each matching selector
+in config order. The combination `[app-name=muted category=warning]`
+can override a general warning sound without suppressing warning
+notifications from other applications. A later `[mode=quiet]` can
+temporarily suppress them all.
+
+The private D-Bus regression
+(`tests/private_service.rs::app_scoped_category_sound_mute_preserves_other_application_audio`)
+sends warnings from two applications, verifies both retain their
+category color, confirms only the allowed app runs the sound,
+silences both apps in quiet mode without replaying previous hooks,
+and verifies app-specific suppression resumes when the ordinary
+mode is restored.
+
+[Accepted commit 65ae3ab](https://github.com/sguzman/posthorn/commit/65ae3abb745cc4528e88acfea860a6d9a737d585) ·
+[green two-job CI 40265537356](https://github.com/sguzman/posthorn/actions/runs/40265537356):
+**347 library tests, 99 private D-Bus tests, complete isolated Wayland suite**.
+
+## A failing category sound command cannot reject Notify (2026-10-25)
+
+Pinned Mako `notification.c:403-435` launches
+`on-notify=exec` through a double-fork and does not propagate the
+hook shell's exit status to the Freedesktop Notify result
+(`dbus/xdg.c:430-434`). Sound-player failure must leave notification
+delivery, active history and future mode transitions usable.
+
+The new private D-Bus regression
+(`tests/private_service.rs::nonzero_category_sound_command_exit_does_not_reject_notify`)
+uses a temporary file-backed sound hook that emits its ID and
+exits with status 27. Notify still succeeds and retains the
+notification; quiet mode suppresses the failing hook and its
+mode changes do not replay it; a later ordinary Notify continues
+to execute the hook without losing delivery.
+
+[Accepted commit 228fdd0](https://github.com/sguzman/posthorn/commit/228fdd07bc89c610f4a7ca079f6bed95dab5b3d5) ·
+[green two-job CI 40265692081](https://github.com/sguzman/posthorn/actions/runs/40265692081):
+**347 library tests, 100 private D-Bus tests, complete isolated Wayland suite**.
+
+Combined accepted delta:
+**T502 84% → 87% (+3 pp)**;
+category sound parity feature **84% → 87% (+3 pp)**;
+P5 **58.50% → 59.25% (+0.75 pp, displays 59%)**;
+strict 24-task M0 **90.708% → 90.833% (+0.125 pp, displays 91%)**.
+This is file-backed command QA, not physical speaker testing.
+T503 physical Hyprland remains **51%**, and T504 explicitly
+authorized reversible live Mako cutover remains **0%**.
+No production Mako, user notification D-Bus name or desktop
+configuration was modified.
