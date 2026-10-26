@@ -76,6 +76,19 @@ nested_bus_id="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call 
 [[ -n "${POSTHORN_QA_PARENT_ID:-}" &&
    "$nested_bus_id" != "$POSTHORN_QA_PARENT_ID" ]] ||
   die 'private QA is still connected to the original D-Bus daemon'
+# A private test must never find a standard notifications owner on its
+# disposable bus. This is checked again after Posthorn starts to detect
+# accidental public-name acquisition by a future implementation change.
+assert_no_public_owner(){
+  local answer
+  answer="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
+    org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+    NameHasOwner s org.freedesktop.Notifications)" ||
+    die 'cannot inspect public notification name on private bus'
+  [[ "$answer" == 'b false' ]] ||
+    die 'standard notification name unexpectedly owned on private QA bus'
+}
+assert_no_public_owner
 root="$(mktemp -d)"
 daemon_pid=""
 cleanup(){
@@ -130,6 +143,24 @@ for _ in {1..40}; do
   sleep 0.1
 done
 [[ "$ready" == 1 ]] || die 'private bus name was not acquired'
+assert_no_public_owner
+# A different process on the disposable bus must not masquerade as the
+# daemon under test. Resolve actual D-Bus ownership to this child PID.
+private_unique_owner="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
+  org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+  GetNameOwner s org.posthorn.Development)" ||
+  die 'cannot resolve private Posthorn D-Bus owner'
+[[ "$private_unique_owner" == s\ \"*\" ]] ||
+  die 'invalid private owner reply'
+private_unique_name="${private_unique_owner#s \"}"
+private_unique_name="${private_unique_name%\"}"
+private_owner_pid="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
+  org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+  GetConnectionUnixProcessID s "$private_unique_name")" ||
+  die 'cannot resolve private Posthorn owner PID'
+[[ "$private_owner_pid" == "u $daemon_pid" ]] ||
+  die 'private Posthorn D-Bus name is not owned by launched daemon PID'
+
 
 result="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   org.posthorn.Development /org/freedesktop/Notifications \
@@ -200,4 +231,5 @@ listed_after="$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=5s call \
   org.posthorn.Development /fr/emersion/Mako fr.emersion.Mako ListNotifications)"
 [[ "$listed_after" != *'Temporary QA popup'* ]] ||
   die 'closed notification remains active on the private control API'
+assert_no_public_owner
 printf 'PASS: private Hyprland popup appeared, restyled, and disappeared on screenshots and control bus\n'
