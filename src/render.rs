@@ -199,7 +199,9 @@ fn measure_height_with_icon(
     if width==0||cap==0||width>4096||cap>4096{
         return Err("invalid notification dimensions".into());
     }
-    let border=integer_option(style,"border-size",2).min(width/2);
+    // Pinned render.c uses the configured border size as-is, even when
+    // 2*border exceeds the configured width. No half-width clamp exists.
+    let border=integer_option(style,"border-size",2);
     let padding=Padding::parse(style);
     let width_padding=i64::from(border)*2+i64::from(padding.left)+i64::from(padding.right);
     let height_padding=i64::from(border)*2+i64::from(padding.top)+i64::from(padding.bottom);
@@ -321,7 +323,8 @@ pub fn render_notification_group_with_icon_scale(
         return Err("HiDPI notification exceeds safe buffer bounds".into());
     }
     let (w, h) = (physical_width as i32, physical_height as i32);
-    let border = integer_option(style, "border-size", 2).min(width/2).min(height/2) as f64;
+    // Draw with the same unconstrained border used by source render.c.
+    let border = integer_option(style, "border-size", 2) as f64;
     let radius=CornerRadii::parse(style);
     let pad=Padding::parse(style);
     let top=f64::from(pad.top);
@@ -1421,6 +1424,33 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn border_larger_than_half_width_is_not_silently_shrunk(){
+        // Pinned render.c:102,199,215-225 directly uses border-size.
+        // Mako's config.c accepts nonnegative border sizes independently
+        // of width, and this valid input produces a taller popup.
+        let mut style=Options::new();
+        for (key,value) in [
+            ("width","200"),("height","90"),("padding","0"),
+            ("border-size","110"),("border-radius","0"),
+            ("format","%s"),("icons","0"),
+            ("background-color","#102030FF"),("border-color","#D08040FF"),
+        ] {
+            style.insert(key.into(),value.into());
+        }
+        let note=fixture();
+        for scale in [1u32,2] {
+            let measured=measure_notification_height(&note,&style).unwrap();
+            assert_eq!(measured,220,
+                "two true 110px borders, not two clamped 100px borders");
+            let frame=render_notification_group_scaled(&note,&style,0,scale).unwrap();
+            assert_eq!((frame.width,frame.height),(200,220),
+                "painting and text measurement must agree at {scale}x");
+            assert_eq!(frame.pixels.len(),
+                200usize*220usize*4usize*(scale as usize).pow(2));
         }
     }
 
