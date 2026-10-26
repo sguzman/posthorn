@@ -1,0 +1,101 @@
+# Automated local acceptance job. This file does not execute itself.
+schema_version: 1
+job_id: posthorn-m0-physical-hyprland-private
+repository: https://github.com/sguzman/posthorn
+branch: main
+milestone: M0
+task: T503
+objective: >-
+  Complete the existing real-Hyprland private QA gate with delegated
+  automation, without altering the existing Mako notification daemon.
+execution:
+  required_environment: original logged-in EndeavourOS/Hyprland user session
+  agent: Codex or equivalent authorized local automation
+  timeout_seconds: 900
+  mode: foreground
+  network_policy: no new external services needed
+  preconditions:
+    - Working directory is a clean Posthorn checkout at the intended commit.
+    - User has authorized private workstation QA separately from production cutover.
+    - Hyprland and the existing Mako notification service are already running.
+    - Access to the ORIGINAL user session's WAYLAND_DISPLAY and D-Bus address is available.
+    - Required binaries can be installed only with explicit existing authorization; do not request manual QA.
+  deny_if:
+    - No verified original Hyprland compositor socket.
+    - No verified original org.freedesktop.Notifications owner.
+    - Any production-trial or production-cutover authorization variable is set.
+    - Execution would require stopping/replacing Mako or modifying autostart.
+    - Runner cannot prove its D-Bus session is original before the private child is created.
+safety:
+  forbidden_operations:
+    - Stop, restart, signal, disable, mask, uninstall, or replace real Mako.
+    - Claim or queue for the ORIGINAL org.freedesktop.Notifications D-Bus name.
+    - Write real Hyprland, systemd-user, or Mako configuration files.
+    - Create persistent systemd user units or auto-start entries.
+    - Use real notification messages or browser tabs as test fixtures.
+    - Commit screenshots, real logs, process arguments, environment values, private config, or credentials.
+    - Run --reversible-production-trial on the original user session.
+  allowed_operations:
+    - Read-only introspection of compositor and notification owner.
+    - Cargo builds/tests in the Posthorn checkout.
+    - Create/delete temporary synthetic notifications and private QA files.
+    - Use a disposable nested D-Bus daemon alongside the original Wayland compositor.
+    - Record sanitized yes/no gate outcomes with source commit identifiers.
+steps:
+  - id: preflight
+    action: verify_original_session_and_review_SAFE_CUTOVER
+    reference: docs/SAFE_CUTOVER.md
+    requirement: fail-closed
+  - id: private_acceptance
+    action: run
+    command: "POSTHORN_HYPRLAND_QA=1 bash tests/hyprland_private.sh"
+    requirement: >-
+      Original Mako unique owner must be unchanged. Private owner must
+      be Posthorn's exact PID. Popup must appear, restyle during Reload,
+      close, and independently expire in compositor screenshots.
+  - id: additional_hardware_gates
+    action: evaluate_without_user_manual_QA
+    gates:
+      - real pointer click and binding dispatch
+      - physical touch input and action dispatch
+      - compositor focus and XDG activation
+      - actual monitor scales and monitor hotplug
+      - configured physical audio routing
+      - application behavior through the normal live Mako service
+    requirement: >-
+      For each gate, run safe automated verification only if available
+      without touching real Mako ownership. Otherwise report BLOCKED,
+      not PASS, and do not increase its accepted percentage.
+  - id: close
+    action: verify_cleanup_and_report
+    requirement: >-
+      Remove temporary screenshots and private services; reconfirm
+      original Mako D-Bus owner. Never export raw private QA assets.
+report:
+  format: sanitized-json
+  fields:
+    - git_commit
+    - qa_execution_environment
+    - private_bus_isolated
+    - original_mako_owner_unchanged
+    - private_popup_rendered
+    - reload_repainted
+    - close_removed_popup
+    - timer_expired_popup
+    - pointer_gate
+    - touch_gate
+    - focus_gate
+    - scaling_hotplug_gate
+    - audio_gate
+    - cleanup_passed
+    - blocked_gate_ids
+  accepted_values: ["PASS", "FAIL", "BLOCKED", "NOT_RUN"]
+  publish_only: >-
+    Sanitary Boolean or enum outcomes in the project's evidence ledger.
+    Keep real monitor names, PID, config paths, screenshots and command
+    output off the public repository.
+completion:
+  - Passing private QA may advance T503 ONLY for directly observed gates.
+  - Do not mark real pointer, touch, focus, scaling, or physical audio accepted from Sway CI.
+  - Never advance T504: it requires separate explicit reversible-cutover authorization.
+  - No completion may be claimed without exact local evidence.
