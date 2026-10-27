@@ -30,7 +30,7 @@ pinned_bus_id="$(get_bus_id "--address=$DBUS_SESSION_BUS_ADDRESS")" ||
   die 'pinned session bus GUID unavailable'
 user_bus_id="$(get_bus_id --user)" ||
   die 'original user bus GUID unavailable'
-[[ "$pinned_bus_id" == s\\ \\"*\\" && "$pinned_bus_id" == "$user_bus_id" ]] ||
+[[ "$pinned_bus_id" == 's "'*'"' && "$pinned_bus_id" == "$user_bus_id" ]] ||
   die 'inventory bus is not the original user bus'
 timeout 5s hyprctl monitors >/dev/null || die 'Hyprland monitor query failed'
 dbus_call(){

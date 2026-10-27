@@ -28,9 +28,9 @@ set -euo pipefail
 case " $* " in
   *" GetId "*)
     if [[ " $* " == *" --user "* && -v MOCK_BUS_MISMATCH ]];then
-      printf 's "different-bus"\\n'
+      printf 's "different-bus"\n'
     else
-      printf 's "original-bus"\\n'
+      printf 's "original-bus"\n'
     fi
     ;;
   *" GetNameOwner "*)
