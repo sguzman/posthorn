@@ -19,6 +19,19 @@ done
 for cmd in busctl hyprctl timeout readlink systemctl cut tr;do
   command -v "$cmd" >/dev/null || die "missing prerequisite: $cmd"
 done
+# A supplied D-Bus URI is not proof of the original user bus. Resolve both
+# addresses to their daemon GUID before resolving any notification owner.
+# Standalone inventory must be as fail-closed as the parent QA harness.
+get_bus_id(){
+  busctl "$1" --timeout=4s call \
+    org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetId
+}
+pinned_bus_id="$(get_bus_id "--address=$DBUS_SESSION_BUS_ADDRESS")" ||
+  die 'pinned session bus GUID unavailable'
+user_bus_id="$(get_bus_id --user)" ||
+  die 'original user bus GUID unavailable'
+[[ "$pinned_bus_id" == s\\ \\"*\\" && "$pinned_bus_id" == "$user_bus_id" ]] ||
+  die 'inventory bus is not the original user bus'
 timeout 5s hyprctl monitors >/dev/null || die 'Hyprland monitor query failed'
 dbus_call(){
   busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=4s call \
@@ -71,6 +84,8 @@ if (( ambiguous == 0 )) && [[ "$candidate" =~ ^[a-zA-Z0-9_.@:-]+\.service$ ]];th
     unit="$candidate"
   fi
 fi
+[[ "$(get_bus_id "--address=$DBUS_SESSION_BUS_ADDRESS")" == "$pinned_bus_id" ]] ||
+  die 'original bus daemon changed during inventory'
 [[ "$(get_owner)" == "$owner" && "$(get_pid "$owner")" == "$pid" ]] ||
   die 'notification owner changed during inventory'
 printf 'phase=read-only\nexisting_name=org.freedesktop.Notifications\n'
