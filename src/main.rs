@@ -252,7 +252,9 @@ async fn main() -> ExitCode {
             eprintln!("Posthorn trial refused: explicit authorization required");
             return ExitCode::FAILURE;
         }
-        if env::var("POSTHORN_HYPRLAND_QA").ok().as_deref()==Some("1"){
+        // Private QA and a public-name trial are mutually exclusive even
+        // when the QA marker is inherited with an empty or disabled value.
+        if env::var_os("POSTHORN_HYPRLAND_QA").is_some(){
             eprintln!("Posthorn trial refused: private QA cannot own the public name");
             return ExitCode::FAILURE;
         }

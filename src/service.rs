@@ -113,8 +113,9 @@ pub(crate) async fn open_standard_trial_runtime(runtime:SharedRuntime)
     let pinned=std::env::var("POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS")
         .unwrap_or_default();
     let active=std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap_or_default();
-    let private_qa=std::env::var("POSTHORN_HYPRLAND_QA")
-        .ok().as_deref()==Some("1");
+    // Mirrored authorization gate: even an empty inherited QA marker
+    // prohibits standard-name ownership, not only the literal value 1.
+    let private_qa=std::env::var_os("POSTHORN_HYPRLAND_QA").is_some();
     if !authorized || pinned.is_empty() || pinned!=active || private_qa{
         return Err(zbus::Error::Failure(
             "public-name trial requires separate authorization and matching bus pin".into(),

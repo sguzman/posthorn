@@ -4,8 +4,12 @@ set -euo pipefail
 die(){ printf 'Posthorn inventory: %s\n' "$*" >&2; exit 1; }
 [[ -v POSTHORN_HYPRLAND_QA && "$POSTHORN_HYPRLAND_QA" == 1 ]] ||
   die 'explicit POSTHORN_HYPRLAND_QA=1 guard required'
-[[ ! -v POSTHORN_PRODUCTION_TRIAL_AUTHORIZED ]] ||
-  die 'refuse inventory while trial authorization variable is set'
+for forbidden in POSTHORN_PRODUCTION_TRIAL_AUTHORIZED \
+  POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS \
+  POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS; do
+  [[ ! -v "$forbidden" ]] ||
+    die 'refuse inventory while production-trial environment is present'
+done
 [[ -v HYPRLAND_INSTANCE_SIGNATURE && -v WAYLAND_DISPLAY &&
    -v DBUS_SESSION_BUS_ADDRESS && -v XDG_RUNTIME_DIR ]] ||
   die 'real Hyprland session and original D-Bus address required'

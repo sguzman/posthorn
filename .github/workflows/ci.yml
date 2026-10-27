@@ -84,7 +84,17 @@ jobs:
             echo 'Armed trial bypassed read-only inventory refusal'
             exit 1
           fi
-          grep -q 'refuse inventory while trial authorization variable is set' "$output"
+          grep -q 'refuse inventory while production-trial environment is present' "$output"
+          for variable in POSTHORN_PRODUCTION_TRIAL_AUTHORIZED \
+            POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS \
+            POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS; do
+            if env -u HYPRLAND_INSTANCE_SIGNATURE POSTHORN_HYPRLAND_QA=1 \
+              "$variable=" bash tests/read_only_owner_inventory.sh >"$output" 2>&1; then
+              echo "Inventory accepted inherited production-trial marker $variable" >&2
+              exit 1
+            fi
+            grep -q 'refuse inventory while production-trial environment is present' "$output"
+          done
           if env -u HYPRLAND_INSTANCE_SIGNATURE POSTHORN_HYPRLAND_QA=1 bash tests/read_only_owner_inventory.sh >"$output" 2>&1; then
             echo 'Original real Hyprland requirement bypassed'
             exit 1

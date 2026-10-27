@@ -81,7 +81,12 @@ entrypoint that reuses the multi-output Wayland renderer and standard
 unless both `POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1` and
 `POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS` equal to the active
 `DBUS_SESSION_BUS_ADDRESS` are supplied by an authorized automated
-controller. It explicitly refuses private Hyprland QA mode.
+controller. It explicitly refuses private Hyprland QA mode: the presence of the
+`POSTHORN_HYPRLAND_QA` environment variable blocks public-name registration,
+even if its value is empty or `0`. The CLI and internal trial registration
+helper enforce the same fail-closed rule. Conversely, private QA and read-only
+owner inventory reject *any* inherited production-trial authorization, bus-pin,
+or lifetime variable (even when empty).
 
 A third mandatory guard, `POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS`,
 must contain a finite integer from **1 to 600 seconds**. Missing,

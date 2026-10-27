@@ -56,6 +56,27 @@ if POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS=
   echo 'Private Hyprland QA bypassed the public-name gate' >&2;exit 1
 fi
 grep -q 'private QA cannot own the public name' "$root/private-qa.log"
+# Even an empty or disabled inherited private-QA marker must be a
+# hard public-name refusal. This preflight runs before any compositor
+# starts, while the session bus is already a disposable CI bus.
+for marker in '' '0' 'false';do
+  if POSTHORN_HYPRLAND_QA="$marker" \
+    POSTHORN_PRODUCTION_TRIAL_AUTHORIZED=1 \
+    POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS=60 \
+    POSTHORN_PRODUCTION_TRIAL_EXPECTED_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+    ./target/debug/posthorn --reversible-production-trial -c "$root/config" \
+    >"$root/private-qa-inherited.log" 2>&1;then
+    echo "Inherited private-QA marker '$marker' bypassed public-name gate" >&2
+    exit 1
+  fi
+  grep -q 'private QA cannot own the public name' "$root/private-qa-inherited.log"
+done
+[[ "$(busctl --address="$DBUS_SESSION_BUS_ADDRESS" --timeout=3s call \
+    org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+    NameHasOwner s org.freedesktop.Notifications)" == 'b false' ]] || {
+  echo 'Rejected inherited private-QA marker unexpectedly acquired public name' >&2
+  exit 1
+}
 # Even with an authorized, correctly pinned bus, an unbounded trial
 # must refuse before touching the compositor or acquiring D-Bus names.
 if env -u POSTHORN_PRODUCTION_TRIAL_MAX_SECONDS \
