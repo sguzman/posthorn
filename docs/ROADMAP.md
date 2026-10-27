@@ -35,7 +35,7 @@ do not count toward Mako MVP. No runtime parity is claimed yet.
 
 - 📬 T301 — Implement org.freedesktop.Notifications methods and signals — `██████████ 99%`
 - 🧾 T302 — Implement full Mako D-Bus control interface, properties and JSON — `██████████ 99%`
-- 🔄 T303 — Correct startup, bus ownership and config reload behavior — `█████████░ 93%`
+- 🔄 T303 — Correct startup, bus ownership and config reload behavior — `█████████░ 94%`
 
 ### 🪟 P4 — Wayland protocol and rendering — `██████████ 99%`
 

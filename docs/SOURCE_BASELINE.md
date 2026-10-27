@@ -5839,3 +5839,31 @@ physical Hyprland T503 remains 51%, authorized production
 cutover T504 remains 0%.** Neither the installed Mako daemon,
 the real public notification bus, nor any Hyprland
 autostart/supervisor was changed.
+
+## GNU daemon-CLI end-of-options and non-option permutation source parity (2026-10-26)
+
+Pinned Mako v1.11.0 `config.c:parse_config_arguments` calls GNU
+`getopt_long` twice. It stops parsing at `--`, honors the **presence**
+of `POSIXLY_CORRECT` (including an empty value) by stopping at the first
+non-option, and otherwise permutes later options past multiple non-option
+operands, including standalone `-`. Unrelated operands do not override
+an explicit `-c` configuration selection. An independent compiled glibc
+C probe established the operative option/operand ordering.
+
+Posthorn's private daemon CLI now reproduces these branches:
+
+- [`e2605e0`](https://github.com/sguzman/posthorn/commit/e2605e064eb2ea9d28fcf6b62701d3805ae79de0) accepts `--` with Rust regressions.
+- [`6901ea0`](https://github.com/sguzman/posthorn/commit/6901ea09d89c15ac9013385be762aef369c46752) handles POSIX stopping and default GNU permutation, with [passing Rust/Wayland](https://github.com/sguzman/posthorn/actions/runs/40422636725) and [original-Mako executable comparison](https://github.com/sguzman/posthorn/actions/runs/40422636685).
+- [`c92bd0e`](https://github.com/sguzman/posthorn/commit/c92bd0e0a0a8e841e037ba328814296fb9020d05) permits repeated non-option operands and lone `-`, with [passing Rust/Wayland](https://github.com/sguzman/posthorn/actions/runs/40423817785) and [pinned-original executable differential](https://github.com/sguzman/posthorn/actions/runs/40423817854).
+
+The executable checks launch both daemons sequentially on disposable 2x Sway
+and independent D-Bus ownership, require the option-selected popup's
+**410-pixel** background width or the POSIX-stopped **288-pixel** width,
+and compare the marked-up compositor frames across original Mako and
+Posthorn. These checks cover selected daemon startup/argument branches,
+**not** the complete `makoctl` client or a physical Hyprland cutover.
+
+**Accepted:** T303 **93% → 94%** (+1 pp), P3 raw **97.000% → 97.333%**
+(display **97%**), strict M0 **92.375% → 92.417%** (+0.042 pp).
+T501 stays **99%**; T503 **51%**; T504 **0%**. No original session or
+installed Mako service was changed.
