@@ -73,6 +73,21 @@ launch a rollback mechanism, stop Mako, or authorize cutover.
 It has not been run on the actual workstation. Unknown supervisor
 ownership blocks Phase B until a restart/rollback plan is proven.
 
+## Standard-name library test helper isolation
+
+The `open_standard_service` library helper used by the pre-existing
+name-collision and ordered-D-Bus-wire tests is now compiled **only** when
+the `dbus-integration` Cargo feature is explicitly selected. Even with
+that feature enabled, it refuses to connect unless running under GitHub
+Actions with the separate `POSTHORN_STANDARD_SERVICE_CI=1` capability,
+a nonempty disposable D-Bus address, and no physical Hyprland, private-QA
+or production-trial marker. Both CI workflows supply the capability
+exclusively to their `dbus-run-session` test invocation. This keeps a
+test-only public-name registration path out of the ordinary Rust library,
+without weakening the existing collision and D-Bus properties tests.
+The opt-in reversible-production-trial path remains separately guarded;
+these CI credentials are **not** workstation cutover authorization.
+
 ## Prepared CLI capability (not authorization)
 
 The development binary has a **non-default** `--reversible-production-trial`

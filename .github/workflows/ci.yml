@@ -102,7 +102,7 @@ jobs:
           grep -q 'real Hyprland session and original D-Bus address required' "$output"
       - name: Verify read-only owner inspection against synthetic Mako process
         run: bash tests/mock_owner_inventory.sh
-      - run: dbus-run-session -- cargo test --tests --features dbus-integration -- --test-threads=1
+      - run: POSTHORN_STANDARD_SERVICE_CI=1 dbus-run-session -- cargo test --tests --features dbus-integration -- --test-threads=1
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
       - run: python3 tools/render_roadmap.py && git diff --exit-code -- docs/ROADMAP.md
 

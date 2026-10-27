@@ -28,7 +28,7 @@ jobs:
       - name: Validate Rust library and private D-Bus tests
         run: |
           cargo test --all-targets
-          dbus-run-session -- cargo test --tests --features dbus-integration -- --test-threads=1
+          POSTHORN_STANDARD_SERVICE_CI=1 dbus-run-session -- cargo test --tests --features dbus-integration -- --test-threads=1
           python3 -m unittest discover -s tests -p 'test_*.py'
           python3 tools/render_roadmap.py
           git diff --exit-code -- docs/ROADMAP.md

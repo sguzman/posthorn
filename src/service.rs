@@ -126,11 +126,74 @@ pub(crate) async fn open_standard_trial_runtime(runtime:SharedRuntime)
     open_named_runtime(runtime,BUS_NAME).await
 }
 
-/// Prepare the eventual desktop notification server. This method is *only*
-/// exercised under dbus-run-session in CI; no startup command invokes it yet.
-/// A full replacement is forbidden until the MVP parity gate is complete.
+/// For unit/integration tests only: refuse direct public-name acquisition
+/// from library consumers in normal builds. The opt-in production trial uses
+/// open_standard_trial_runtime() and its separate authorization gates.
+#[cfg(feature = "dbus-integration")]
+fn ci_standard_service_allowed(
+    github_actions: Option<&str>,
+    explicit_ci_capability: Option<&str>,
+    pinned_bus: &str,
+    physical_hyprland: bool,
+    private_qa: bool,
+    production_trial: bool,
+) -> bool {
+    github_actions == Some("true")
+        && explicit_ci_capability == Some("1")
+        && !pinned_bus.is_empty()
+        && !physical_hyprland
+        && !private_qa
+        && !production_trial
+}
+
+/// Restricted CI helper for the original Mako name-collision wire tests.
+/// Not compiled into ordinary Posthorn builds. Even under the feature flag,
+/// all CI/isolation checks run before a D-Bus connection/name is requested.
+#[cfg(feature = "dbus-integration")]
 pub async fn open_standard_service(config: Config) -> zbus::Result<(Connection, SharedRuntime)> {
+    let ci = std::env::var("GITHUB_ACTIONS").ok();
+    let capability = std::env::var("POSTHORN_STANDARD_SERVICE_CI").ok();
+    let bus = std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap_or_default();
+    if !ci_standard_service_allowed(
+        ci.as_deref(),
+        capability.as_deref(),
+        &bus,
+        std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some(),
+        std::env::var_os("POSTHORN_HYPRLAND_QA").is_some(),
+        std::env::var_os("POSTHORN_PRODUCTION_TRIAL_AUTHORIZED").is_some(),
+    ) {
+        return Err(zbus::Error::Failure(
+            "standard-name test helper is restricted to isolated CI".into(),
+        ));
+    }
     open_named_service(config, BUS_NAME).await
+}
+
+#[cfg(all(test, feature = "dbus-integration"))]
+mod standard_ci_helper_guard_tests {
+    use super::ci_standard_service_allowed;
+
+    #[test]
+    fn rejects_missing_or_inherited_public_bus_capabilities() {
+        assert!(ci_standard_service_allowed(
+            Some("true"), Some("1"), "unix:path=/disposable-ci-bus",
+            false, false, false
+        ));
+        for (gha, capability, bus, hyprland, qa, trial) in [
+            (None, Some("1"), "unix:path=/disposable", false, false, false),
+            (Some("false"), Some("1"), "unix:path=/disposable", false, false, false),
+            (Some("true"), None, "unix:path=/disposable", false, false, false),
+            (Some("true"), Some("0"), "unix:path=/disposable", false, false, false),
+            (Some("true"), Some("1"), "", false, false, false),
+            (Some("true"), Some("1"), "unix:path=/disposable", true, false, false),
+            (Some("true"), Some("1"), "unix:path=/disposable", false, true, false),
+            (Some("true"), Some("1"), "unix:path=/disposable", false, false, true),
+        ] {
+            assert!(!ci_standard_service_allowed(
+                gha, capability, bus, hyprland, qa, trial
+            ));
+        }
+    }
 }
 
 /// Emit expiry signals only for notifications that actually transitioned from
