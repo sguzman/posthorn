@@ -1171,6 +1171,41 @@ done
   "$root/mako-cli-posix-order-markup.png"
 echo 'Pinned Mako/Posthorn GNU POSIXLY_CORRECT option-order raster: MATCH'
 
+# Pinned config.c uses GNU getopt_long rather than rejecting a second
+# positional operand or treating a lone "-" as an invalid short option.
+# The original executable must still recognize a later --width=205;
+# compare full marked-up compositor frames on the same isolated output.
+for impl in posthorn mako; do
+  cp "$root/cli-desktop-original.conf" "$root/cli-desktop.conf"
+  clear_color '#416D98'
+  if [[ "$impl" == posthorn ]]; then
+    env -u POSIXLY_CORRECT ./target/debug/posthorn --experimental-private-desktop \
+      -c "$root/cli-desktop.conf" first-operand second-operand - --width=205 \
+      >"$root/daemon.log" 2>&1 &
+    bus=org.posthorn.Development
+  else
+    env -u POSIXLY_CORRECT "$mako_binary" -c "$root/cli-desktop.conf" \
+      first-operand second-operand - --width=205 >"$root/daemon.log" 2>&1 &
+    bus=org.freedesktop.Notifications
+  fi
+  daemon_pid=$!
+  wait_for_bus "$bus"
+  markup_notify "$bus"
+  bounds="$(markup_measure "$impl-cli-gnu-operands" "$bus")"
+  read -r x0 x1 y0 y1 <<<"$bounds"
+  (( x1-x0+1 == 410 )) || {
+    echo "$impl rejected GNU non-option operands or lost later width: $bounds"
+    exit 1
+  }
+  echo "$impl GNU operand permutation: multiple operands and lone dash accepted"
+  kill "$daemon_pid"; wait "$daemon_pid" 2>/dev/null || true
+  daemon_pid=""
+done
+./target/debug/examples/qa_png_probe \
+  "$root/posthorn-cli-gnu-operands-markup.png" '#E5C58B' 0 identical \
+  "$root/mako-cli-gnu-operands-markup.png"
+echo 'Pinned Mako/Posthorn GNU multi-operand permutation raster: MATCH'
+
 # T104: verify config.c's recursive include processing in the actual
 # graphical daemon. The include target can be a symlink, children may
 # include other children, and the parent may override the included

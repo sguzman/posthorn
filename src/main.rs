@@ -85,8 +85,13 @@ fn parse_mako_cli_args_with_mode(arguments:&[String],stop_at_operand:bool)
             }else{
                 overrides.push((matched.into(),value));
             }
-        }else if positional_path.is_none() && !token.starts_with('-'){
-            positional_path=Some(token.into());
+        }else if token == "-" || !token.starts_with('-'){
+            // GNU getopt_long accepts every non-option operand, including
+            // a lone "-". In the default permutation mode it continues to
+            // parse later flags even after multiple operands. Only the
+            // first operand is retained as the private entrypoint's
+            // optional positional config path.
+            if positional_path.is_none() { positional_path=Some(token.into()); }
             if stop_at_operand { break; }
         }else{
             return Err(format!("unexpected argument '{token}'"));
@@ -103,6 +108,25 @@ mod cli_terminator_tests {
 
     fn args(tokens: &[&str]) -> Vec<String> {
         tokens.iter().map(|token| (*token).to_owned()).collect()
+    }
+
+    #[test]
+    fn gnu_permutation_skips_multiple_operands_and_lone_dash() {
+        let (path, overrides) = super::parse_mako_cli_args_with_mode(
+            &args(&["-c", "/tmp/explicit.conf", "first", "second", "-",
+                    "--width=205"]), false
+        ).unwrap();
+        assert_eq!(path.as_deref(), Some("/tmp/explicit.conf"));
+        assert_eq!(overrides, vec![("width".into(), "205".into())]);
+    }
+
+    #[test]
+    fn posixly_correct_treats_lone_dash_as_first_operand() {
+        let (path, overrides) = super::parse_mako_cli_args_with_mode(
+            &args(&["-c", "/tmp/explicit.conf", "-", "--width=777"]), true
+        ).unwrap();
+        assert_eq!(path.as_deref(), Some("/tmp/explicit.conf"));
+        assert!(overrides.is_empty());
     }
 
     #[test]
