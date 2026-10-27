@@ -67,24 +67,9 @@ grep -q '^owner_executable=mako$' "$root/good.txt"
 grep -q "^owner_pid=$mako_pid$" "$root/good.txt"
 grep -q '^supervisor=unverified$' "$root/good.txt"
 grep -q '^cutover_authorized=no$' "$root/good.txt"
-grep -q '^rollback_controller_verified=noexport MOCK_OWNER_PID="$$"
-if bash tests/read_only_owner_inventory.sh >"$root/nonmako.txt" 2>&1;then
-  echo 'Non-Mako owner incorrectly accepted by read-only inventory' >&2
-  exit 1
-fi
-grep -q 'current owner executable is not Mako' "$root/nonmako.txt"
-# A bus-name race must refuse: never accept stale PID/supervisor evidence.
-export MOCK_OWNER_PID="$mako_pid" MOCK_OWNER_CHURN=1
-printf '0\n' >"$MOCK_COUNTER"
-if bash tests/read_only_owner_inventory.sh >"$root/churn.txt" 2>&1;then
-  echo 'Bus owner change was incorrectly accepted' >&2
-  exit 1
-fi
-grep -q 'notification owner changed during inventory' "$root/churn.txt"
-echo 'PASS: synthetic Mako owner accepted read-only, non-Mako and owner churn rejected'
- "$root/good.txt"
-# A wrongly pinned session address must never be accepted as the original
-# user bus, even if it appears to have a running Mako notification owner.
+grep -q '^rollback_controller_verified=no$' "$root/good.txt"
+# A wrongly pinned D-Bus address must never be accepted as the original
+# user bus, even if the name owner happens to be a running Mako process.
 export MOCK_BUS_MISMATCH=1
 if bash tests/read_only_owner_inventory.sh >"$root/wrong-bus.txt" 2>&1;then
   echo 'A mismatched original-user-bus GUID was accepted by inventory' >&2
